@@ -183,6 +183,24 @@ html[data-mode="dark"] .mini-btn.danger{color:#F87171;}
 .mini-btn.accent{color:var(--p1);border-color:var(--p1);}
 .icon-btn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--muted);cursor:pointer;flex-shrink:0;}
 .icon-btn:hover{color:var(--ink);background:var(--surface2);}
+/* ===== overflow guards: nothing escapes its card ===== */
+.glass-card,.clay-card,.pagehead,.tbl-wrap,.toolbar{min-width:0;}
+.glass-card{overflow:hidden;}
+code,.mono{overflow-wrap:anywhere;}
+.tbl{min-width:680px;}
+.tbl td{overflow-wrap:anywhere;}
+.tbl .mono{word-break:break-all;}
+.pagehead{flex-wrap:wrap;row-gap:12px;}
+.kpi-val{font-size:clamp(22px,5vw,30px);overflow-wrap:anywhere;}
+.chip{max-width:100%;}
+/* ===== frosted key card: blurred key behind glass, punched corners ===== */
+.keycard{position:relative;display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid var(--line);border-radius:12px;background:linear-gradient(135deg,rgba(79,70,229,0.10),rgba(79,70,229,0.02) 60%),var(--surface);backdrop-filter:blur(10px) saturate(140%);-webkit-backdrop-filter:blur(10px) saturate(140%);
+  -webkit-mask:radial-gradient(circle 7px at 0 0,transparent 7px,#000 7.5px),radial-gradient(circle 7px at 100% 0,transparent 7px,#000 7.5px),radial-gradient(circle 7px at 0 100%,transparent 7px,#000 7.5px),radial-gradient(circle 7px at 100% 100%,transparent 7px,#000 7.5px);
+  -webkit-mask-composite:source-in;
+  mask:radial-gradient(circle 7px at 0 0,transparent 7px,#000 7.5px),radial-gradient(circle 7px at 100% 0,transparent 7px,#000 7.5px),radial-gradient(circle 7px at 0 100%,transparent 7px,#000 7.5px),radial-gradient(circle 7px at 100% 100%,transparent 7px,#000 7.5px);
+  mask-composite:intersect;}
+html[data-mode="dark"] .keycard{background:linear-gradient(135deg,rgba(99,102,241,0.18),rgba(99,102,241,0.05) 60%),var(--surface);}
+.keycard .mono{flex:1;min-width:0;word-break:break-all;}
 `;
 
 export const BASE_JS = `

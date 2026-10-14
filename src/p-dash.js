@@ -108,7 +108,7 @@ export function panelKeyList(sess, keys, o) {
     const st = (k.is_blocked | 0) === 1 ? 'blocked' : expired ? 'expired' : 'active';
     const search = esc(((k.key_value || '') + ' ' + (k.creator || '')).toLowerCase());
     return '<tr data-search="' + search + '" data-status="' + st + '">'
-      + '<td><div class="flex items-center gap-1.5"><span class="mono blur-sm select-none" id="pk-' + k.id + '">' + esc(k.key_value) + '</span>'
+      + '<td><div class="keycard"><span class="mono blur-sm select-none" id="pk-' + k.id + '">' + esc(k.key_value) + '</span>'
       + '<button onclick="document.getElementById(\'pk-' + k.id + '\').classList.toggle(\'blur-sm\')" class="icon-btn" aria-label="Reveal key"><i class="bi bi-eye"></i></button>'
       + '<button onclick="doCopy(\'' + esc(k.key_value) + '\',this)" class="icon-btn" aria-label="Copy key"><i class="bi bi-clipboard"></i></button></div></td>'
       + '<td><span class="chip chip-n">' + esc(k.duration) + '</span> <span class="chip chip-i">' + esc(k.server_type || 'PRIVATE') + '</span></td>'
