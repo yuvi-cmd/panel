@@ -240,6 +240,13 @@ export default {
       const me = await db.prepare('SELECT balance FROM users WHERE id=?').bind(myId).first().catch(() => ({}));
       const balanceText = isOwnerLike ? 'UNLIMITED' : Number(me?.balance || 0).toLocaleString('en-IN');
       let stats = {};
+      // Recent-keys scope mirrors /keys: owner-like sees panel, admin sees
+      // own + invited resellers' keys, reseller sees own.
+      let recentQ = 'SELECT k.*,(SELECT COUNT(*) FROM key_devices d WHERE d.key_id=k.id) dev_count,(SELECT username FROM users WHERE id=k.created_by) creator FROM api_keys k WHERE k.panel_code=? ';
+      let recentA = [myPanel];
+      if (myRole === 'ADMIN') { recentQ += 'AND (k.created_by=? OR k.created_by IN (SELECT id FROM users WHERE invited_by=?)) '; recentA.push(myId, myId); }
+      else if (myRole === 'RESELLER') { recentQ += 'AND k.created_by=? '; recentA.push(myId); }
+      recentQ += 'ORDER BY k.id DESC LIMIT 5';
       if (isOwnerLike) {
         const r = await db.prepare("SELECT (SELECT COUNT(*) FROM users WHERE panel_code=? AND role='ADMIN') a,(SELECT COUNT(*) FROM users WHERE panel_code=? AND role='RESELLER') r,(SELECT COUNT(*) FROM api_keys WHERE panel_code=?) t,(SELECT COUNT(*) FROM api_keys k JOIN users u ON k.created_by=u.id WHERE k.panel_code=? AND u.role='ADMIN') ak,(SELECT COUNT(*) FROM api_keys k JOIN users u ON k.created_by=u.id WHERE k.panel_code=? AND u.role='RESELLER') rk,(SELECT COUNT(*) FROM api_keys WHERE panel_code=? AND is_blocked=0) ac").bind(myPanel, myPanel, myPanel, myPanel, myPanel, myPanel).first().catch(() => ({}));
         stats = { total_admins: r?.a || 0, total_resellers: r?.r || 0, total_keys: r?.t || 0, admin_keys: r?.ak || 0, reseller_keys: r?.rk || 0, active_keys: r?.ac || 0 };
@@ -250,7 +257,8 @@ export default {
         const r = await db.prepare('SELECT (SELECT COUNT(*) FROM api_keys WHERE panel_code=? AND created_by=?) a,(SELECT COUNT(*) FROM api_keys WHERE panel_code=? AND created_by=? AND is_blocked=0) b').bind(myPanel, myId, myPanel, myId).first().catch(() => ({}));
         stats = { my_keys: r?.a || 0, my_active_keys: r?.b || 0 };
       }
-      return P('dashboard', 'Dashboard', panelDashboard(sess, stats, balanceText));
+      const recent = (await db.prepare(recentQ).bind(...recentA).all().catch(() => ({ results: [] }))).results || [];
+      return P('dashboard', 'Dashboard', panelDashboard(sess, stats, balanceText, recent));
     }
 
     // ---------- PANEL GENERATE ----------

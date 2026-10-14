@@ -38,11 +38,11 @@ export function panelLayout(o) {
     + '<body class="flex h-screen overflow-hidden relative" data-theme="' + esc(th) + '">'
     + '<div class="droplet drop-1"></div><div class="droplet drop-2"></div><div class="droplet drop-3"></div><div class="droplet drop-4"></div><div class="droplet drop-5"></div><div class="droplet drop-6"></div><div class="droplet drop-7"></div><div class="droplet drop-8"></div>'
     + '<div id="sidebar-overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40 hidden md:hidden"></div>'
-    + '<aside id="sidebar" class="w-[264px] shrink-0 glass-sidebar flex flex-col absolute inset-y-0 left-0 transform -translate-x-full md:relative md:translate-x-0 transition-transform duration-300 z-50">'
+    + '<aside id="sidebar" class="w-[264px] shrink-0 rail flex flex-col absolute inset-y-0 left-0 transform -translate-x-full md:relative md:translate-x-0 transition-transform duration-300 z-50">'
     + '<div class="px-5 pt-6 pb-5"><div class="flex items-center gap-3">'
     + '<div class="w-10 h-10 shrink-0 rounded-xl avatar-premium text-white flex items-center justify-center text-lg shadow"><i class="bi bi-shield-check"></i></div>'
-    + '<div class="flex-1 min-w-0"><p class="truncate text-[15px] font-extrabold tracking-tight" style="color:var(--ink)">' + esc(panelName) + '</p>'
-    + '<p class="font-mono text-[11px] truncate" style="color:var(--muted)">' + esc(sess.panel_code || '') + ' · ' + esc(role) + '</p></div>'
+    + '<div class="flex-1 min-w-0"><p class="truncate text-[15px] font-extrabold tracking-tight rail-brand-name">' + esc(panelName) + '</p>'
+    + '<p class="font-mono text-[11px] truncate rail-brand-sub">' + esc(sess.panel_code || '') + ' · ' + esc(role) + '</p></div>'
     + '<button onclick="toggleSidebar()" class="md:hidden text-2xl" style="color:var(--muted)" aria-label="Close menu"><i class="bi bi-x-lg"></i></button></div></div>'
     + '<nav class="flex-1 px-3 pb-4 overflow-y-auto" aria-label="Primary">'
     + sideLabel('Overview')
@@ -51,13 +51,13 @@ export function panelLayout(o) {
     + '<a href="/keys" class="' + navClass('keys', route) + '"><i class="bi bi-view-list text-lg w-6 text-center"></i><span>Key Manager</span></a>'
     + MGMT + SDK + TENANT
     + '<div class="side-divider"></div><a href="/settings" class="' + navClass('settings', route) + '"><i class="bi bi-gear-fill text-lg w-6 text-center"></i><span>Settings</span></a>'
-    + '</nav><div class="p-3"><div class="clay-card rounded-xl p-3 flex items-center gap-2.5"><span class="status-dot"></span><div class="min-w-0"><p class="text-xs font-bold" style="color:var(--ink)">Systems live</p><p class="text-[11px] truncate" style="color:var(--muted)">' + esc(sess.panel_code || '') + ' tenant</p></div></div></div></aside>'
+    + '</nav><div class="p-3"><div class="rail-foot"><span class="status-dot"></span><div class="min-w-0"><p class="text-xs font-bold rail-brand-name">Systems live</p><p class="text-[11px] truncate rail-brand-sub">' + esc(sess.panel_code || '') + ' tenant</p></div></div></div></aside>'
     + '<div class="flex-1 flex flex-col h-screen overflow-y-auto relative w-full z-10">'
     + '<header class="glass-header sticky top-0 z-30"><div class="flex items-center gap-3 px-4 lg:px-8 h-16">'
     + '<button onclick="toggleSidebar()" class="md:hidden mode-btn" aria-label="Open menu"><i class="bi bi-list text-xl"></i></button>'
     + '<div class="min-w-0"><p class="font-mono text-[11px] truncate" style="color:var(--muted)">ARC Auth <span style="color:var(--faint)">/</span> ' + esc(sess.panel_code || '') + '</p>'
     + '<h1 class="truncate text-base md:text-lg font-extrabold tracking-tight" style="color:var(--ink)">' + esc(title) + '</h1></div>'
-    + '<div class="ml-auto flex items-center gap-2">' + MODE_BTN
+    + '<div class="ml-auto hidden md:inline-flex items-center gap-2"><span class="live-pill"><span class="status-dot"></span>Live</span></div><div class="ml-auto md:ml-0 flex items-center gap-2">' + MODE_BTN
     + '<div class="hidden sm:flex flex-col items-end mr-1"><span class="text-sm font-bold" style="color:var(--ink)">' + esc(sess.username) + '</span><span class="text-[10px] font-extrabold tracking-widest uppercase" style="color:var(--p1)">' + esc(role) + '</span></div>'
     + '<div class="relative group"><div class="w-10 h-10 rounded-xl avatar-premium text-white flex items-center justify-center font-bold text-base cursor-pointer">' + initial + '</div>'
     + '<div class="absolute right-0 mt-3 w-56 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all rounded-xl overflow-hidden bg-white border border-slate-200 shadow-lg"><div class="p-3"><div class="px-4 py-3 border-b border-slate-200 mb-2"><p class="font-bold text-slate-800 text-sm">' + esc(sess.username) + '</p><p class="text-xs text-slate-600">' + esc(sess.panel_code || '') + '</p></div>'

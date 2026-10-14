@@ -2,31 +2,38 @@ import { esc } from './ui.js';
 import { pageHead, alertBox } from './panel-ui.js';
 
 function hero(icon, title, sub, extra) {
-  return '<div class="relative mb-6 overflow-hidden rounded-3xl p-6 md:p-8 avatar-premium">'
-    + '<div class="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-[70px]"></div>'
-    + '<div class="relative z-10 flex items-center justify-between gap-4"><div class="flex items-center gap-4 min-w-0"><div class="w-14 h-14 shrink-0 rounded-2xl bg-white/20 border border-white/30 text-white flex items-center justify-center text-2xl"><i class="bi ' + icon + '"></i></div>'
-    + '<div class="min-w-0"><h1 class="text-2xl md:text-3xl font-black text-white truncate">' + title + '</h1><p class="text-white/80 text-xs md:text-sm font-medium">' + sub + '</p></div></div>'
-    + (extra || '') + '</div></div>';
+  return '<div class="pagehead"><div class="ph-ic"><i class="bi ' + icon + '"></i></div>'
+    + '<div class="flex-1 min-w-0"><h1 class="truncate">' + title + '</h1><p class="truncate">' + sub + '</p></div>'
+    + (extra || '') + '</div>';
 }
 const NSTEP = '<script>function nstep(id,d,mn,mx){var e=document.getElementById(id);if(!e)return;var v=(parseInt(e.value||mn,10)||mn)+d;v=Math.max(mn,Math.min(mx,v));e.value=v;}</script>';
 
 export function usersPage(sess, list, o) {
   const msg = o.ok ? alertBox('ok', 'Done', esc(o.ok)) : o.error ? alertBox('err', 'Error', esc(o.error)) : '';
   const rows = list.map(u =>
-    '<div class="glass-card p-4 md:p-5 relative overflow-hidden"><div class="absolute top-0 left-0 right-0 h-1 avatar-premium"></div>'
-    + '<div class="flex items-center gap-3"><div class="w-12 h-12 rounded-2xl avatar-premium text-white flex items-center justify-center font-black text-lg shrink-0">' + esc(u.username.substring(0, 1).toUpperCase()) + '</div>'
-    + '<div class="flex-1 min-w-0"><p class="font-black text-sm truncate">' + esc(u.username) + '</p><div class="flex gap-1.5 mt-1.5 flex-wrap">'
-    + '<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600">' + esc(u.role) + '</span>'
-    + (u.is_blocked ? '<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-red-50 text-red-500">BLOCKED</span>' : '<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-500">ACTIVE</span>')
-    + '<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-amber-50 text-amber-600"><i class="bi bi-wallet2 mr-0.5"></i>Rs ' + (u.balance | 0) + '</span></div></div></div>'
-    + (u.invited ? '<p class="text-[11px] text-slate-500 mt-2"><i class="bi bi-person-plus mr-1"></i>invited by <b>' + esc(u.invited) + '</b></p>' : '')
-    + '<form method="POST" class="flex flex-wrap gap-2 mt-3 items-center"><input type="hidden" name="target_id" value="' + u.id + '">'
-    + '<div class="inp-icon"><i class="bi bi-cash"></i><input type="number" name="amount" placeholder="Amount" class="clay-card px-3 py-2 text-xs w-28 rounded-xl"></div>'
-    + '<button name="action" value="add_balance" class="clay-card px-3 py-2 text-xs font-extrabold text-emerald-600 rounded-xl"><i class="bi bi-plus-lg"></i> Balance</button>'
-    + '<button name="action" value="deduct_balance" class="clay-card px-3 py-2 text-xs font-extrabold text-amber-600 rounded-xl"><i class="bi bi-dash-lg"></i> Balance</button>'
-    + '<button name="action" value="toggle_block" class="clay-card px-3 py-2 text-xs font-extrabold ' + (u.is_blocked ? 'text-emerald-600' : 'text-red-600') + ' rounded-xl"><i class="bi ' + (u.is_blocked ? 'bi-unlock' : 'bi-lock') + '"></i> ' + (u.is_blocked ? 'Unblock' : 'Block') + '</button></form></div>'
+    '<tr data-search="' + esc((u.username + ' ' + (u.invited || '')).toLowerCase()) + '" data-role="' + esc(u.role) + '" data-status="' + (u.is_blocked ? 'blocked' : 'active') + '">'
+    + '<td><div class="flex items-center gap-2.5"><div class="w-9 h-9 rounded-lg avatar-premium text-white flex items-center justify-center font-extrabold text-sm shrink-0">' + esc(u.username.substring(0, 1).toUpperCase()) + '</div>'
+    + '<div class="min-w-0"><p class="font-bold text-[13px] truncate">' + esc(u.username) + '</p>' + (u.invited ? '<p class="text-[11px] truncate" style="color:var(--muted)">by ' + esc(u.invited) + '</p>' : '') + '</div></div></td>'
+    + '<td><span class="chip ' + (u.role === 'OWNER' || u.role === 'PROFESSOR' ? 'chip-i' : u.role === 'ADMIN' ? 'chip-a' : 'chip-n') + '">' + esc(u.role) + '</span></td>'
+    + '<td>' + (u.is_blocked ? '<span class="chip chip-r">Blocked</span>' : '<span class="chip chip-g">Active</span>') + '</td>'
+    + '<td class="mono">Rs ' + (u.balance | 0) + '</td>'
+    + '<td><form method="POST" class="row-actions items-center"><input type="hidden" name="target_id" value="' + u.id + '">'
+    + '<input type="number" name="amount" placeholder="Amt" aria-label="Amount" class="clay-card px-2 py-1.5 text-xs rounded-lg" style="width:76px;">'
+    + '<button name="action" value="add_balance" class="mini-btn" title="Add balance"><i class="bi bi-plus-lg"></i></button>'
+    + '<button name="action" value="deduct_balance" class="mini-btn" title="Deduct balance"><i class="bi bi-dash-lg"></i></button>'
+    + (u.id !== sess.id
+      ? '<button name="action" value="toggle_block" onclick="return confirm(\'' + (u.is_blocked ? 'Unblock' : 'Block') + ' this user?\')" class="mini-btn ' + (u.is_blocked ? '' : 'danger') + '" title="' + (u.is_blocked ? 'Unblock' : 'Block') + '"><i class="bi ' + (u.is_blocked ? 'bi-unlock' : 'bi-lock') + '"></i></button>'
+      : '<span class="chip chip-n">you</span>') + '</form></td></tr>'
   ).join('');
-  return hero('bi-people-fill', 'User Management', list.length + ' users • balance + block control', '') + msg + '<div class="grid grid-cols-1 md:grid-cols-2 gap-3">' + (rows || '<div class="glass-card p-8 text-center text-sm text-slate-400">No users</div>') + '</div>';
+  return hero('bi-people-fill', 'Users', list.length + ' in scope • balance + block control', '')
+    + msg
+    + '<div class="toolbar"><div class="grow inp-icon"><i class="bi bi-search"></i><input id="uq" placeholder="Search user…" oninput="filterUsers()" class="w-full clay-card px-4 py-2.5 text-sm rounded-xl focus:outline-none"></div>'
+    + '<select id="us" onchange="filterUsers()" class="clay-card custom-select px-3 py-2.5 text-sm font-bold rounded-xl"><option value="">All statuses</option><option value="active">Active</option><option value="blocked">Blocked</option></select>'
+    + '<select id="ur" onchange="filterUsers()" class="clay-card custom-select px-3 py-2.5 text-sm font-bold rounded-xl"><option value="">All roles</option><option>OWNER</option><option>ADMIN</option><option>RESELLER</option><option>PROFESSOR</option></select></div>'
+    + '<div class="tbl-wrap"><table class="tbl" id="utbl"><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Balance</th><th>Actions</th></tr></thead><tbody>'
+    + (rows || '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:28px;">No users</td></tr>')
+    + '</tbody></table></div>'
+    + '<script>function filterUsers(){var q=(document.getElementById("uq").value||"").toLowerCase(),s=document.getElementById("us").value,r=document.getElementById("ur").value;document.querySelectorAll("#utbl tbody tr[data-search]").forEach(function(x){var ok=(!q||x.getAttribute("data-search").indexOf(q)>=0)&&(!s||x.getAttribute("data-status")===s)&&(!r||x.getAttribute("data-role")===r);x.style.display=ok?"":"none";});}</script>';
 }
 
 export function adminsPage(list, viewUser, viewKeys, o) {

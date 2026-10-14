@@ -12,33 +12,66 @@ function pcard(label, val, icon, extra) {
     + '<div class="w-14 h-14 shrink-0 rounded-2xl avatar-premium text-white flex items-center justify-center text-2xl"><i class="bi ' + icon + '"></i></div></div></div>';
 }
 
-export function panelDashboard(sess, stats, balanceText) {
+function kpi(label, val, foot) {
+  return '<div class="glass-card p-5"><p class="kpi-label">' + label + '</p><p class="kpi-val">' + val + '</p>' + (foot ? '<p class="kpi-foot">' + foot + '</p>' : '') + '</div>';
+}
+
+function keyChip(k) {
+  if ((k.is_blocked | 0) === 1) return '<span class="chip chip-r">Blocked</span>';
+  if (k.expires_at && Date.parse(String(k.expires_at).replace(' ', 'T') + 'Z') < Date.now()) return '<span class="chip chip-a">Expired</span>';
+  return '<span class="chip chip-g">Active</span>';
+}
+
+export function panelDashboard(sess, stats, balanceText, recent) {
   const role = sess.role;
-  const sub = role === 'OWNER' ? 'Manage your entire panel network and track performance'
-    : role === 'ADMIN' ? 'Manage your team and monitor key generation' : 'Track your keys and manage your account';
-  let cards = '';
-  if (role === 'OWNER') {
-    cards = '<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-5 mb-6">'
-      + pcard('Account Balance', esc(balanceText), 'bi-wallet2')
-      + pcard('Total Panel Keys', stats.total_keys || 0, 'bi-key-fill', '<p class="text-[11px] text-slate-500 font-semibold mt-1">' + (stats.active_keys || 0) + ' active</p>')
-      + '<div class="glass-card p-5 md:p-6 relative overflow-hidden"><div class="absolute top-0 left-0 right-0 h-1 avatar-premium"></div><div class="flex items-center justify-between gap-3"><div><p class="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider mb-1">Total Network</p><div class="flex gap-6"><div class="text-center"><span class="block text-2xl font-black text-slate-800">' + (stats.total_admins || 0) + '</span><span class="text-[9px] uppercase font-bold text-slate-400">Admins</span></div><div class="text-center"><span class="block text-2xl font-black text-slate-800">' + (stats.total_resellers || 0) + '</span><span class="text-[9px] uppercase font-bold text-slate-400">Resellers</span></div></div></div><div class="w-14 h-14 shrink-0 rounded-2xl avatar-premium text-white flex items-center justify-center text-2xl"><i class="bi bi-diagram-3-fill"></i></div></div></div>'
-      + pcard('Keys by Admins', stats.admin_keys || 0, 'bi-person-badge-fill')
-      + pcard('Keys by Resellers', stats.reseller_keys || 0, 'bi-person-workspace')
-      + '<div class="glass-card p-5 md:p-6"><p class="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider mb-3">Quick Actions</p><div class="flex gap-2 flex-wrap"><a href="/generate" class="btn-premium px-4 py-2.5 rounded-xl text-xs font-bold"><i class="bi bi-plus-circle"></i> Generate Key</a><a href="/users" class="clay-card px-4 py-2.5 rounded-xl text-slate-700 text-xs font-bold"><i class="bi bi-people"></i> Users</a><a href="/server" class="clay-card px-4 py-2.5 rounded-xl text-slate-700 text-xs font-bold"><i class="bi bi-hdd"></i> Server</a></div></div></div>';
+  const sub = role === 'OWNER' || role === 'PROFESSOR' ? 'Panel network at a glance'
+    : role === 'ADMIN' ? 'Your team and keys at a glance' : 'Your keys at a glance';
+  let kpis = '';
+  if (role === 'OWNER' || role === 'PROFESSOR') {
+    kpis = '<div class="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-4">'
+      + kpi('Balance', esc(balanceText), 'owner wallet')
+      + kpi('Total keys', stats.total_keys || 0, (stats.active_keys || 0) + ' active')
+      + kpi('Admins', stats.total_admins || 0, (stats.admin_keys || 0) + ' keys by them')
+      + kpi('Resellers', stats.total_resellers || 0, (stats.reseller_keys || 0) + ' keys by them') + '</div>';
   } else if (role === 'ADMIN') {
-    cards = '<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 md:gap-5 mb-6">'
-      + pcard('My Balance', esc(balanceText), 'bi-wallet2') + pcard('Team Total Keys', stats.team_keys || 0, 'bi-key-fill')
-      + pcard('My Keys', stats.my_keys || 0, 'bi-person-check', '<p class="text-[11px] text-slate-500 font-semibold mt-1">' + (stats.my_active_keys || 0) + ' active</p>')
-      + pcard('My Resellers', stats.my_resellers || 0, 'bi-people-fill', '<p class="text-[11px] text-slate-500 font-semibold mt-1">' + (stats.my_reseller_keys || 0) + ' keys by them</p>') + '</div>';
+    kpis = '<div class="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-4">'
+      + kpi('Balance', esc(balanceText))
+      + kpi('Team keys', stats.team_keys || 0, 'you + your resellers')
+      + kpi('My keys', stats.my_keys || 0, (stats.my_active_keys || 0) + ' active')
+      + kpi('Resellers', stats.my_resellers || 0, (stats.my_reseller_keys || 0) + ' keys by them') + '</div>';
   } else {
-    cards = '<div class="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5 mb-6">'
-      + pcard('Account Balance', esc(balanceText), 'bi-wallet2') + pcard('Total Keys', stats.my_keys || 0, 'bi-key-fill') + pcard('Active Keys', stats.my_active_keys || 0, 'bi-shield-check') + '</div>';
+    kpis = '<div class="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-4">'
+      + kpi('Balance', esc(balanceText))
+      + kpi('Total keys', stats.my_keys || 0)
+      + kpi('Active keys', stats.my_active_keys || 0, 'ready to use') + '</div>';
   }
-  return '<div class="relative mb-6 md:mb-8 overflow-hidden rounded-3xl p-6 md:p-10 avatar-premium">'
-    + '<div class="absolute top-0 right-0 w-72 h-72 bg-white/10 rounded-full blur-[80px]"></div>'
-    + '<div class="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4"><div><h1 class="text-2xl md:text-4xl font-black text-white mb-2">Welcome back, ' + esc(sess.username) + '!</h1><p class="text-white/80 text-sm md:text-base font-medium">' + sub + '</p></div>'
-    + '<div class="hidden md:flex items-center gap-3 bg-white/10 rounded-2xl px-6 py-4 border border-white/20"><div class="text-right"><p class="text-[10px] text-white/70 font-bold uppercase">Role</p><p class="text-white font-extrabold text-sm">' + esc(role) + '</p></div><div class="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center text-2xl"><i class="bi bi-rocket-takeoff-fill text-white"></i></div></div></div></div>'
-    + cards;
+  const rows = (recent || []).map(k =>
+    '<tr><td><span class="mono">' + esc(String(k.key_value || '').slice(0, 26)) + (String(k.key_value || '').length > 26 ? '…' : '') + '</span></td>'
+    + '<td><span class="chip chip-n">' + esc(k.duration || '') + '</span> <span class="chip chip-i">' + esc(k.server_type || 'PRIVATE') + '</span></td>'
+    + '<td>' + keyChip(k) + '</td>'
+    + '<td style="color:var(--muted)">' + esc(k.expires_at || ('pending ' + (k.duration || ''))) + '</td></tr>'
+  ).join('');
+  return '<div class="pagehead"><div class="ph-ic"><i class="bi bi-grid-1x2-fill"></i></div>'
+    + '<div class="flex-1 min-w-0"><h1 class="truncate">Welcome back, ' + esc(sess.username) + '</h1><p class="truncate">' + sub + '</p></div>'
+    + '<div class="hidden sm:flex gap-2 shrink-0"><a href="/generate" class="btn-premium px-4 py-2.5 rounded-xl text-xs font-bold"><i class="bi bi-plus-circle"></i> Generate</a>'
+    + '<a href="/keys" class="mini-btn" style="padding:10px 16px;font-size:12px;">View keys</a></div></div>'
+    + kpis
+    + '<div class="grid grid-cols-1 xl:grid-cols-3 gap-4">'
+    + '<div class="xl:col-span-2"><div class="flex items-center justify-between mb-2"><h2 class="text-sm font-extrabold" style="color:var(--ink)">Recent keys</h2><a href="/keys" class="text-xs font-bold" style="color:var(--p1)">Open manager →</a></div>'
+    + '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Key</th><th>Plan</th><th>Status</th><th>Expires</th></tr></thead><tbody>'
+    + (rows || '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px;">No keys yet — <a href="/generate" style="color:var(--p1);font-weight:700;">generate one →</a></td></tr>')
+    + '</tbody></table></div></div>'
+    + '<div><h2 class="text-sm font-extrabold mb-2" style="color:var(--ink)">Quick actions</h2><div class="glass-card p-4 grid grid-cols-2 gap-2">'
+    + '<a href="/generate" class="mini-btn accent justify-center" style="padding:12px;">Generate</a>'
+    + '<a href="/keys" class="mini-btn justify-center" style="padding:12px;">Keys</a>'
+    + '<a href="/api-test" class="mini-btn justify-center" style="padding:12px;">API test</a>'
+    + '<a href="/server" class="mini-btn justify-center" style="padding:12px;">Server</a>'
+    + '</div><div class="glass-card p-4 mt-4"><h2 class="text-sm font-extrabold mb-3" style="color:var(--ink)">Guardrails on</h2>'
+    + '<div class="space-y-2.5 text-[13px]" style="color:var(--muted)">'
+    + '<p class="flex items-center gap-2"><span class="status-dot"></span>Keys bound to devices</p>'
+    + '<p class="flex items-center gap-2"><span class="status-dot"></span>Login device lock</p>'
+    + '<p class="flex items-center gap-2"><span class="status-dot"></span>Tenant-isolated data</p>'
+    + '</div></div></div></div>';
 }
 
 export function panelGenerate(sess, o) {
@@ -47,10 +80,9 @@ export function panelGenerate(sess, o) {
     : o.error ? alertBox('err', 'Error', esc(o.error)) : '';
   const pills = KEY_DURATIONS.map(d => '<div class="pill' + (d === '30D' ? ' on' : '') + '" data-dur="' + d + '" onclick="pickDur(this)">' + d + '<div style="font-size:10px;opacity:.8">Rs' + KEY_PRICING[d] + '</div></div>').join('');
   const quick = [1, 10, 50, 100, 500].map(q => '<div class="pill' + (q === 1 ? ' on' : '') + '" data-amt="' + q + '" onclick="setAmt(' + q + ')">' + q + '</div>').join('');
-  return '<div class="relative mb-6 overflow-hidden rounded-3xl p-6 md:p-8 avatar-premium">'
-    + '<div class="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-[70px]"></div>'
-    + '<div class="relative z-10 flex items-center gap-4"><div class="w-14 h-14 shrink-0 rounded-2xl bg-white/20 border border-white/30 text-white flex items-center justify-center text-2xl"><i class="bi bi-key-fill"></i></div>'
-    + '<div><h1 class="text-2xl md:text-3xl font-black text-white">Generate Keys</h1><p class="text-white/80 text-xs md:text-sm font-medium">' + (isOwner ? 'Unlimited generation (OWNER)' : 'Cost balance se katega — neeche live total dekho') + '</p></div></div></div>'
+  return '<div class="pagehead"><div class="ph-ic"><i class="bi bi-key-fill"></i></div>'
+    + '<div class="flex-1 min-w-0"><h1 class="truncate">Generate keys</h1><p class="truncate">' + (isOwner ? 'Unlimited generation (OWNER)' : 'Cost balance se katega — neeche live total dekho') + '</p></div>'
+    + '<span class="chip chip-i shrink-0">PRICED</span></div>'
     + msg
     + '<form method="POST" id="genForm" class="glass-card p-5 md:p-7"><div class="space-y-5">'
     + '<div class="clay-card p-4 rounded-2xl"><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2"><span class="inline-flex items-center justify-center w-5 h-5 rounded-lg avatar-premium text-white text-[10px] font-black mr-1">1</span> Duration</label><input type="hidden" name="duration" id="f-dur" value="30D"><div class="grid grid-cols-4 md:grid-cols-7 gap-2">' + pills + '</div></div>'
@@ -79,28 +111,42 @@ export function panelGenerate(sess, o) {
 const SRV_BADGE = { PRIVATE: 'bg-blue-50 text-blue-600', PUBLIC: 'bg-emerald-50 text-emerald-600', ADMIN: 'bg-purple-50 text-purple-600', SAFE: 'bg-amber-50 text-amber-600' };
 
 export function panelKeyList(sess, keys, o) {
-  const isOwner = sess.role === 'OWNER';
+  const isOwner = sess.role === 'OWNER' || sess.role === 'PROFESSOR';
   const msg = o.ok ? alertBox('ok', 'Done', esc(o.ok)) : o.error ? alertBox('err', 'Error', esc(o.error)) : '';
   const bulk = isOwner ? '<form method="POST" onsubmit="return confirm(\'Bulk action pakka?\')" class="glass-card p-4 mb-4 flex flex-wrap gap-2 items-center"><input type="hidden" name="bulk" value="1"><select name="action" class="clay-card px-3 py-2 text-xs font-bold rounded-xl"><option value="delete_expired">Delete Expired</option><option value="delete_all">Delete ALL (panel)</option><option value="extend_all">Extend ALL +</option></select><input type="number" name="extend_val" placeholder="days" class="clay-card px-3 py-2 text-xs w-24 rounded-xl"><input type="hidden" name="extend_unit" value="D"><button class="btn-premium px-4 py-2 rounded-xl text-xs font-bold">Apply</button></form>' : '';
-  const rows = keys.length ? keys.map(k => {
-    const used = k.dev_count || 0, lim = k.device_limit || 1, pct = Math.min(100, Math.round(used / lim * 100));
-    const exp = k.expires_at || ('PENDING (' + esc(k.duration) + ')');
-    const badge = SRV_BADGE[k.server_type] || SRV_BADGE.PRIVATE;
-    return '<div class="glass-card overflow-hidden"><div class="p-4 md:p-5">'
-      + '<div class="flex items-center gap-2 flex-wrap mb-2">'
-      + '<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg ' + (k.is_blocked ? 'bg-red-50 text-red-500' : 'bg-emerald-50 text-emerald-500') + '">' + (k.is_blocked ? 'BLOCKED' : 'ACTIVE') + '</span>'
-      + '<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600">' + esc(k.duration) + '</span>'
-      + '<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg ' + badge + '">' + esc(k.server_type || 'PRIVATE') + '</span></div>'
-      + '<div class="clay-card p-3 rounded-2xl flex items-center gap-2"><p class="flex-1 font-mono text-sm font-bold break-all blur-sm select-none" id="pk-' + k.id + '">' + esc(k.key_value) + '</p><button onclick="document.getElementById(\'pk-' + k.id + '\').classList.toggle(\'blur-sm\')" class="text-slate-400 text-lg px-1"><i class="bi bi-eye"></i></button><button onclick="doCopy(\'' + esc(k.key_value) + '\',this)" class="clay-card w-9 h-9 rounded-xl shrink-0 text-slate-600"><i class="bi bi-clipboard"></i></button></div>'
-      + '<div class="mt-2"><div class="flex justify-between text-[10px] font-bold text-slate-500 mb-1"><span><i class="bi bi-phone mr-1"></i>' + used + '/' + lim + ' devices • ' + k.uses + ' uses</span><span>Exp: ' + esc(exp) + '</span></div><div class="h-2 rounded-full bg-slate-100 overflow-hidden"><div class="h-full rounded-full avatar-premium" style="width:' + pct + '%"></div></div></div>'
-      + '<p class="text-[11px] text-slate-400 mt-1.5">by ' + esc(k.creator || '?') + '</p>'
-      + '<div class="flex flex-wrap gap-2 mt-3"><form method="POST" class="inline"><input type="hidden" name="key_id" value="' + k.id + '"><input type="hidden" name="action" value="reset_device"><button class="clay-card px-3 py-1.5 text-xs font-bold text-blue-600 rounded-xl"><i class="bi bi-arrow-counterclockwise"></i> Reset Device</button></form>'
-      + '<form method="POST" class="inline" onsubmit="return confirm(\'Delete key?\')"><input type="hidden" name="key_id" value="' + k.id + '"><input type="hidden" name="action" value="delete_key"><button class="clay-card px-3 py-1.5 text-xs font-bold text-red-600 rounded-xl"><i class="bi bi-trash"></i> Delete</button></form></div></div>'
-      + '<details class="border-t border-slate-200 px-4 md:px-5 py-1 text-xs"><summary class="cursor-pointer font-bold text-slate-500 py-2.5">Edit / Extend</summary><form method="POST" class="flex flex-wrap gap-2 pb-3"><input type="hidden" name="key_id" value="' + k.id + '"><input type="hidden" name="action" value="edit_key"><select name="edit_status" class="clay-card px-2 py-2 text-xs font-bold rounded-xl"><option value="1">Active</option><option value="0"' + (k.is_blocked ? ' selected' : '') + '>Blocked</option></select><input type="number" name="extend_val" placeholder="+days" class="clay-card px-2 py-2 text-xs w-24 rounded-xl"><input type="hidden" name="extend_unit" value="D">'
-      + (isOwner ? '<select name="edit_server" class="clay-card px-2 py-2 text-xs font-bold rounded-xl"><option value="">Server~</option><option>PRIVATE</option><option>PUBLIC</option><option>ADMIN</option><option>SAFE</option></select>' : '')
-      + '<button class="btn-premium px-4 py-2 rounded-xl text-xs font-bold">Save</button></form></details></div>';
-  }).join('') : '<div class="glass-card p-10 text-center text-slate-400 text-sm"><i class="bi bi-inbox text-5xl block mb-3 opacity-40"></i>No keys found. <a href="/generate" class="text-blue-600 font-bold">Generate →</a></div>';
-  return pageHead('Key Manager', 'bi-view-list', keys.length + ' keys (max 200)') + msg + bulk + '<div class="space-y-4">' + rows + '</div>';
+  const rows = keys.map(k => {
+    const used = k.dev_count || 0, lim = Math.max(1, k.device_limit | 0), pct = Math.min(100, Math.round(used / lim * 100));
+    const expired = k.expires_at && Date.parse(String(k.expires_at).replace(' ', 'T') + 'Z') < Date.now();
+    const st = (k.is_blocked | 0) === 1 ? 'blocked' : expired ? 'expired' : 'active';
+    const search = esc(((k.key_value || '') + ' ' + (k.creator || '')).toLowerCase());
+    return '<tr data-search="' + search + '" data-status="' + st + '">'
+      + '<td><div class="flex items-center gap-1.5"><span class="mono blur-sm select-none" id="pk-' + k.id + '">' + esc(k.key_value) + '</span>'
+      + '<button onclick="document.getElementById(\'pk-' + k.id + '\').classList.toggle(\'blur-sm\')" class="icon-btn" aria-label="Reveal key"><i class="bi bi-eye"></i></button>'
+      + '<button onclick="doCopy(\'' + esc(k.key_value) + '\',this)" class="icon-btn" aria-label="Copy key"><i class="bi bi-clipboard"></i></button></div></td>'
+      + '<td><span class="chip chip-n">' + esc(k.duration) + '</span> <span class="chip chip-i">' + esc(k.server_type || 'PRIVATE') + '</span></td>'
+      + '<td><div class="text-xs font-bold" style="color:var(--muted)">' + used + '/' + lim + ' · ' + (k.uses | 0) + ' uses</div><div class="meter mt-1"><div style="width:' + pct + '%"></div></div></td>'
+      + '<td>' + ((k.is_blocked | 0) === 1 ? '<span class="chip chip-r">Blocked</span>' : expired ? '<span class="chip chip-a">Expired</span>' : '<span class="chip chip-g">Active</span>') + '</td>'
+      + '<td style="color:var(--muted);white-space:nowrap;">' + esc(k.expires_at || ('pending ' + (k.duration || ''))) + '<div class="text-[11px]">by ' + esc(k.creator || '?') + '</div></td>'
+      + '<td><div class="row-actions">'
+      + '<form method="POST" class="inline"><input type="hidden" name="key_id" value="' + k.id + '"><input type="hidden" name="action" value="reset_device"><button class="mini-btn" title="Reset devices"><i class="bi bi-arrow-counterclockwise"></i>Reset</button></form>'
+      + '<form method="POST" class="inline"><input type="hidden" name="key_id" value="' + k.id + '"><input type="hidden" name="action" value="edit_key"><input type="hidden" name="edit_status" value="' + (k.is_blocked ? '1' : '0') + '"><button class="mini-btn" title="' + (k.is_blocked ? 'Unblock' : 'Block') + '"><i class="bi ' + (k.is_blocked ? 'bi-unlock' : 'bi-lock') + '"></i>' + (k.is_blocked ? 'Unblock' : 'Block') + '</button></form>'
+      + '<form method="POST" class="inline" onsubmit="return confirm(\'Delete key?\')"><input type="hidden" name="key_id" value="' + k.id + '"><input type="hidden" name="action" value="delete_key"><button class="mini-btn danger" title="Delete"><i class="bi bi-trash"></i></button></form>'
+      + '</div><details class="mt-1.5"><summary class="cursor-pointer text-[11px] font-bold" style="color:var(--muted)">Extend / server</summary>'
+      + '<form method="POST" class="flex flex-wrap gap-1.5 pt-1.5"><input type="hidden" name="key_id" value="' + k.id + '"><input type="hidden" name="action" value="edit_key"><input type="hidden" name="edit_status" value="' + (k.is_blocked ? '0' : '1') + '">'
+      + '<input type="number" name="extend_val" placeholder="+days" class="clay-card px-2 py-1.5 text-xs w-20 rounded-xl"><input type="hidden" name="extend_unit" value="D">'
+      + (isOwner ? '<select name="edit_server" class="clay-card px-2 py-1.5 text-xs font-bold rounded-xl"><option value="">Server~</option><option>PRIVATE</option><option>PUBLIC</option><option>ADMIN</option><option>SAFE</option></select>' : '')
+      + '<button class="mini-btn accent">Save</button></form></details></td></tr>';
+  }).join('');
+  return '<div class="pagehead"><div class="ph-ic"><i class="bi bi-view-list"></i></div>'
+    + '<div class="flex-1 min-w-0"><h1 class="truncate">Keys</h1><p class="truncate">' + keys.length + ' keys in scope · max 200</p></div>'
+    + '<a href="/generate" class="btn-premium px-4 py-2.5 rounded-xl text-xs font-bold shrink-0"><i class="bi bi-plus-lg"></i> New</a></div>'
+    + msg + bulk
+    + '<div class="toolbar"><div class="grow inp-icon"><i class="bi bi-search"></i><input id="kq" placeholder="Search key or creator…" oninput="filterKeys()" class="w-full clay-card px-4 py-2.5 text-sm rounded-xl focus:outline-none"></div>'
+    + '<select id="ks" onchange="filterKeys()" class="clay-card custom-select px-3 py-2.5 text-sm font-bold rounded-xl"><option value="">All statuses</option><option value="active">Active</option><option value="blocked">Blocked</option><option value="expired">Expired</option></select></div>'
+    + '<div class="tbl-wrap"><table class="tbl" id="ktbl"><thead><tr><th>Key</th><th>Plan</th><th>Use</th><th>Status</th><th>Expiry · By</th><th>Actions</th></tr></thead><tbody>'
+    + (rows || '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:28px;">No keys found. <a href="/generate" style="color:var(--p1);font-weight:700;">Generate →</a></td></tr>')
+    + '</tbody></table></div>'
+    + '<script>function filterKeys(){var q=(document.getElementById("kq").value||"").toLowerCase(),s=document.getElementById("ks").value,n=0;document.querySelectorAll("#ktbl tbody tr[data-search]").forEach(function(r){var ok=(!q||r.getAttribute("data-search").indexOf(q)>=0)&&(!s||r.getAttribute("data-status")===s);r.style.display=ok?"":"none";if(ok)n++;});}</script>';
 }
 
 export function arcxRand(len) {

@@ -5,11 +5,9 @@ const MOD_FIELDS = ['modname', 'mod_status', 'credit', 'license_key', 'ESP', 'It
 export { MOD_FIELDS };
 
 function hero(icon, title, sub, pill) {
-  return '<div class="relative mb-6 overflow-hidden rounded-3xl p-6 md:p-8 avatar-premium">'
-    + '<div class="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-[70px]"></div>'
-    + '<div class="relative z-10 flex items-center justify-between gap-4"><div class="flex items-center gap-4"><div class="w-14 h-14 shrink-0 rounded-2xl bg-white/20 border border-white/30 text-white flex items-center justify-center text-2xl"><i class="bi ' + icon + '"></i></div>'
-    + '<div><h1 class="text-2xl md:text-3xl font-black text-white">' + title + '</h1><p class="text-white/80 text-xs md:text-sm font-medium">' + sub + '</p></div></div>'
-    + (pill || '') + '</div></div>';
+  return '<div class="pagehead"><div class="ph-ic"><i class="bi ' + icon + '"></i></div>'
+    + '<div class="flex-1 min-w-0"><h1 class="truncate">' + title + '</h1><p class="truncate">' + sub + '</p></div>'
+    + (pill || '') + '</div>';
 }
 const pillW = (txt, ok) => '<span class="shrink-0 text-[10px] font-extrabold px-3 py-1.5 rounded-full uppercase ' + (ok ? 'bg-emerald-400/90 text-white' : 'bg-red-500/90 text-white') + '">' + txt + '</span>';
 const NSTEP = '<script>function nstep(id,d,mn,mx){var e=document.getElementById(id);if(!e)return;var v=(parseInt(e.value||mn,10)||mn)+d;v=Math.max(mn,Math.min(mx,v));e.value=v;}</script>';

@@ -130,10 +130,10 @@ html[data-mode="dark"] .hover\\:bg-slate-50:hover{background-color:#1A2029 !impo
 html[data-mode="dark"] .hover\\:bg-slate-100:hover{background-color:#232A34 !important;}
 html[data-mode="dark"] .hover\\:bg-red-50:hover{background-color:rgba(239,68,68,0.14) !important;}
 /* indigo hero banners stay indigo in both modes */
-.avatar-premium .text-white,.avatar-premium .text-white\\/70,.avatar-premium .text-white\\/75,.avatar-premium .text-white\\/80{color:#fff !important;}
-.avatar-premium .bg-white\\/10{background-color:rgba(255,255,255,0.10) !important;}
-.avatar-premium .bg-white\\/20{background-color:rgba(255,255,255,0.20) !important;}
-.avatar-premium .border-white\\/20,.avatar-premium .border-white\\/30{border-color:rgba(255,255,255,0.25) !important;}
+.avatar-premium .text-white,.avatar-premium .text-white\/70,.avatar-premium .text-white\/75,.avatar-premium .text-white\/80{color:#fff !important;}
+.avatar-premium .bg-white\/10{background-color:rgba(255,255,255,0.10) !important;}
+.avatar-premium .bg-white\/20{background-color:rgba(255,255,255,0.20) !important;}
+.avatar-premium .border-white\/20,.avatar-premium .border-white\/30{border-color:rgba(255,255,255,0.25) !important;}
 .sw input{opacity:0;width:0;height:0;}
 .sw .tr{position:absolute;inset:0;border-radius:999px;background:rgba(148,163,184,0.45);transition:.3s;cursor:pointer;}
 .sw .tr:before{content:'';position:absolute;width:26px;height:26px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.3s;box-shadow:0 2px 6px rgba(0,0,0,0.25);}
@@ -142,6 +142,58 @@ html[data-mode="dark"] .hover\\:bg-red-50:hover{background-color:rgba(239,68,68,
 .inp-icon{position:relative;}
 .inp-icon > i{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#94A3B8;}
 .inp-icon > input{padding-left:40px !important;}
+/* ===== v3 command layout: dark rail, page heads, tables, chips ===== */
+.rail{background:#0D1120;color:#C4C9D6;border-right:1px solid #0D1120;position:relative;}
+html[data-mode="dark"] .rail{background:#040609;border-right:1px solid var(--line);}
+.rail .nav-glass-item{display:flex;align-items:center;gap:12px;padding:9px 12px;color:#9AA3BC;font-weight:500;}
+.rail .nav-glass-item i.bi{width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.07);border-radius:9px;font-size:15px;flex-shrink:0;}
+.rail .nav-glass-item:hover{background:rgba(255,255,255,0.07);color:#fff;}
+.rail .nav-glass-item span{font-size:13.5px;}
+.rail .nav-active{background:var(--p1) !important;border-color:var(--p1) !important;color:#fff !important;}
+.rail .nav-active i.bi{background:rgba(255,255,255,0.20);}
+.rail .side-label{color:#5F6B82;}
+.rail .side-divider{border-color:rgba(255,255,255,0.09);}
+.rail-brand-name{color:#FFFFFF;}
+.rail-brand-sub{color:#8B93A7;}
+.rail-foot{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.10);border-radius:12px;padding:12px;display:flex;align-items:center;gap:10px;}
+.pagehead{display:flex;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:20px;box-shadow:0 1px 2px rgba(16,24,40,0.05);}
+.pagehead h1{font-size:20px;font-weight:800;letter-spacing:-0.01em;color:var(--ink);}
+.pagehead p{font-size:13px;color:var(--muted);margin-top:2px;}
+.ph-ic{width:46px;height:46px;border-radius:12px;background:var(--p1);color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;box-shadow:0 1px 2px var(--glow);}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:0 1px 2px rgba(16,24,40,0.05);}
+.tbl{width:100%;min-width:780px;border-collapse:collapse;font-size:13px;}
+.tbl th{text-align:left;font-size:10.5px;font-weight:800;letter-spacing:0.07em;text-transform:uppercase;color:var(--muted);padding:10px 14px;border-bottom:1px solid var(--line);background:var(--surface2);white-space:nowrap;}
+.tbl td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle;color:var(--ink);}
+.tbl tbody tr:last-child td{border-bottom:none;}
+.tbl tbody tr:hover td{background:var(--surface2);}
+.tbl .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;font-weight:600;}
+.meter{height:6px;border-radius:999px;background:var(--surface2);border:1px solid var(--line);overflow:hidden;min-width:90px;}
+.meter > div{height:100%;background:var(--p1);border-radius:999px;}
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;}
+.toolbar .grow{flex:1;min-width:200px;}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:0.02em;white-space:nowrap;}
+.chip::before{content:'';width:6px;height:6px;border-radius:999px;background:currentColor;}
+.chip-g{background:rgba(16,185,129,0.13);color:#059669;}
+.chip-r{background:rgba(239,68,68,0.12);color:#DC2626;}
+.chip-a{background:rgba(245,158,11,0.15);color:#B45309;}
+.chip-i{background:rgba(79,70,229,0.12);color:var(--p1);}
+.chip-n{background:var(--surface2);color:var(--muted);}
+html[data-mode="dark"] .chip-g{color:#34D399;}
+html[data-mode="dark"] .chip-r{color:#F87171;}
+html[data-mode="dark"] .chip-a{color:#FBBF24;}
+html[data-mode="dark"] .chip-i{color:#A5B4FC;}
+.live-pill{display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border-radius:999px;background:var(--surface2);border:1px solid var(--line);font-size:12px;font-weight:700;color:var(--muted);white-space:nowrap;}
+.kpi-label{font-size:11px;font-weight:800;letter-spacing:0.07em;text-transform:uppercase;color:var(--muted);}
+.kpi-val{font-size:30px;font-weight:800;letter-spacing:-0.02em;color:var(--ink);margin-top:4px;}
+.kpi-foot{font-size:12px;color:var(--muted);margin-top:4px;}
+.row-actions{display:flex;gap:6px;flex-wrap:wrap;}
+.mini-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 10px;border-radius:8px;font-size:12px;font-weight:700;border:1px solid var(--line);background:var(--surface);color:var(--muted);cursor:pointer;white-space:nowrap;}
+.mini-btn:hover{color:var(--ink);background:var(--surface2);}
+.mini-btn.danger{color:#DC2626;}
+html[data-mode="dark"] .mini-btn.danger{color:#F87171;}
+.mini-btn.accent{color:var(--p1);border-color:var(--p1);}
+.icon-btn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--muted);cursor:pointer;flex-shrink:0;}
+.icon-btn:hover{color:var(--ink);background:var(--surface2);}
 `;
 
 export const BASE_JS = `
@@ -181,11 +233,11 @@ export function layout(o) {
     + '<body class="flex h-screen overflow-hidden relative" data-theme="' + esc(th) + '">'
     + '<div class="droplet drop-1"></div><div class="droplet drop-2"></div><div class="droplet drop-3"></div><div class="droplet drop-4"></div><div class="droplet drop-5"></div><div class="droplet drop-6"></div><div class="droplet drop-7"></div><div class="droplet drop-8"></div>'
     + '<div id="sidebar-overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40 hidden md:hidden"></div>'
-    + '<aside id="sidebar" class="w-[264px] shrink-0 glass-sidebar flex flex-col absolute inset-y-0 left-0 transform -translate-x-full md:relative md:translate-x-0 transition-transform duration-300 z-50">'
+    + '<aside id="sidebar" class="w-[264px] shrink-0 rail flex flex-col absolute inset-y-0 left-0 transform -translate-x-full md:relative md:translate-x-0 transition-transform duration-300 z-50">'
     + '<div class="px-5 pt-6 pb-5"><div class="flex items-center gap-3">'
     + '<div class="w-10 h-10 shrink-0 rounded-xl avatar-premium text-white flex items-center justify-center text-lg shadow"><i class="bi bi-boxes"></i></div>'
-    + '<div class="flex-1 min-w-0"><p class="truncate text-[15px] font-extrabold tracking-tight" style="color:var(--ink)">' + esc(panelName) + '</p>'
-    + '<p class="font-mono text-[11px] truncate" style="color:var(--muted)">' + esc(panelCode) + ' · SDK</p></div>'
+    + '<div class="flex-1 min-w-0"><p class="truncate text-[15px] font-extrabold tracking-tight rail-brand-name">' + esc(panelName) + '</p>'
+    + '<p class="font-mono text-[11px] truncate rail-brand-sub">' + esc(panelCode) + ' · SDK</p></div>'
     + '<button onclick="toggleSidebar()" class="md:hidden text-2xl" style="color:var(--muted)" aria-label="Close menu"><i class="bi bi-x-lg"></i></button></div></div>'
     + '<nav class="flex-1 px-3 pb-4 overflow-y-auto" aria-label="SDK">'
     + sideLabel('SDK Panel')
@@ -195,13 +247,13 @@ export function layout(o) {
     + '<a href="/sdk/keys" class="' + navClass('sdk/keys', route) + '"><i class="bi bi-view-list text-lg w-6 text-center"></i> SDK Keys</a>'
     + '<a href="/sdk/server" class="' + navClass('sdk/server', route) + '"><i class="bi bi-hdd-network-fill text-lg w-6 text-center"></i> Server</a>'
     + '<a href="/sdk/hash" class="' + navClass('sdk/hash', route) + '"><i class="bi bi-fingerprint text-lg w-6 text-center"></i> Hash</a>'
-    + '</nav><div class="p-3"><div class="clay-card rounded-xl p-3 flex items-center gap-2.5"><span class="status-dot"></span><div class="min-w-0"><p class="text-xs font-bold" style="color:var(--ink)">Engines live</p><p class="text-[11px] truncate" style="color:var(--muted)">Mundo + Bcore</p></div></div></div></aside>'
+    + '</nav><div class="p-3"><div class="rail-foot"><span class="status-dot"></span><div class="min-w-0"><p class="text-xs font-bold rail-brand-name">Engines live</p><p class="text-[11px] truncate rail-brand-sub">Mundo + Bcore</p></div></div></div></aside>'
     + '<div class="flex-1 flex flex-col h-screen overflow-y-auto relative w-full z-10">'
     + '<header class="glass-header sticky top-0 z-30"><div class="flex items-center gap-3 px-4 lg:px-8 h-16">'
     + '<button onclick="toggleSidebar()" class="md:hidden mode-btn" aria-label="Open menu"><i class="bi bi-list text-xl"></i></button>'
     + '<div class="min-w-0"><p class="font-mono text-[11px] truncate" style="color:var(--muted)">SDK Panel <span style="color:var(--faint)">/</span> ' + esc(panelCode) + '</p>'
     + '<h1 class="truncate text-base md:text-lg font-extrabold tracking-tight" style="color:var(--ink)">' + esc(title) + '</h1></div>'
-    + '<div class="ml-auto flex items-center gap-2">' + MODE_BTN
+    + '<div class="ml-auto hidden md:inline-flex items-center gap-2"><span class="live-pill"><span class="status-dot"></span>Live</span></div><div class="ml-auto md:ml-0 flex items-center gap-2">' + MODE_BTN
     + '<div class="hidden sm:flex flex-col items-end mr-1"><span class="text-sm font-bold" style="color:var(--ink)">' + esc(username) + '</span><span class="text-[10px] font-extrabold tracking-widest uppercase" style="color:var(--p1)">OWNER</span></div>'
     + '<div class="relative group"><div class="w-10 h-10 rounded-xl avatar-premium text-white flex items-center justify-center font-bold text-base cursor-pointer">' + esc(String(username || 'A').substring(0, 1).toUpperCase()) + '</div>'
     + '<div class="absolute right-0 mt-3 w-52 rounded-xl overflow-hidden bg-white border border-slate-200 shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all"><div class="p-3"><a href="/logout" class="flex items-center gap-3 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 rounded-xl font-medium"><i class="bi bi-box-arrow-right"></i> Sign Out</a></div></div>'
