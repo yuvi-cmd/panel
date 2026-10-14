@@ -35,7 +35,7 @@ export function keysPage(mundoKeys, bcoreKeys) {
         ? '<button onclick="ca(\'unblock_key\',' + k.id + ',0,\'' + engine + '\')" class="clay-card px-3 py-1.5 text-xs font-bold text-emerald-600 rounded-xl"><i class="bi bi-unlock"></i> Unblock</button>'
         : '<button onclick="ca(\'block_key\',' + k.id + ',0,\'' + engine + '\')" class="clay-card px-3 py-1.5 text-xs font-bold text-amber-600 rounded-xl"><i class="bi bi-lock"></i> Block</button>')
       + '<button onclick="ca(\'delete_key\',' + k.id + ',0,\'' + engine + '\')" class="clay-card px-3 py-1.5 text-xs font-bold text-red-600 rounded-xl"><i class="bi bi-trash"></i> Delete</button></div></div>'
-      + '<div id="pn-' + engine + '-' + k.id + '" class="hidden border-t border-white/50 p-4 bg-white/20"><h4 class="text-xs font-extrabold text-slate-500 uppercase mb-3">Bound Packages / Apps</h4>' + binds + addForm + '</div></div>';
+      + '<div id="pn-' + engine + '-' + k.id + '" class="hidden border-t border-slate-200 p-4 bg-slate-50"><h4 class="text-xs font-extrabold text-slate-500 uppercase mb-3">Bound Packages / Apps</h4>' + binds + addForm + '</div></div>';
   }
   function section(keys, engine) {
     if (!keys.length) return '<div class="glass-card p-10 text-center"><i class="bi bi-inbox text-5xl text-slate-300 mb-3"></i><p class="text-slate-500 text-sm">No ' + engine + ' keys found</p><a href="/sdk/generate" class="inline-block mt-3 btn-premium px-6 py-2.5 rounded-xl text-xs font-bold">Generate Key</a></div>';
