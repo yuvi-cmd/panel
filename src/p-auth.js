@@ -1,16 +1,17 @@
-import { CSS, esc } from './ui.js';
+import { CSS, MODE_BTN, MODE_EARLY, MODE_STANDALONE, esc } from './ui.js';
 
 function shell(panelName, heading, sub, inner) {
   return '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">'
     + '<title>' + esc(heading) + ' - ' + esc(panelName) + '</title><script src="https://cdn.tailwindcss.com"></script>'
     + '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">'
     + '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">'
-    + '<style>' + CSS + '.clay-input{width:100%;background:#FFFFFF;border:1px solid #E5E7EB;border-radius:10px;padding:14px 16px;font-size:16px;font-weight:500;outline:none;color:#18181B;}.clay-input:focus{background:#fff;border-color:#4F46E5;box-shadow:0 0 0 3px rgba(79,70,229,0.15);}.label-dark{display:block;font-size:11px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;}.alert-box{padding:12px 16px;border-radius:10px;font-size:13px;font-weight:600;margin-bottom:16px;}.alert-error{background:#FEF2F2;border:1px solid #FECACA;color:#DC2626;}.alert-success{background:#ECFDF5;border:1px solid #A7F3D0;color:#059669;}</style></head>'
-    + '<body style="min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:20px;">'
+    + '<style>' + CSS + '.clay-input{width:100%;background:var(--input);border:1px solid var(--line);border-radius:10px;padding:14px 16px;font-size:16px;font-weight:500;outline:none;color:var(--ink);}.clay-input:focus{background:var(--input);border-color:var(--p1);box-shadow:0 0 0 3px var(--glow);}.label-dark{display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;}.alert-box{padding:12px 16px;border-radius:10px;font-size:13px;font-weight:600;margin-bottom:16px;}.alert-error{background:var(--danger-bg);border:1px solid var(--danger-line);color:var(--danger-tx);}.alert-success{background:var(--ok-bg);border:1px solid var(--ok-line);color:var(--ok-tx);}.auth-card{box-shadow:0 12px 32px rgba(16,24,40,0.10);}</style>' + MODE_EARLY + MODE_STANDALONE + '</head>'
+    + '<body class="auth-dots" style="min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:20px;">'
+    + '<div class="fixed top-4 right-4 z-50">' + MODE_BTN + '</div>'
     + '<div class="droplet drop-1"></div><div class="droplet drop-2"></div><div class="droplet drop-3"></div><div class="droplet drop-4"></div><div class="droplet drop-5"></div>'
  + '<div class="w-full max-w-[400px] relative z-10"><div class="text-center mb-5"><div class="w-14 h-14 rounded-2xl avatar-premium flex items-center justify-center text-xl text-white mx-auto mb-2"><i class="bi bi-shield-lock-fill"></i></div>'
  + '<h1 class="text-lg font-black"><span class="brand-text">' + esc(panelName) + '</span></h1></div>'
-    + '<div class="glass-card p-6"><div class="text-center mb-5"><h2 class="text-base font-black text-slate-800">' + esc(heading) + '</h2><p class="text-xs text-slate-500 mt-0.5">' + esc(sub) + '</p></div>' + inner + '</div></div></body></html>';
+    + '<div class="glass-card auth-card p-6"><div class="text-center mb-5"><h2 class="text-base font-black text-slate-800">' + esc(heading) + '</h2><p class="text-xs text-slate-500 mt-0.5">' + esc(sub) + '</p></div>' + inner + '</div></div></body></html>';
 }
 
 function alerts(error, msg, errorLink) {
