@@ -1,4 +1,4 @@
-import { CSS, BASE_JS, MODE_BTN, MODE_EARLY, esc, navClass, sideLabel } from './ui.js';
+import { CSS, BASE_JS, MODE_BTN, MODE_EARLY, CMDK_BTN, PAL_SHELL, esc, navClass, sideLabel } from './ui.js';
 
 export function panelLayout(o) {
   const { title, route, sess, panelName, content, theme } = o;
@@ -28,6 +28,11 @@ export function panelLayout(o) {
   const TENANT = (sess.id === 1 || isProf)
     ? '<div class="side-divider"></div><a href="/create-panel" class="' + navClass('create-panel', route) + '"><i class="bi bi-server text-lg w-6 text-center"></i><span>New Tenant</span></a>'
     : '';
+  const PGS = [['Dashboard', '/dashboard', 'bi-grid-1x2-fill'], ['Generate keys', '/generate', 'bi-key-fill'], ['Keys', '/keys', 'bi-view-list'], ['Activate panel', '/panel-activate', 'bi-ticket-detailed'], ['Settings', '/settings', 'bi-gear-fill']]
+    .concat(isOA ? [['Users', '/users', 'bi-people-fill'], ['Referrals', '/referral', 'bi-diagram-3-fill'], ['Server & mod', '/server', 'bi-hdd-fill'], ['API tester', '/api-test', 'bi-broadcast'], ['Mod / loader', '/loader-manager', 'bi-box-seam-fill']] : [])
+    .concat(isOwner ? [['Encryption', '/enc-api', 'bi-shield-check']] : [])
+    .concat(canSeeSdk ? [['SDK panel', '/sdk', 'bi-boxes']] : [])
+    .concat((sess.id === 1 || isProf) ? [['Tenants', '/tenant', 'bi-server']] : []);
   return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
     + '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
     + '<title>' + esc(title) + ' - ' + esc(panelName) + '</title>'
@@ -57,7 +62,7 @@ export function panelLayout(o) {
     + '<button onclick="toggleSidebar()" class="md:hidden mode-btn" aria-label="Open menu"><i class="bi bi-list text-xl"></i></button>'
     + '<div class="min-w-0"><p class="font-mono text-[11px] truncate" style="color:var(--muted)">ARC Auth <span style="color:var(--faint)">/</span> ' + esc(sess.panel_code || '') + '</p>'
     + '<h1 class="truncate text-base md:text-lg font-extrabold tracking-tight" style="color:var(--ink)">' + esc(title) + '</h1></div>'
-    + '<div class="ml-auto hidden md:inline-flex items-center gap-2"><span class="live-pill"><span class="status-dot"></span>Live</span></div><div class="ml-auto md:ml-0 flex items-center gap-2">' + MODE_BTN
+    + '<div class="ml-auto hidden md:inline-flex items-center gap-2"><span class="live-pill"><span class="status-dot"></span>Live</span></div><div class="ml-auto md:ml-0 flex items-center gap-2">' + CMDK_BTN + MODE_BTN
     + '<div class="hidden sm:flex flex-col items-end mr-1"><span class="text-sm font-bold" style="color:var(--ink)">' + esc(sess.username) + '</span><span class="text-[10px] font-extrabold tracking-widest uppercase" style="color:var(--p1)">' + esc(role) + '</span></div>'
     + '<div class="relative group"><div class="w-10 h-10 rounded-xl avatar-premium text-white flex items-center justify-center font-bold text-base cursor-pointer">' + initial + '</div>'
     + '<div class="absolute right-0 mt-3 w-56 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all rounded-xl overflow-hidden bg-white border border-slate-200 shadow-lg"><div class="p-3"><div class="px-4 py-3 border-b border-slate-200 mb-2"><p class="font-bold text-slate-800 text-sm">' + esc(sess.username) + '</p><p class="text-xs text-slate-600">' + esc(sess.panel_code || '') + '</p></div>'
@@ -65,6 +70,7 @@ export function panelLayout(o) {
     + '<div class="border-t border-slate-200 my-2"></div><a href="/logout" class="flex items-center gap-3 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 rounded-xl font-medium"><i class="bi bi-box-arrow-right"></i> Sign Out</a>'
     + '</div></div></div></div></header>'
     + '<main class="p-4 md:p-8 pb-20 relative z-10"><div class="mx-auto w-full max-w-6xl">' + content + '</div></main></div>'
+    + PAL_SHELL + '<script>window.PGS=' + JSON.stringify(PGS) + ';</script>'
     + '<script>' + BASE_JS + '</script></body></html>';
 }
 

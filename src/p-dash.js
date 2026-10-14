@@ -6,10 +6,10 @@ export const KEY_DURATIONS = ['2H', '1D', '3D', '7D', '15D', '30D', '60D'];
 export const BULK_MAX = 500;
 
 function pcard(label, val, icon, extra) {
-  return '<div class="glass-card p-5 md:p-6 relative overflow-hidden"><div class="absolute top-0 left-0 right-0 h-1 avatar-premium"></div>'
-    + '<div class="flex items-center justify-between gap-3"><div class="min-w-0"><p class="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider mb-1">' + label + '</p>'
-    + '<h3 class="text-3xl font-black text-slate-800 truncate">' + val + '</h3>' + (extra || '') + '</div>'
-    + '<div class="w-14 h-14 shrink-0 rounded-2xl avatar-premium text-white flex items-center justify-center text-2xl"><i class="bi ' + icon + '"></i></div></div></div>';
+  return '<div class="glass-card p-5"><div class="flex items-start justify-between gap-3">'
+    + '<div class="min-w-0"><p class="kpi-label">' + label + '</p>'
+    + '<p class="kpi-val truncate">' + val + '</p>' + (extra || '') + '</div>'
+    + '<div class="stat-ic"><i class="bi ' + icon + '"></i></div></div></div>';
 }
 
 function kpi(label, val, foot) {
@@ -39,19 +39,18 @@ export function panelDashboard(sess, stats, balanceText) {
       + kpi('Total keys', stats.my_keys || 0)
       + kpi('Active keys', stats.my_active_keys || 0, 'ready to use') + '</div>';
   }
-  return '<div class="pagehead"><div class="ph-ic"><i class="bi bi-grid-1x2-fill"></i></div>'
-    + '<div class="flex-1 min-w-0"><h1 class="truncate">Welcome back, ' + esc(sess.username) + '</h1><p class="truncate">' + sub + '</p></div>'
-    + '<div class="hidden sm:flex gap-2 shrink-0"><a href="/generate" class="btn-premium px-4 py-2.5 rounded-xl text-xs font-bold"><i class="bi bi-plus-circle"></i> Generate</a>'
-    + '<a href="/keys" class="mini-btn" style="padding:10px 16px;font-size:12px;">View keys</a></div></div>'
+  return '<div class="mb-5"><p class="text-xs font-bold uppercase tracking-widest" style="color:var(--faint)"><span id="istdate">Today</span> · ' + esc(sess.panel_code || '') + '</p>'
+    + '<div class="mt-1 flex flex-wrap items-end justify-between gap-3"><h1 class="text-2xl md:text-[28px] font-extrabold tracking-tight" style="color:var(--ink)"><span id="greet">Hello, </span>' + esc(sess.username) + '</h1>'
+    + '<div class="flex gap-2 shrink-0"><a href="/generate" class="btn-premium px-4 py-2.5 rounded-xl text-xs font-bold"><i class="bi bi-plus-circle"></i> Generate</a>'
+    + '<a href="/keys" class="mini-btn" style="padding:10px 16px;font-size:12px;">Manage keys</a></div></div>'
+    + '<p class="text-[13px] mt-1" style="color:var(--muted)">' + sub + '</p></div>'
+    + '<script>(function(){try{var now=new Date();var h=parseInt(new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Kolkata",hour:"numeric",hour12:false}).format(now),10);document.getElementById("greet").textContent=(h<12?"Good morning, ":h<17?"Good afternoon, ":"Good evening, ");document.getElementById("istdate").textContent=new Intl.DateTimeFormat("en-IN",{timeZone:"Asia/Kolkata",weekday:"long",day:"numeric",month:"long"}).format(now);}catch(e){}})();</script>'
     + kpis
     + '<div class="grid grid-cols-1 xl:grid-cols-3 gap-4">'
-    + '<div class="xl:col-span-2"><h2 class="text-sm font-extrabold mb-2" style="color:var(--ink)">Quick actions</h2><div class="glass-card p-4 grid grid-cols-2 gap-2">'
-    + '<a href="/generate" class="mini-btn accent justify-center" style="padding:14px;">Generate keys</a>'
-    + '<a href="/keys" class="mini-btn justify-center" style="padding:14px;">Manage keys</a>'
-    + '<a href="/api-test" class="mini-btn justify-center" style="padding:14px;">Test API</a>'
-    + '<a href="/server" class="mini-btn justify-center" style="padding:14px;">Server config</a>'
-    + '<a href="/users" class="mini-btn justify-center" style="padding:14px;">Users</a>'
-    + '<a href="/referral" class="mini-btn justify-center" style="padding:14px;">Referrals</a>'
+    + '<div class="xl:col-span-2"><h2 class="text-sm font-extrabold mb-2" style="color:var(--ink)">Jump in</h2><div class="glass-card p-2.5">'
+    + '<a href="/generate" class="linkrow mb-2"><span class="stat-ic"><i class="bi bi-key-fill"></i></span><span>Generate keys<span class="block text-xs font-medium" style="color:var(--muted)">Plans, limits and bulk</span></span><i class="bi bi-chevron-right chev"></i></a>'
+    + '<a href="/keys" class="linkrow mb-2"><span class="stat-ic"><i class="bi bi-view-list"></i></span><span>Key manager<span class="block text-xs font-medium" style="color:var(--muted)">Search, reset, extend, block</span></span><i class="bi bi-chevron-right chev"></i></a>'
+    + '<a href="/api-test" class="linkrow"><span class="stat-ic"><i class="bi bi-broadcast"></i></span><span>Test the API<span class="block text-xs font-medium" style="color:var(--muted)">Connect &amp; encrypt, live</span></span><i class="bi bi-chevron-right chev"></i></a>'
     + '</div></div>'
     + '<div><h2 class="text-sm font-extrabold mb-2" style="color:var(--ink)">Panel health</h2><div class="glass-card p-4">'
     + '<div class="space-y-3 text-[13px]" style="color:var(--muted)">'
@@ -134,7 +133,12 @@ export function panelKeyList(sess, keys, o) {
     + '<div class="tbl-wrap"><table class="tbl" id="ktbl"><thead><tr><th>Key</th><th>Plan</th><th>Use</th><th>Status</th><th>Expiry · By</th><th>Actions</th></tr></thead><tbody>'
     + (rows || '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:28px;">No keys found. <a href="/generate" style="color:var(--p1);font-weight:700;">Generate →</a></td></tr>')
     + '</tbody></table></div>'
-    + '<script>function filterKeys(){var q=(document.getElementById("kq").value||"").toLowerCase(),s=document.getElementById("ks").value,n=0;document.querySelectorAll("#ktbl tbody tr[data-search]").forEach(function(r){var ok=(!q||r.getAttribute("data-search").indexOf(q)>=0)&&(!s||r.getAttribute("data-status")===s);r.style.display=ok?"":"none";if(ok)n++;});}</script>';
+    + '<div class="pager"><span id="kcount"></span><span class="flex gap-2"><button class="mini-btn" onclick="kPrev()">← Prev</button><button class="mini-btn" onclick="kNext()">Next →</button></span></div>'
+    + '<script>var KPAGE=1;var KPER=25;function kList(){return Array.prototype.slice.call(document.querySelectorAll("#ktbl tbody tr[data-search]"));}'
+    + 'function kMatch(){var q=(document.getElementById("kq").value||"").toLowerCase(),s=document.getElementById("ks").value;return kList().filter(function(r){return (!q||r.getAttribute("data-search").indexOf(q)>=0)&&(!s||r.getAttribute("data-status")===s);});}'
+    + 'function kRender(){var list=kMatch();var pages=Math.max(1,Math.ceil(list.length/KPER));if(KPAGE>pages)KPAGE=pages;list.forEach(function(r,i){r.style.display=(i>=(KPAGE-1)*KPER&&i<KPAGE*KPER)?"":"none";});document.getElementById("kcount").textContent=list.length+" keys · page "+KPAGE+" of "+pages;}'
+    + 'function kPrev(){if(KPAGE>1){KPAGE--;kRender();}}function kNext(){KPAGE++;kRender();}'
+    + 'function filterKeys(){KPAGE=1;kRender();}document.addEventListener("DOMContentLoaded",kRender);</script>';
 }
 
 export function arcxRand(len) {
