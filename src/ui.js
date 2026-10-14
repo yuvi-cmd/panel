@@ -1,5 +1,14 @@
 export function esc(s) {
-  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  // Escape &, <, >, " and ' so values are safe in HTML text, attributes
+  // and single-quoted JS strings (e.g. onclick="doCopy('...')").
+  // NOTE: for new code prefer jsArg() (JSON.stringify) over manual quoting.
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
+}
+
+// Safe embedding of an arbitrary string as a single JS argument inside
+// HTML attributes: returns a double-quoted JSON string (HTML-escaped).
+export function jsArg(s) {
+  return JSON.stringify(String(s ?? '')).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 export function navClass(path, cur) {

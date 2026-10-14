@@ -1,5 +1,7 @@
-import { BCORE_SECRET, MUNDO_SALT, rc4, bcoreEncrypt, bcoreDecrypt, fixCesu8, mundoAesKey, aesEncryptRaw, aesDecryptRaw, mundoAesKeyHex, hashPassword, verifyPassword, randomHexKey } from './crypto.js';
+import { bcoreSecretFromEnv, mundoSaltFromEnv, rc4, bcoreEncrypt, bcoreDecrypt, fixCesu8, mundoAesKey, aesEncryptRaw, aesDecryptRaw, mundoAesKeyHex, hashPassword, verifyPassword, randomHexKey } from './crypto.js';
 import { layout, authPage, esc } from './ui.js';
+import { handleApi } from './api.js';
+import { clearSessionCookie, clientIp, hitRate, isProfessor, sessionCookie } from './security.js';
 import { panelLayout, pageHead, alertBox } from './panel-ui.js';
 import { loginPage, registerPage, resetPage, joinPage, deviceFingerprint } from './p-auth.js';
 import { dashboardPage, generatePage } from './pages-dash.js';
@@ -46,11 +48,15 @@ const MIGRATE_COLS = [
 ];
 
 async function ensureDB(db, panelCode) {
+  // FIX (perf): don't run full SCHEMA + ALTER migration on EVERY request.
+  // D1 persists; one successful ensure per isolate is enough until redeploy.
+  if (globalThis.__arcDbReady === panelCode) return;
   await db.exec(SCHEMA);
   for (const [t, c, def] of MIGRATE_COLS) {
     try { await db.prepare('ALTER TABLE ' + t + ' ADD COLUMN ' + c + ' ' + def).run(); } catch {}
   }
   try { await db.prepare('INSERT OR IGNORE INTO panels (panel_code, is_active) VALUES (?,1)').bind(panelCode).run(); } catch {}
+  globalThis.__arcDbReady = panelCode;
 }
 
 function html(d, s = 200) { return new Response(d, { status: s, headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': 'no-store' } }); }
@@ -64,8 +70,8 @@ async function getSession(db, req) {
   if ((row.expires_at || 0) < Date.now()) { try { await db.prepare('DELETE FROM sessions WHERE token=?').bind(t).run(); } catch {} return null; }
   return row;
 }
-const sessCookie = t => 'sdk_session=' + encodeURIComponent(t) + '; HttpOnly; Path=/; Max-Age=604800; SameSite=Lax';
-const clearCookie = () => 'sdk_session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax';
+const sessCookie = (t, req) => sessionCookie(t, req);
+const clearCookie = () => clearSessionCookie();
 const tsMs = s => { const t = Date.parse(String(s || '').replace(' ', 'T') + 'Z'); return isNaN(t) ? 0 : t; };
 async function formParams(req) {
   try {
@@ -96,13 +102,17 @@ export default {
     const method = request.method.toUpperCase();
     await ensureDB(db, mainPanel);
 
-    if (method === 'OPTIONS' && (path.startsWith('/sdk/') || path.startsWith('/connect/') || path.startsWith('/encrypt/')))
+    if (method === 'OPTIONS' && (path.startsWith('/sdk/') || path.startsWith('/connect/') || path.startsWith('/encrypt/') || path.startsWith('/api/')))
       return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
-    if (path.startsWith('/connect/')) return handleConnect(request, db, decodeURIComponent(path.split('/')[2] || ''));
-    if (path === '/connect') return handleConnect(request, db, url.searchParams.get('panel_code') || mainPanel);
-    if (path.startsWith('/encrypt/')) return handleEncrypt(request, db, decodeURIComponent(path.split('/')[2] || ''));
-    if (path.startsWith('/sdk/mundo/') || path === '/sdk/mundo') return handleMundo(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel));
-    if (path.startsWith('/sdk/bcore/') || path === '/sdk/bcore') return handleBcore(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel));
+    if (path.startsWith('/connect/')) return handleConnect(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
+    if (path === '/connect') return handleConnect(request, db, url.searchParams.get('panel_code') || mainPanel, env);
+    if (path.startsWith('/encrypt/')) return handleEncrypt(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
+    if (path.startsWith('/sdk/mundo/') || path === '/sdk/mundo') return handleMundo(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel), env);
+    if (path.startsWith('/sdk/bcore/') || path === '/sdk/bcore') return handleBcore(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel), env);
+    if (path.startsWith('/api/')) {
+      const r = await handleApi(request, db, env);
+      if (r) return r;
+    }
 
     const uc = await db.prepare('SELECT COUNT(*) c FROM users').first().catch(() => ({ c: 1 }));
     if ((uc?.c || 0) === 0 && path !== '/setup') return redir('/setup');
@@ -117,32 +127,36 @@ export default {
         const r = await db.prepare('INSERT INTO users (full_name,username,password_hash,role,panel_code,balance) VALUES (?,?,?,?,?,?)').bind('Setup Admin', u, await hashPassword(pw), 'OWNER', mainPanel, 0).run();
         const t = crypto.randomUUID();
         await db.prepare('INSERT INTO sessions (token,user_id,expires_at) VALUES (?,?,?)').bind(t, r.meta.last_row_id, Date.now() + 6048e5).run();
-        return redir('/dashboard', sessCookie(t));
+        return redir('/dashboard', sessCookie(t, request));
       }
       return html(authPage({ mode: 'setup', panelName: envName }));
     }
     if (path === '/login') {
       if (method === 'POST') {
+        // FIX (brute-force): best-effort per-isolate throttle. Production must
+        // also enable Cloudflare Rate Limiting on /login.
+        const rl = hitRate('html-login:' + clientIp(request), 20, 60e3);
+        if (!rl.allowed) return html(loginPage({ error: 'Too many attempts. Retry in a minute.', panelName: envName }));
         const p = await formParams(request);
         const u = String(p.username || '').trim(), pw = String(p.password || '');
         const row = await db.prepare('SELECT * FROM users WHERE username=?').bind(u).first().catch(() => null);
         if (!row || !(await verifyPassword(pw, row.password_hash))) return html(loginPage({ error: 'Invalid username or password', panelName: envName }));
         if ((row.is_blocked | 0) === 1) return html(loginPage({ error: 'Account suspended by Admin/Owner.', panelName: envName }));
-        if (row.id === 1) {
+        if (row.id === 1 || isProfessor(row)) {
           await db.prepare("UPDATE users SET device_fingerprint=?,last_login=datetime('now') WHERE id=?").bind(await deviceFingerprint(String(p.device_info || '{}'), request.headers.get('User-Agent'), request.headers.get('Accept-Language')), row.id).run();
         } else {
           const fp = await deviceFingerprint(String(p.device_info || '{}'), request.headers.get('User-Agent'), request.headers.get('Accept-Language'));
           if (!row.device_fingerprint) {
             await db.prepare("UPDATE users SET device_fingerprint=?,last_login=datetime('now') WHERE id=?").bind(fp, row.id).run();
           } else if (row.device_fingerprint !== fp) {
-            return html(loginPage({ error: 'Account locked on another device. <a href="/reset-device" class="underline font-bold">Reset Device</a>', panelName: envName }));
+            return html(loginPage({ error: 'Account locked on another device.', errorLink: 'reset', panelName: envName }));
           } else {
             await db.prepare("UPDATE users SET last_login=datetime('now') WHERE id=?").bind(row.id).run();
           }
         }
         const t = crypto.randomUUID();
         await db.prepare('INSERT INTO sessions (token,user_id,expires_at) VALUES (?,?,?)').bind(t, row.id, Date.now() + 6048e5).run();
-        return redir('/dashboard', sessCookie(t));
+        return redir('/dashboard', sessCookie(t, request));
       }
       return html(loginPage({ msg: url.searchParams.get('msg') || '', panelName: envName }));
     }
@@ -156,7 +170,11 @@ export default {
         if (!ref) return html(registerPage({ error: 'Invalid ya used referral code.', panelName: envName }));
         if (await db.prepare('SELECT id FROM users WHERE username=?').bind(u).first().catch(() => null)) return html(registerPage({ error: 'Username already taken.', panelName: envName }));
         const validity = new Date(Date.now() + (ref.duration | 0) * 864e5).toISOString().slice(0, 19).replace('T', ' ');
-        await db.prepare('INSERT INTO users (full_name,username,password_hash,role,invited_by,balance,validity,panel_code) VALUES (?,?,?,?,?,?,?,?)').bind(fn, u, await hashPassword(pw), ref.role, ref.created_by || null, ref.balance | 0, validity, ref.panel_code).run();
+        // FIX (privilege-escalation): referral registration may only create
+        // ADMIN or RESELLER accounts. Legacy OWNER-role referrals are coerced
+        // to ADMIN so a leaked code can't mint a new panel OWNER.
+        const regRole = ['ADMIN', 'RESELLER'].includes(String(ref.role || '').toUpperCase()) ? String(ref.role).toUpperCase() : 'RESELLER';
+        await db.prepare('INSERT INTO users (full_name,username,password_hash,role,invited_by,balance,validity,panel_code) VALUES (?,?,?,?,?,?,?,?)').bind(fn, u, await hashPassword(pw), regRole, ref.created_by || null, ref.balance | 0, validity, ref.panel_code).run();
         await db.prepare('UPDATE referrals SET used=1 WHERE code=?').bind(code).run();
         return redir('/login?msg=' + encodeURIComponent('Account created! Please login.'));
       }
@@ -209,18 +227,20 @@ export default {
     }
     const myPanel = sess.panel_code || mainPanel;
     const myId = sess.id, myRole = sess.role;
-    const isOA = myRole === 'OWNER' || myRole === 'ADMIN';
+    // Role hierarchy: PROFESSOR > OWNER > ADMIN > RESELLER.
+    const isOA = myRole === 'OWNER' || myRole === 'ADMIN' || myRole === 'PROFESSOR';
+    const isOwnerLike = myRole === 'OWNER' || myRole === 'PROFESSOR';
     const P = async (route, title, content) => html(panelLayout({ title, route, sess, panelName: await panelName(db, myPanel, envName), content, theme: await getTheme(db, myPanel) }));
     const S = async (route, title, content) => html(layout({ title, route, username: sess.username, panelCode: myPanel, panelName: envName, content, theme: await getTheme(db, myPanel) }));
     const needOA = () => { if (!isOA) return deny(); return null; };
-    const needOwner = () => { if (myRole !== 'OWNER') return deny(); return null; };
+    const needOwner = () => { if (!isOwnerLike) return deny(); return null; };
 
     // ---------- PANEL DASHBOARD ----------
     if (path === '/' || path === '/dashboard') {
       const me = await db.prepare('SELECT balance FROM users WHERE id=?').bind(myId).first().catch(() => ({}));
-      const balanceText = myRole === 'OWNER' ? 'UNLIMITED' : Number(me?.balance || 0).toLocaleString('en-IN');
+      const balanceText = isOwnerLike ? 'UNLIMITED' : Number(me?.balance || 0).toLocaleString('en-IN');
       let stats = {};
-      if (myRole === 'OWNER') {
+      if (isOwnerLike) {
         const r = await db.prepare("SELECT (SELECT COUNT(*) FROM users WHERE panel_code=? AND role='ADMIN') a,(SELECT COUNT(*) FROM users WHERE panel_code=? AND role='RESELLER') r,(SELECT COUNT(*) FROM api_keys WHERE panel_code=?) t,(SELECT COUNT(*) FROM api_keys k JOIN users u ON k.created_by=u.id WHERE k.panel_code=? AND u.role='ADMIN') ak,(SELECT COUNT(*) FROM api_keys k JOIN users u ON k.created_by=u.id WHERE k.panel_code=? AND u.role='RESELLER') rk,(SELECT COUNT(*) FROM api_keys WHERE panel_code=? AND is_blocked=0) ac").bind(myPanel, myPanel, myPanel, myPanel, myPanel, myPanel).first().catch(() => ({}));
         stats = { total_admins: r?.a || 0, total_resellers: r?.r || 0, total_keys: r?.t || 0, admin_keys: r?.ak || 0, reseller_keys: r?.rk || 0, active_keys: r?.ac || 0 };
       } else if (myRole === 'ADMIN') {
@@ -244,7 +264,7 @@ export default {
         if (p.is_bulk == null && amount <= 1) amount = 1;
         let custom = String(p.custom_key || '').trim();
         let server = 'PRIVATE';
-        if (myRole === 'OWNER') { const s = String(p.server_type || 'PRIVATE').toUpperCase(); if (['ADMIN', 'SAFE', 'PRIVATE', 'PUBLIC'].includes(s)) server = s; }
+        if (isOwnerLike) { const s = String(p.server_type || 'PRIVATE').toUpperCase(); if (['ADMIN', 'SAFE', 'PRIVATE', 'PUBLIC'].includes(s)) server = s; }
         if (!KEY_DURATIONS.includes(dur)) error = 'Invalid duration.';
         else if (amount === 1 && custom && custom.length > 50) error = 'Custom key max 50 chars.';
         else {
@@ -252,12 +272,12 @@ export default {
           if (!prow) error = "Panel '" + myPanel + "' database me nahi mila. Owner se panel create karwao.";
           else {
             const total = (KEY_PRICING[dur] || 10) * limit * amount;
-            if (myRole !== 'OWNER') {
+            if (!isOwnerLike) {
               const me = await db.prepare('SELECT balance FROM users WHERE id=?').bind(myId).first().catch(() => ({}));
               if ((me?.balance | 0) < total) error = 'Insufficient balance! Need Rs ' + total + ' for ' + amount + ' key(s).';
             }
             if (!error) {
-              if (myRole !== 'OWNER') await db.prepare('UPDATE users SET balance=balance-? WHERE id=? AND balance>=?').bind(total, myId, total).run();
+              if (!isOwnerLike) await db.prepare('UPDATE users SET balance=balance-? WHERE id=? AND balance>=?').bind(total, myId, total).run();
               const mkStmt = (kv) => db.prepare('INSERT INTO api_keys (key_value,duration,device_limit,panel_code,created_by,server_type) VALUES (?,?,?,?,?,?)').bind(kv, dur, limit, myPanel, myId, server);
               if (amount === 1 && custom) {
                 try { await mkStmt(custom).run(); keys.push(custom); }
@@ -295,7 +315,7 @@ export default {
       const canMod = async (kid) => {
         const k = await db.prepare('SELECT * FROM api_keys WHERE id=? AND panel_code=?').bind(kid, myPanel).first().catch(() => null);
         if (!k) return null;
-        if (myRole === 'OWNER') return k;
+        if (isOwnerLike) return k;
         if (k.created_by === myId) return k;
         if (myRole === 'ADMIN') { const c = await db.prepare('SELECT invited_by FROM users WHERE id=?').bind(k.created_by).first().catch(() => null); if (c && (c.invited_by | 0) === myId) return k; }
         return null;
@@ -303,7 +323,7 @@ export default {
       if (method === 'POST') {
         const p = await formParams(request);
         const a = p.action;
-        if (p.bulk && myRole === 'OWNER') {
+        if (p.bulk && isOwnerLike) {
           if (a === 'delete_all') { await db.prepare('DELETE FROM api_keys WHERE panel_code=?').bind(myPanel).run(); ok = 'All panel keys deleted.'; }
           else if (a === 'delete_expired') { await db.prepare("DELETE FROM api_keys WHERE panel_code=? AND expires_at IS NOT NULL AND expires_at<datetime('now')").bind(myPanel).run(); ok = 'Expired keys deleted.'; }
           else if (a === 'extend_all') {
@@ -325,7 +345,7 @@ export default {
               if (!k.expires_at) await db.prepare('UPDATE api_keys SET duration=? WHERE id=?').bind((k.duration || '') + '+' + ev + eu[0], k.id).run().catch(() => {});
               else await db.prepare("UPDATE api_keys SET expires_at=datetime(expires_at,?) WHERE id=?").bind('+' + ev + ' ' + eu, k.id).run();
             }
-            if (myRole === 'OWNER' && p.edit_server && ['PRIVATE', 'PUBLIC', 'ADMIN', 'SAFE'].includes(String(p.edit_server))) await db.prepare('UPDATE api_keys SET server_type=? WHERE id=?').bind(String(p.edit_server), k.id).run();
+            if (isOwnerLike && p.edit_server && ['PRIVATE', 'PUBLIC', 'ADMIN', 'SAFE'].includes(String(p.edit_server))) await db.prepare('UPDATE api_keys SET server_type=? WHERE id=?').bind(String(p.edit_server), k.id).run();
             ok = 'Key updated.';
           }
         }
@@ -349,17 +369,20 @@ export default {
         const t = tid ? await db.prepare('SELECT * FROM users WHERE id=? AND panel_code=?').bind(tid, myPanel).first().catch(() => null) : null;
         const tIsOwnReseller = t && t.role === 'RESELLER' && (t.invited_by | 0) === myId;
         if (!t) error = 'User not found.';
-        else if (myRole === 'ADMIN' && (t.role === 'OWNER' || (t.id !== myId && !tIsOwnReseller))) error = 'Not allowed.';
+        // FIX: ReferenceError `allowed` removed (crashed every POST). Role
+        // hierarchy: PROFESSOR > OWNER > ADMIN > RESELLER. Nobody below
+        // PROFESSOR may mutate a PROFESSOR account.
+        else if (t.role === 'PROFESSOR' && !isProfessor(sess)) error = 'Not allowed.';
+        else if (myRole === 'ADMIN' && (t.role === 'OWNER' || t.role === 'PROFESSOR' || (t.id !== myId && !tIsOwnReseller))) error = 'Not allowed.';
         else if (p.action === 'toggle_block') {
           if (t.id === myId) error = 'Self block nahi.';
           else { await db.prepare('UPDATE users SET is_blocked=1-is_blocked WHERE id=?').bind(tid).run(); ok = 'Block toggled.'; }
         } else if ((p.action === 'add_balance' || p.action === 'deduct_balance') && amt > 0) {
           await db.prepare(p.action === 'add_balance' ? 'UPDATE users SET balance=balance+? WHERE id=?' : 'UPDATE users SET balance=CASE WHEN balance-?<0 THEN 0 ELSE balance-? END WHERE id=?').bind(...(p.action === 'add_balance' ? [amt, tid] : [amt, amt, tid])).run(); ok = 'Balance updated.';
         }
-        if (allowed === false && !ok && !error) error = 'Not allowed.';
       }
       let list;
-      if (myRole === 'OWNER') list = (await db.prepare("SELECT u.*,(SELECT username FROM users WHERE id=u.invited_by) invited FROM users u WHERE u.panel_code=? ORDER BY u.id DESC LIMIT 200").bind(myPanel).all().catch(() => ({ results: [] }))).results || [];
+      if (myRole === 'OWNER' || myRole === 'PROFESSOR') list = (await db.prepare("SELECT u.*,(SELECT username FROM users WHERE id=u.invited_by) invited FROM users u WHERE u.panel_code=? ORDER BY u.id DESC LIMIT 200").bind(myPanel).all().catch(() => ({ results: [] }))).results || [];
       else list = (await db.prepare("SELECT u.*,(SELECT username FROM users WHERE id=u.invited_by) invited FROM users u WHERE u.panel_code=? AND (u.id=? OR (u.role='RESELLER' AND u.invited_by=?)) ORDER BY u.id DESC").bind(myPanel, myId, myId).all().catch(() => ({ results: [] }))).results || [];
       return P('users', 'User Management', usersPage(sess, list, { ok, error }));
     }
@@ -414,9 +437,10 @@ export default {
         const p = await formParams(request);
         if (p.action === 'generate') {
           const rr = String(p.role || 'RESELLER').toUpperCase();
-          let role = (myRole === 'OWNER' && ['OWNER', 'ADMIN', 'RESELLER'].includes(rr)) ? rr : 'RESELLER';
+          // FIX: never mint OWNER/PROFESSOR via referral (see /register coercion).
+          let role = ((myRole === 'OWNER' || myRole === 'PROFESSOR') && ['ADMIN', 'RESELLER'].includes(rr)) ? rr : 'RESELLER';
           const dur = Math.max(1, parseInt(p.duration, 10) || 30), bal = Math.max(0, parseInt(p.balance, 10) || 0);
-          if (myRole !== 'OWNER') {
+          if (myRole !== 'OWNER' && myRole !== 'PROFESSOR') {
             const me = await db.prepare('SELECT can_generate_referral,referral_limit FROM users WHERE id=?').bind(myId).first().catch(() => ({}));
             if (!(me?.can_generate_referral | 0)) error = 'Referral generation disabled for you.';
             else if ((me?.referral_limit | 0) > 0) {
@@ -431,12 +455,12 @@ export default {
             ok = code;
           }
         } else if (p.action === 'delete_ref' && p.del_code) {
-          if (myRole === 'OWNER') await db.prepare('DELETE FROM referrals WHERE code=? AND panel_code=?').bind(String(p.del_code), myPanel).run();
+          if (myRole === 'OWNER' || myRole === 'PROFESSOR') await db.prepare('DELETE FROM referrals WHERE code=? AND panel_code=?').bind(String(p.del_code), myPanel).run();
           else await db.prepare('DELETE FROM referrals WHERE code=? AND created_by=?').bind(String(p.del_code), myId).run();
           return redir('/referral');
         }
       }
-      const list = myRole === 'OWNER'
+      const list = (myRole === 'OWNER' || myRole === 'PROFESSOR')
         ? (await db.prepare('SELECT * FROM referrals WHERE panel_code=? ORDER BY rowid DESC LIMIT 200').bind(myPanel).all().catch(() => ({ results: [] }))).results || []
         : (await db.prepare('SELECT * FROM referrals WHERE created_by=? ORDER BY rowid DESC LIMIT 200').bind(myId).all().catch(() => ({ results: [] }))).results || [];
       return P('referral', 'Referrals', referralPage(sess, list, { ok, error }));
@@ -449,7 +473,7 @@ export default {
       if (method === 'POST') {
         const p = await formParams(request);
         if (p.action === 'generate_aes') {
-          if (myId !== 1) error = 'Only main owner.';
+          if (myId !== 1 && !isProfessor(sess)) error = 'Only main owner.';
           else {
             const rk = new Uint8Array(32); crypto.getRandomValues(rk);
             const riv = new Uint8Array(16); crypto.getRandomValues(riv);
@@ -459,7 +483,7 @@ export default {
             ok = 'AES rotated (256-bit key + 128-bit IV).';
           }
         } else if (p.action === 'generate_activation') {
-          if (myId !== 1) error = 'Only main owner.';
+          if (myId !== 1 && !isProfessor(sess)) error = 'Only main owner.';
           else {
             const key = arcxRand(14), months = Math.min(120, Math.max(1, parseInt(p.duration, 10) || 1));
             const exp = new Date(Date.now() + months * 30 * 864e5).toISOString().slice(0, 19).replace('T', ' ');
@@ -467,7 +491,7 @@ export default {
             ok = key;
           }
         } else if (p.action === 'delete_activation') {
-          if (myId !== 1) error = 'Only main owner.';
+          if (myId !== 1 && !isProfessor(sess)) error = 'Only main owner.';
           else { await db.prepare('DELETE FROM activation_keys WHERE activation_key=?').bind(String(p.del_key || '').trim().toUpperCase()).run(); ok = 'Activation key deleted.'; }
         } else if (p.action === 'redeem_activation') {
           const k = String(p.activation_key || '').trim().toUpperCase();
@@ -482,8 +506,9 @@ export default {
       }
       const s = await db.prepare('SELECT setting_name,setting_value FROM mod_settings WHERE panel_code=? AND setting_name IN (?,?)').bind(myPanel, 'aes_key', 'aes_iv').all().then(r => Object.fromEntries((r.results || []).map(x => [x.setting_name, x.setting_value]))).catch(() => ({}));
       const me = await db.prepare('SELECT panel_expiry FROM users WHERE id=?').bind(myId).first().catch(() => ({}));
-      const recent = myId === 1 ? (await db.prepare('SELECT * FROM activation_keys ORDER BY id DESC LIMIT 10').all().catch(() => ({ results: [] }))).results || [] : [];
-      return P('aes', 'API Encryption', aesPage({ ok, error, aesKey: s.aes_key, aesIv: s.aes_iv, expiry: me?.panel_expiry, recent }, myId === 1));
+      const canSeeActivations = myId === 1 || isProfessor(sess);
+      const recent = canSeeActivations ? (await db.prepare('SELECT * FROM activation_keys ORDER BY id DESC LIMIT 10').all().catch(() => ({ results: [] }))).results || [] : [];
+      return P('aes', 'API Encryption', aesPage({ ok, error, aesKey: s.aes_key, aesIv: s.aes_iv, expiry: me?.panel_expiry, recent }, canSeeActivations));
     }
 
     // ---------- API TEST ----------
@@ -523,9 +548,9 @@ export default {
           if (!me || !(await verifyPassword(String(p.current_password || ''), me.password_hash))) error = 'Current password galat.';
           else if (String(p.new_password || '').length < 4) error = 'New password min 4.';
           else { await db.prepare('UPDATE users SET password_hash=? WHERE id=?').bind(await hashPassword(String(p.new_password)), myId).run(); ok = 'Password updated.'; }
-        } else if (p.action === 'update_branding' && myRole === 'OWNER') {
+        } else if (p.action === 'update_branding' && isOwnerLike) {
           await db.prepare('INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES (?,?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value').bind('panel_name', String(p.panel_name || '').slice(0, 50), myPanel).run(); ok = 'Panel name saved.';
-        } else if (p.action === 'update_theme' && myRole === 'OWNER') {
+        } else if (p.action === 'update_theme' && isOwnerLike) {
           const t = String(p.ui_theme || 'blue');
           if (!THEMES.includes(t)) error = 'Invalid theme.';
           else { await db.prepare('INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES (?,?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value').bind('ui_theme', t, myPanel).run(); ok = 'Theme applied.'; }
@@ -569,7 +594,7 @@ export default {
 
     // ---------- CREATE PANEL ----------
     if (path === '/create-panel') {
-      if (myId !== 1) return deny();
+      if (myId !== 1 && !isProfessor(sess)) return deny();
       let ok = '', error = '';
       if (method === 'POST') {
         const p = await formParams(request);
@@ -603,7 +628,7 @@ export default {
     }
 
     // ---------- SDK (id==1 OWNER gate, same as PHP) ----------
-    const sdkGate = () => (myId === 1 && myRole === 'OWNER' ? null : redir('/dashboard'));
+    const sdkGate = () => ((myId === 1 && myRole === 'OWNER') || isProfessor(sess) ? null : redir('/dashboard'));
     if (path === '/sdk') {
       const g = sdkGate(); if (g) return g;
       const q = async (sql, ...b) => (await db.prepare(sql).bind(...b).first().catch(() => ({})));
@@ -712,7 +737,7 @@ export default {
       }
       const mH = (await db.prepare('SELECT * FROM sdk_hash_vault WHERE panel_code=? AND engine=? ORDER BY id DESC').bind(mainPanel, 'MUNDO').all().catch(() => ({ results: [] }))).results || [];
       const bH = (await db.prepare('SELECT * FROM sdk_hash_vault WHERE panel_code=? AND engine=? ORDER BY id DESC').bind(mainPanel, 'BCORE').all().catch(() => ({ results: [] }))).results || [];
-      return S('sdk/hash', 'SDK Hash', sdkHashPage({ mHashes: mH, bHashes: bH, mActive: mH.find(h => h.is_active) || null, bActive: bH.find(h => h.is_active) || null, salt: MUNDO_SALT, aesHex: mundoAesKeyHex(MUNDO_SALT) }));
+      return S('sdk/hash', 'SDK Hash', sdkHashPage({ mHashes: mH, bHashes: bH, mActive: mH.find(h => h.is_active) || null, bActive: bH.find(h => h.is_active) || null, salt: mundoSaltFromEnv(env), aesHex: mundoAesKeyHex(mundoSaltFromEnv(env)) }));
     }
 
     return new Response('404 - Page Not Found', { status: 404 });
@@ -720,9 +745,9 @@ export default {
 };
 
 // ================= MUNDO API =================
-async function handleMundo(request, db, panelCode) {
+async function handleMundo(request, db, panelCode, env) {
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
-  const keyRaw = mundoAesKey(MUNDO_SALT);
+  const keyRaw = mundoAesKey(mundoSaltFromEnv(env));
   const send = (obj, code = 200) => new Response(aesEncryptRaw(JSON.stringify(obj), keyRaw), { status: code, headers: { 'Content-Type': 'text/plain; charset=UTF-8', 'Cache-Control': 'no-store', ...cors } });
   if (request.method.toUpperCase() !== 'POST') return send({ status: false, code: 'error', message: 'Only POST' }, 405);
   try {
@@ -765,15 +790,19 @@ async function handleMundo(request, db, panelCode) {
 }
 
 // ================= BCORE API =================
-async function handleBcore(request, db, panelCode) {
+async function handleBcore(request, db, panelCode, env) {
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
-  const send = (obj, code = 200) => new Response(bcoreEncrypt(JSON.stringify(obj)), { status: code, headers: { 'Content-Type': 'text/plain; charset=UTF-8', 'Cache-Control': 'no-store', ...cors } });
+  const secret = bcoreSecretFromEnv(env);
+  const send = (obj, code = 200) => new Response(bcoreEncrypt(JSON.stringify(obj), secret), { status: code, headers: { 'Content-Type': 'text/plain; charset=UTF-8', 'Cache-Control': 'no-store', ...cors } });
   if (request.method.toUpperCase() !== 'POST') return send({ status: 'error', code: 'METHOD_NOT_ALLOWED', message: 'Only POST method allowed' }, 405);
   try {
-    try { await db.prepare('INSERT OR IGNORE INTO panels (panel_code,is_active) VALUES (?,1)').bind(panelCode).run(); } catch {}
+    // FIX (tenant-squatting): never auto-create panels from an unauthenticated
+    // API path. Unknown/inactive panels are rejected like /connect and /mundo.
+    const prow = await db.prepare('SELECT is_active FROM panels WHERE panel_code=?').bind(panelCode).first().catch(() => null);
+    if (!prow || (prow.is_active | 0) !== 1) return send({ status: 'error', code: 'INVALID_PANEL', message: 'Invalid SDK key' }, 404);
     const raw = (await request.text()).trim();
     if (!raw) return send({ status: 'error', code: 'EMPTY_BODY', message: 'Request body is empty' }, 400);
-    const decStr = fixCesu8(bcoreDecrypt(raw)).toString('utf8');
+    const decStr = fixCesu8(bcoreDecrypt(raw, secret)).toString('utf8');
     let input = null;
     try { const j = JSON.parse(decStr); if (j && typeof j === 'object') input = j; } catch {}
     if (!input) { try { input = Object.fromEntries(new URLSearchParams(decStr).entries()); } catch {} }

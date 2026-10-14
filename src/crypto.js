@@ -1,7 +1,30 @@
 import { createCipheriv, createDecipheriv } from 'node:crypto';
 
-export const BCORE_SECRET = 'YuviMatrix_Secure_2026';
-export const MUNDO_SALT = 'https://mundo.cp.cheat/v2/api/verify';
+// ---------------------------------------------------------------------------
+// Secrets: DO NOT hardcode production secrets here.
+// These constants are legacy-compat fallbacks only (kept so existing clients
+// using RC4 / AES-128-ECB keep working). For new deployments set real secrets
+// via Cloudflare encrypted secrets:
+//
+//   wrangler secret put BCORE_SECRET
+//   wrangler secret put MUNDO_SALT
+//
+// The helpers below prefer env values when provided.
+// See SECURITY.md for the migration plan (do NOT silently rotate these or old
+// clients break).
+// ---------------------------------------------------------------------------
+export const BCORE_SECRET = 'YuviMatrix_Secure_2026'; // legacy fallback, NOT a production default
+export const MUNDO_SALT = 'https://mundo.cp.cheat/v2/api/verify'; // legacy fallback
+
+export function bcoreSecretFromEnv(env) {
+  const v = env && typeof env.BCORE_SECRET === 'string' ? env.BCORE_SECRET.trim() : '';
+  return v || BCORE_SECRET;
+}
+
+export function mundoSaltFromEnv(env) {
+  const v = env && typeof env.MUNDO_SALT === 'string' ? env.MUNDO_SALT.trim() : '';
+  return v || MUNDO_SALT;
+}
 
 // ---------- RC4 (BCORE, same as PHP) ----------
 export function rc4(dataBuf, keyStr) {
@@ -24,16 +47,16 @@ export function rc4(dataBuf, keyStr) {
   return out;
 }
 
-export function bcoreEncrypt(plain) {
-  const enc = rc4(Buffer.from(plain, 'utf8'), BCORE_SECRET);
+export function bcoreEncrypt(plain, secret) {
+  const enc = rc4(Buffer.from(plain, 'utf8'), secret || BCORE_SECRET);
   return enc.toString('base64');
 }
 
-export function bcoreDecrypt(b64) {
+export function bcoreDecrypt(b64, secret) {
   try {
     const raw = Buffer.from(String(b64 || '').trim(), 'base64');
     if (!raw.length) return Buffer.alloc(0);
-    return rc4(raw, BCORE_SECRET);
+    return rc4(raw, secret || BCORE_SECRET);
   } catch { return Buffer.alloc(0); }
 }
 

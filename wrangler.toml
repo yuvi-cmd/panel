@@ -6,6 +6,17 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 PANEL_CODE = "YUVI_001"
 PANEL_NAME = "YUVI PANEL"
+# Origin of the Next.js frontend (e.g. "https://panel.example.com").
+# Required for cross-origin /api/* calls with credentials. Same-origin
+# deployments can leave this empty.
+FRONTEND_ORIGIN = ""
+
+# Secrets (NEVER commit values here). Set via:
+#   wrangler secret put BCORE_SECRET
+#   wrangler secret put MUNDO_SALT
+#   wrangler secret put ARCX_TOKEN_SALT
+# Legacy fallbacks in src/crypto.js / src/p-connect.js keep old clients
+# working until a documented rotation. See SECURITY.md.
 
 [[d1_databases]]
 binding = "DB"

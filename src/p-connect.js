@@ -12,15 +12,17 @@ export const ARCX_VERSIONS = { PUBLIC: 'PUBLIC FREE', PRIVATE: 'PRIVATE PAID', A
 const md5 = s => md5hex(s);
 const clean = (v, max = 255) => (typeof v === 'string' && v.trim() !== '' && v.trim().length <= max) ? v.trim() : '';
 
-// Login session ho to asal error batate hain (debug ke liye), warna generic.
+// FIX (info-leak): never echo DB exception text to clients. Log server-side.
 async function errDetail(db, request, e) {
-  try {
-    const m = (request.headers.get('Cookie') || '').match(/sdk_session=([^;]+)/);
-    if (!m) return '';
-    const s = await db.prepare('SELECT 1 ok FROM sessions WHERE token=? AND expires_at>?').bind(decodeURIComponent(m[1]), Date.now()).first();
-    if (s) return ' :: ' + String((e && e.message) || e).slice(0, 300);
-  } catch {}
+  try { console.error('connect/encrypt error:', (e && e.stack) || e); } catch {}
   return '';
+}
+
+// Token salt: legacy-compat fallback. Override via `ARCX_TOKEN_SALT` secret.
+// WARNING: rotating this invalidates all previously issued client tokens.
+export function arcxSaltFromEnv(env) {
+  const v = env && typeof env.ARCX_TOKEN_SALT === 'string' ? env.ARCX_TOKEN_SALT : '';
+  return v || 'Vm8Lk7Uj2JmsjCPVPVjrLa7zgfx3uz9E';
 }
 
 export function aes256CbcEnc(json, keyHex, ivHex) {
@@ -71,7 +73,7 @@ async function verifyKey(db, panel, userKey, serial) {
   return { key, expiry };
 }
 
-export async function handleConnect(request, db, panel) {
+export async function handleConnect(request, db, panel, env) {
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
   const J = (obj, code = 200) => new Response(JSON.stringify(obj), { status: code, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...cors } });
   if (request.method.toUpperCase() !== 'POST') return J({ status: false, reason: 'METHOD NOT ALLOWED' }, 405);
@@ -90,7 +92,7 @@ export async function handleConnect(request, db, panel) {
     if (v.err) return J({ status: false, reason: v.err }, v.code);
     const s = await loadSettings(db, panel);
     const get = (k, d) => (k in s && s[k] != null ? String(s[k]) : d);
-    const real = 'PUBG-' + userKey + '-' + serial + '-' + 'Vm8Lk7Uj2JmsjCPVPVjrLa7zgfx3uz9E';
+    const real = 'PUBG-' + userKey + '-' + serial + '-' + arcxSaltFromEnv(env);
     const token = md5(real), enc = md5(token + 'VIPENC');
     let st = String(v.key.server_type || 'PRIVATE').toUpperCase();
     if (!['ADMIN', 'SAFE', 'PRIVATE', 'PUBLIC'].includes(st)) st = 'PRIVATE';
@@ -109,7 +111,7 @@ export async function handleConnect(request, db, panel) {
   } catch (e) { return J({ status: false, reason: 'SERVER ERROR' + await errDetail(db, request, e) }, 500); }
 }
 
-export async function handleEncrypt(request, db, panel) {
+export async function handleEncrypt(request, db, panel, env) {
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
   const J = (obj, code = 200) => new Response(JSON.stringify(obj), { status: code, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...cors } });
   if (request.method.toUpperCase() !== 'POST') return J({ status: false, reason: 'METHOD NOT ALLOWED' }, 405);
@@ -132,7 +134,7 @@ export async function handleEncrypt(request, db, panel) {
     const v = await verifyKey(db, panel, userKey, serial);
     if (v.err) return J({ status: false, reason: v.err }, v.code);
     const get = (k, d) => (k in s && s[k] != null ? String(s[k]) : d);
-    const real = 'PUBG-' + userKey + '-' + serial + '-' + 'Vm8Lk7Uj2JmsjCPVPVjrLa7zgfx3uz9E';
+    const real = 'PUBG-' + userKey + '-' + serial + '-' + arcxSaltFromEnv(env);
     const inner = {
       status: true, data: {
         real, token: md5(real), Enc: md5(md5(real) + 'VIPENC'), EXP: v.expiry, rng: Math.floor(Date.now() / 1000),

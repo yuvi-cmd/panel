@@ -13,8 +13,13 @@ function shell(panelName, heading, sub, inner) {
     + '<div class="glass-card p-6"><div class="text-center mb-5"><h2 class="text-base font-black text-slate-800">' + esc(heading) + '</h2><p class="text-xs text-slate-500 mt-0.5">' + esc(sub) + '</p></div>' + inner + '</div></div></body></html>';
 }
 
-function alerts(error, msg) {
-  return (error ? '<div class="alert-box alert-error"><i class="bi bi-exclamation-circle-fill"></i> ' + error + '</div>' : '')
+function alerts(error, msg, errorLink) {
+  // FIX (XSS): error text is always escaped. The only allowed HTML is an
+  // internal static link (e.g. Reset Device) passed via errorLink.
+  const link = errorLink === 'reset'
+    ? ' <a href="/reset-device" class="underline font-bold">Reset Device</a>'
+    : '';
+  return (error ? '<div class="alert-box alert-error"><i class="bi bi-exclamation-circle-fill"></i> ' + esc(error) + link + '</div>' : '')
     + (msg ? '<div class="alert-box alert-success"><i class="bi bi-check-circle-fill"></i> ' + esc(msg) + '</div>' : '');
 }
 
@@ -24,7 +29,7 @@ document.addEventListener('DOMContentLoaded',function(){var el=document.getEleme
 </script>`;
 
 export function loginPage(o) {
-  const inner = alerts(o.error || '', o.msg || '')
+  const inner = alerts(o.error || '', o.msg || '', o.errorLink || '')
     + '<form method="POST" class="space-y-3.5"><input type="hidden" name="device_info" id="device_info_login">'
     + '<div><label class="label-dark">Username</label><input type="text" name="username" required class="clay-input" placeholder="Enter your username"></div>'
     + '<div><label class="label-dark">Password</label><input type="password" name="password" required class="clay-input" placeholder="Enter your password"></div>'

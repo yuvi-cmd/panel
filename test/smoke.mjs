@@ -1,0 +1,279 @@
+// Smoke / integration tests for the Worker (no external deps).
+// Uses Node's built-in SQLite (node:sqlite) behind a tiny D1-compatible shim
+// and drives the Worker's fetch() end-to-end: auth, tenant isolation,
+// key lifecycle, referral role coercion, connect/encrypt contracts.
+//
+// Run:  node test/smoke.mjs   (Node >= 22.5; Node 26 recommended)
+
+import { DatabaseSync } from 'node:sqlite';
+import app from '../src/index.js';
+
+// ---------- minimal D1 shim over node:sqlite ----------
+function makeDb() {
+  const sqlite = new DatabaseSync(':memory:');
+  const wrap = (stmt, args) => ({
+    async first() {
+      try {
+        return stmt.get(...args) ?? null;
+      } catch {
+        return null;
+      }
+    },
+    async all() {
+      try {
+        return { results: stmt.all(...args) };
+      } catch {
+        return { results: [] };
+      }
+    },
+    async run() {
+      const info = stmt.run(...args);
+      return { meta: { last_row_id: Number(info.lastInsertRowid), changes: info.changes } };
+    },
+  });
+  return {
+    prepare(sql) {
+      const stmt = sqlite.prepare(sql);
+      const bound = (...args) => wrap(stmt, args);
+      return { bind: bound, first: () => bound().first(), all: () => bound().all(), run: () => bound().run() };
+    },
+    async exec(sql) {
+      sqlite.exec(sql);
+    },
+  };
+}
+
+// ---------- tiny test runner ----------
+let passed = 0;
+let failed = 0;
+function ok(cond, name, extra) {
+  if (cond) {
+    passed += 1;
+    console.log('  ok - ' + name);
+  } else {
+    failed += 1;
+    console.error('  FAIL - ' + name + (extra ? ' :: ' + extra : ''));
+  }
+}
+
+function cookieFrom(res) {
+  const h = res.headers.get('Set-Cookie') || '';
+  const m = h.match(/sdk_session=([^;]+)/);
+  return m ? `sdk_session=${m[1]}` : '';
+}
+
+async function call(env, method, path, { cookie, json, form, headers } = {}) {
+  const url = 'https://panel.test' + path;
+  const h = { ...(headers || {}) };
+  if (cookie) h.Cookie = cookie;
+  let body;
+  if (json !== undefined) {
+    h['Content-Type'] = 'application/json';
+    body = JSON.stringify(json);
+  } else if (form !== undefined) {
+    body = form; // FormData
+  }
+  const req = new Request(url, { method, headers: h, body });
+  return app.fetch(req, env, {});
+}
+
+const env = { DB: makeDb(), PANEL_CODE: 'YUVI_001', PANEL_NAME: 'TEST PANEL' };
+
+// ---------- 1. setup ----------
+console.log('setup + auth');
+{
+  const r = await call(env, 'GET', '/setup');
+  ok(r.status === 200, 'GET /setup renders when empty');
+  const fd = new FormData();
+  fd.set('username', 'boss');
+  fd.set('password', 'secret123');
+  const r2 = await call(env, 'POST', '/setup', { form: fd });
+  ok(r2.status === 302 && r2.headers.get('Location') === '/dashboard', 'POST /setup creates first OWNER');
+  var ownerCookie = cookieFrom(r2);
+  ok(!!ownerCookie, 'setup sets session cookie');
+}
+
+// ---------- 2. JSON login + dashboard ----------
+console.log('json api auth');
+{
+  const r = await call(env, 'POST', '/api/login', { json: { username: 'boss', password: 'secret123', device_info: '{}' } });
+  ok(r.status === 200, 'POST /api/login 200');
+  const b = await r.json();
+  ok(b.ok === true && b.user.role === 'OWNER', 'login returns OWNER user', JSON.stringify(b).slice(0, 120));
+  var ownerApiCookie = cookieFrom(r) || ownerCookie;
+  ok(!!ownerApiCookie, 'login sets session cookie');
+
+  const d = await call(env, 'GET', '/api/dashboard', { cookie: ownerApiCookie });
+  const db = await d.json();
+  ok(d.status === 200 && db.ok === true && typeof db.stats === 'object', 'GET /api/dashboard ok');
+  ok(!('BCORE_SECRET' in db) && !('aes_key' in db), 'dashboard leaks no secrets');
+
+  const anon = await call(env, 'GET', '/api/dashboard');
+  ok(anon.status === 401, 'dashboard requires auth');
+}
+
+// ---------- 3. generate + keys ----------
+console.log('keys lifecycle');
+let keyId = 0;
+{
+  const g = await call(env, 'POST', '/api/generate', { cookie: ownerCookie, json: { duration: '30D', device_limit: 1, bulk_amount: 2 } });
+  const gb = await g.json();
+  ok(g.status === 200 && gb.ok === true && gb.keys.length === 2, 'generate 2 keys', JSON.stringify(gb).slice(0, 160));
+  var keyA = gb.keys[0];
+
+  const k = await call(env, 'GET', '/api/keys?page=1&pageSize=20', { cookie: ownerCookie });
+  const kb = await k.json();
+  ok(kb.ok === true && kb.total === 2, 'keys list total=2');
+  keyId = kb.items[0].id;
+  ok(typeof kb.items[0].expires_at_ist !== 'undefined', 'keys include IST display field');
+
+  const bad = await call(env, 'POST', '/api/generate', { cookie: ownerCookie, json: { duration: 'NOPE', device_limit: 1, bulk_amount: 1 } });
+  ok(bad.status === 400, 'invalid duration rejected');
+}
+
+// ---------- 4. /users POST no longer crashes (ReferenceError fix) ----------
+console.log('users admin');
+{
+  // owner creates a referral, then a reseller registers
+  const ref = await call(env, 'POST', '/api/referral', { cookie: ownerCookie, json: { action: 'generate', role: 'RESELLER', duration: 30, balance: 100 } });
+  const refb = await ref.json();
+  ok(refb.ok === true && /^REF-/.test(refb.code), 'referral generated');
+  ok(refb.role === 'RESELLER', 'referral role respected');
+
+  // OWNER-role referral must NOT be mintable anymore
+  const ref2 = await call(env, 'POST', '/api/referral', { cookie: ownerCookie, json: { action: 'generate', role: 'OWNER', duration: 30, balance: 0 } });
+  const ref2b = await ref2.json();
+  ok(ref2b.ok === true && ref2b.role !== 'OWNER', 'OWNER referral coerced, got ' + ref2b.role);
+
+  const fd = new FormData();
+  fd.set('full_name', 'Res Eller');
+  fd.set('username', 'res1');
+  fd.set('password', 'pass1234');
+  fd.set('referral_code', refb.code);
+  const reg = await call(env, 'POST', '/register', { form: fd });
+  ok(reg.status === 302, 'register with referral redirects');
+
+  const users = await call(env, 'GET', '/api/users', { cookie: ownerCookie });
+  const ub = await users.json();
+  const res1 = ub.items.find((u) => u.username === 'res1');
+  ok(!!res1 && res1.role === 'RESELLER', 'reseller registered in panel');
+
+  // block toggle (this POST crashed before the fix)
+  const t = await call(env, 'POST', '/api/users', { cookie: ownerCookie, json: { action: 'toggle_block', target_id: res1.id } });
+  const tb = await t.json();
+  ok(t.status === 200 && tb.ok === true, 'toggle_block works (no ReferenceError)');
+
+  // legacy OWNER-role referral in DB must coerce to non-OWNER on register
+  env.DB.prepare("INSERT INTO referrals (code,role,duration,balance,panel_code,created_by) VALUES ('REF-LEGACY-OWNER','OWNER',30,0,'YUVI_001',1)").bind().run();
+  const fd2 = new FormData();
+  fd2.set('full_name', 'Legacy Owner');
+  fd2.set('username', 'leg1');
+  fd2.set('password', 'pass1234');
+  fd2.set('referral_code', 'REF-LEGACY-OWNER');
+  await call(env, 'POST', '/register', { form: fd2 });
+  const users2 = await call(env, 'GET', '/api/users', { cookie: ownerCookie });
+  const ub2 = await users2.json();
+  const leg = ub2.items.find((u) => u.username === 'leg1');
+  ok(!!leg && leg.role !== 'OWNER', 'legacy OWNER referral coerced to ' + (leg && leg.role));
+}
+
+// ---------- 5. tenant isolation ----------
+console.log('tenant isolation');
+let panel2KeyId = 0;
+{
+  const c = await call(env, 'POST', '/api/panels', { cookie: ownerCookie, json: { action: 'create', custom_code: 'PANEL_TWO', duration: 30 } });
+  ok(c.status === 200, 'second panel created');
+
+  const fd = new FormData();
+  fd.set('panel_code', 'PANEL_TWO');
+  fd.set('username', 'boss2');
+  fd.set('password', 'secret123');
+  const j = await call(env, 'POST', '/join-panel', { form: fd });
+  ok(j.status === 302, 'second panel claimed');
+
+  const l2 = await call(env, 'POST', '/api/login', { json: { username: 'boss2', password: 'secret123', device_info: '{}' } });
+  const l2c = cookieFrom(l2);
+  ok(l2.status === 200 && !!l2c, 'second owner login');
+
+  const g2 = await call(env, 'POST', '/api/generate', { cookie: l2c, json: { duration: '7D', device_limit: 1, bulk_amount: 1 } });
+  const g2b = await g2.json();
+  ok(g2b.ok === true && g2b.keys.length === 1, 'panel2 key generated');
+
+  const k2 = await call(env, 'GET', '/api/keys', { cookie: l2c });
+  panel2KeyId = (await k2.json()).items[0].id;
+
+  // panel1 owner must NOT see panel2 keys
+  const k1 = await call(env, 'GET', '/api/keys', { cookie: ownerCookie });
+  const k1b = await k1.json();
+  const leak = k1b.items.some((x) => x.id === panel2KeyId);
+  ok(!leak, 'no cross-tenant key read');
+
+  // ...nor mutate them
+  const del = await call(env, 'POST', '/api/keys', { cookie: ownerCookie, json: { action: 'delete_key', key_id: panel2KeyId } });
+  ok(del.status === 403, 'cross-tenant key delete forbidden');
+
+  const still = await call(env, 'GET', '/api/keys', { cookie: l2c });
+  ok((await still.json()).total === 1, 'panel2 key intact');
+}
+
+// ---------- 6. connect / encrypt contracts ----------
+console.log('connect + encrypt');
+{
+  const fd = new FormData();
+  fd.set('game', 'PUBG');
+  // fetch key_value of first panel1 key directly
+  const row = await env.DB.prepare('SELECT key_value FROM api_keys WHERE panel_code=? LIMIT 1').bind('YUVI_001').first();
+  fd.set('user_key', row.key_value);
+  fd.set('serial', 'DEV-001');
+  const c = await call(env, 'POST', '/connect/YUVI_001', { form: fd });
+  const cb = await c.json();
+  ok(c.status === 200 && cb.status === true && cb.data && cb.data.lib_url, 'connect ok returns lib_url');
+
+  const fdBad = new FormData();
+  fdBad.set('game', 'OTHER');
+  fdBad.set('user_key', 'x');
+  fdBad.set('serial', 'y');
+  const cbad = await call(env, 'POST', '/connect/YUVI_001', { form: fdBad });
+  ok(cbad.status === 403, 'non-PUBG game rejected');
+
+  const e = await call(env, 'POST', '/encrypt/YUVI_001', { form: fd });
+  ok(e.status === 403, 'encrypt blocked before panel activation');
+
+  // activate panel2? no — activate YUVI_001 via voucher + AES config
+  env.DB.prepare("INSERT INTO activation_keys (activation_key,panel_code,name,duration_months,expires_at) VALUES ('VOUCHER-1','YUVI_001','t',1,'2099-01-01 00:00:00')").bind().run();
+  const a = await call(env, 'POST', '/api/activate', { cookie: ownerCookie, json: { activation_key: 'voucher-1' } });
+  ok(a.status === 200, 'activation redeem (case-insensitive)');
+  env.DB.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES ('aes_key',?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value").bind('a'.repeat(64), 'YUVI_001').run();
+  env.DB.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES ('aes_iv',?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value").bind('b'.repeat(32), 'YUVI_001').run();
+  const e2 = await call(env, 'POST', '/encrypt/YUVI_001', { form: fd });
+  const e2b = await e2.json();
+  ok(e2.status === 200 && e2b.status === true && typeof e2b.payload === 'string', 'encrypt returns payload after activation+aes');
+}
+
+// ---------- 7. bcore tenant-squatting fix + crypto helpers ----------
+console.log('bcore + crypto');
+{
+  const before = env.DB.prepare("SELECT COUNT(*) c FROM panels WHERE panel_code='EVIL_PANEL'").bind().first();
+  const r = await call(env, 'POST', '/sdk/bcore/EVIL_PANEL', { headers: { 'Content-Type': 'text/plain' }, });
+  // send empty body via Request text path
+  void r;
+  const req = new Request('https://panel.test/sdk/bcore/EVIL_PANEL', { method: 'POST', body: 'e30=' });
+  const res = await app.fetch(req, env, {});
+  ok(res.status === 404, 'bcore unknown panel rejected, got ' + res.status);
+  const after = env.DB.prepare("SELECT COUNT(*) c FROM panels WHERE panel_code='EVIL_PANEL'").bind().first();
+  ok((before?.c || 0) === 0 && (after?.c || 0) === 0, 'bcore does not auto-create panels');
+
+  const { esc } = await import('../src/ui.js');
+  ok(esc(`a'b"c<d>`) === 'a&#x27;b&quot;c&lt;d&gt;', 'esc() escapes quotes + tags');
+  const { formatIST, cleanPanelCode } = await import('../src/security.js');
+  ok(formatIST('2026-01-01 00:00:00').length > 0, 'formatIST renders');
+  ok(cleanPanelCode('yuvi_001 ') === 'YUVI_001' && cleanPanelCode('a-b') === '', 'panel code validation');
+  const { hashPassword, verifyPassword, bcoreEncrypt, bcoreDecrypt } = await import('../src/crypto.js');
+  const h = await hashPassword('pw123');
+  ok(await verifyPassword('pw123', h) && !(await verifyPassword('nope', h)), 'password hash roundtrip');
+  const enc = bcoreEncrypt('{"sdk_key":"x"}');
+  ok(bcoreDecrypt(enc).toString('utf8') === '{"sdk_key":"x"}', 'bcore rc4 roundtrip (compat)');
+}
+
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed ? 1 : 0);
