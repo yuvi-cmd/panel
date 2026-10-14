@@ -16,13 +16,7 @@ function kpi(label, val, foot) {
   return '<div class="glass-card p-5"><p class="kpi-label">' + label + '</p><p class="kpi-val">' + val + '</p>' + (foot ? '<p class="kpi-foot">' + foot + '</p>' : '') + '</div>';
 }
 
-function keyChip(k) {
-  if ((k.is_blocked | 0) === 1) return '<span class="chip chip-r">Blocked</span>';
-  if (k.expires_at && Date.parse(String(k.expires_at).replace(' ', 'T') + 'Z') < Date.now()) return '<span class="chip chip-a">Expired</span>';
-  return '<span class="chip chip-g">Active</span>';
-}
-
-export function panelDashboard(sess, stats, balanceText, recent) {
+export function panelDashboard(sess, stats, balanceText) {
   const role = sess.role;
   const sub = role === 'OWNER' || role === 'PROFESSOR' ? 'Panel network at a glance'
     : role === 'ADMIN' ? 'Your team and keys at a glance' : 'Your keys at a glance';
@@ -45,32 +39,26 @@ export function panelDashboard(sess, stats, balanceText, recent) {
       + kpi('Total keys', stats.my_keys || 0)
       + kpi('Active keys', stats.my_active_keys || 0, 'ready to use') + '</div>';
   }
-  const rows = (recent || []).map(k =>
-    '<tr><td><span class="mono">' + esc(String(k.key_value || '').slice(0, 26)) + (String(k.key_value || '').length > 26 ? '…' : '') + '</span></td>'
-    + '<td><span class="chip chip-n">' + esc(k.duration || '') + '</span> <span class="chip chip-i">' + esc(k.server_type || 'PRIVATE') + '</span></td>'
-    + '<td>' + keyChip(k) + '</td>'
-    + '<td style="color:var(--muted)">' + esc(k.expires_at || ('pending ' + (k.duration || ''))) + '</td></tr>'
-  ).join('');
   return '<div class="pagehead"><div class="ph-ic"><i class="bi bi-grid-1x2-fill"></i></div>'
     + '<div class="flex-1 min-w-0"><h1 class="truncate">Welcome back, ' + esc(sess.username) + '</h1><p class="truncate">' + sub + '</p></div>'
     + '<div class="hidden sm:flex gap-2 shrink-0"><a href="/generate" class="btn-premium px-4 py-2.5 rounded-xl text-xs font-bold"><i class="bi bi-plus-circle"></i> Generate</a>'
     + '<a href="/keys" class="mini-btn" style="padding:10px 16px;font-size:12px;">View keys</a></div></div>'
     + kpis
     + '<div class="grid grid-cols-1 xl:grid-cols-3 gap-4">'
-    + '<div class="xl:col-span-2"><div class="flex items-center justify-between mb-2"><h2 class="text-sm font-extrabold" style="color:var(--ink)">Recent keys</h2><a href="/keys" class="text-xs font-bold" style="color:var(--p1)">Open manager →</a></div>'
-    + '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Key</th><th>Plan</th><th>Status</th><th>Expires</th></tr></thead><tbody>'
-    + (rows || '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px;">No keys yet — <a href="/generate" style="color:var(--p1);font-weight:700;">generate one →</a></td></tr>')
-    + '</tbody></table></div></div>'
-    + '<div><h2 class="text-sm font-extrabold mb-2" style="color:var(--ink)">Quick actions</h2><div class="glass-card p-4 grid grid-cols-2 gap-2">'
-    + '<a href="/generate" class="mini-btn accent justify-center" style="padding:12px;">Generate</a>'
-    + '<a href="/keys" class="mini-btn justify-center" style="padding:12px;">Keys</a>'
-    + '<a href="/api-test" class="mini-btn justify-center" style="padding:12px;">API test</a>'
-    + '<a href="/server" class="mini-btn justify-center" style="padding:12px;">Server</a>'
-    + '</div><div class="glass-card p-4 mt-4"><h2 class="text-sm font-extrabold mb-3" style="color:var(--ink)">Guardrails on</h2>'
-    + '<div class="space-y-2.5 text-[13px]" style="color:var(--muted)">'
-    + '<p class="flex items-center gap-2"><span class="status-dot"></span>Keys bound to devices</p>'
-    + '<p class="flex items-center gap-2"><span class="status-dot"></span>Login device lock</p>'
-    + '<p class="flex items-center gap-2"><span class="status-dot"></span>Tenant-isolated data</p>'
+    + '<div class="xl:col-span-2"><h2 class="text-sm font-extrabold mb-2" style="color:var(--ink)">Quick actions</h2><div class="glass-card p-4 grid grid-cols-2 gap-2">'
+    + '<a href="/generate" class="mini-btn accent justify-center" style="padding:14px;">Generate keys</a>'
+    + '<a href="/keys" class="mini-btn justify-center" style="padding:14px;">Manage keys</a>'
+    + '<a href="/api-test" class="mini-btn justify-center" style="padding:14px;">Test API</a>'
+    + '<a href="/server" class="mini-btn justify-center" style="padding:14px;">Server config</a>'
+    + '<a href="/users" class="mini-btn justify-center" style="padding:14px;">Users</a>'
+    + '<a href="/referral" class="mini-btn justify-center" style="padding:14px;">Referrals</a>'
+    + '</div></div>'
+    + '<div><h2 class="text-sm font-extrabold mb-2" style="color:var(--ink)">Panel health</h2><div class="glass-card p-4">'
+    + '<div class="space-y-3 text-[13px]" style="color:var(--muted)">'
+    + '<p class="flex items-center justify-between gap-2">Client API <span class="chip chip-g">Operational</span></p>'
+    + '<p class="flex items-center justify-between gap-2">Device binding <span class="chip chip-g">Enforced</span></p>'
+    + '<p class="flex items-center justify-between gap-2">Login lock <span class="chip chip-g">On</span></p>'
+    + '<p class="flex items-center justify-between gap-2">Tenant isolation <span class="chip chip-g">On</span></p>'
     + '</div></div></div></div>';
 }
 
