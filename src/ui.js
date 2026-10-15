@@ -278,11 +278,18 @@ export const PAL_SHELL = '<div id="pal" class="pal-wrap" style="display:none" on
 // Header / floating light-dark toggle button.
 export const MODE_BTN = '<button onclick="arcToggleMode()" class="mode-btn" aria-label="Toggle light or dark mode" title="Light / dark"><i class="bi bi-moon-stars-fill ic-moon"></i><i class="bi bi-sun-fill ic-sun"></i></button>';
 
+// Inline accent override for a tenant custom theme (hex pre-validated server-side).
+export function accentStyle(a) {
+  if (!a || !/^#[0-9a-f]{6}$/.test(a.acc || '')) return '';
+  const e = (s) => String(s).replace(/"/g, '&quot;');
+  return ' style="--acc:' + e(a.acc) + ';--acc-d:' + e(a.accD) + ';--acc-soft:' + e(a.accSoft) + ';--acc-glow:' + e(a.glow) + ';--p1:' + e(a.acc) + ';--p2:' + e(a.accD) + ';--glow:' + e(a.glow) + '"';
+}
+
 // Small sidebar section label.
 export const sideLabel = (t) => '<div class="side-label">' + esc(t) + '</div>';
 
 export function layout(o) {
-  const { title, route, username, panelCode, panelName, content, theme } = o;
+  const { title, route, username, panelCode, panelName, content, theme, accent } = o;
   const th = theme || 'blue';
   return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
     + '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
@@ -291,7 +298,7 @@ export function layout(o) {
     + '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">'
     + '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">'
     + '<style>' + CSS + '</style>' + MODE_EARLY + '</head>'
-    + '<body class="flex h-screen overflow-hidden relative" data-theme="' + esc(th) + '">'
+    + '<body class="flex h-screen overflow-hidden relative" data-theme="' + esc(th) + '"' + accentStyle(accent) + '>'
     + '<div class="droplet drop-1"></div><div class="droplet drop-2"></div><div class="droplet drop-3"></div><div class="droplet drop-4"></div><div class="droplet drop-5"></div><div class="droplet drop-6"></div><div class="droplet drop-7"></div><div class="droplet drop-8"></div>'
     + '<div id="sidebar-overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40 hidden md:hidden"></div>'
     + '<aside id="sidebar" class="w-[264px] shrink-0 glass-sidebar flex flex-col absolute inset-y-0 left-0 transform -translate-x-full md:relative md:translate-x-0 transition-transform duration-300 z-50">'

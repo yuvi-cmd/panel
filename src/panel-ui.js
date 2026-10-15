@@ -1,7 +1,7 @@
-import { CSS, BASE_JS, MODE_BTN, MODE_EARLY, CMDK_BTN, PAL_SHELL, esc, navClass, sideLabel } from './ui.js';
+import { CSS, BASE_JS, MODE_BTN, MODE_EARLY, CMDK_BTN, PAL_SHELL, accentStyle, esc, navClass, sideLabel } from './ui.js';
 
 export function panelLayout(o) {
-  const { title, route, sess, panelName, content, theme } = o;
+  const { title, route, sess, panelName, content, theme, accent } = o;
   const th = theme || 'blue';
   const role = sess.role || 'RESELLER';
   // Role hierarchy: PROFESSOR > OWNER > ADMIN > RESELLER (nav mirrors API gates).
@@ -40,7 +40,7 @@ export function panelLayout(o) {
     + '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">'
     + '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">'
     + '<style>' + CSS + '</style>' + MODE_EARLY + '</head>'
-    + '<body class="flex h-screen overflow-hidden relative" data-theme="' + esc(th) + '">'
+    + '<body class="flex h-screen overflow-hidden relative" data-theme="' + esc(th) + '"' + accentStyle(accent) + '>'
     + '<div class="droplet drop-1"></div><div class="droplet drop-2"></div><div class="droplet drop-3"></div><div class="droplet drop-4"></div><div class="droplet drop-5"></div><div class="droplet drop-6"></div><div class="droplet drop-7"></div><div class="droplet drop-8"></div>'
     + '<div id="sidebar-overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40 hidden md:hidden"></div>'
     + '<aside id="sidebar" class="w-[264px] shrink-0 glass-sidebar flex flex-col absolute inset-y-0 left-0 transform -translate-x-full md:relative md:translate-x-0 transition-transform duration-300 z-50">'

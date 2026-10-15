@@ -295,6 +295,36 @@ console.log('ui themes');
   ok(['Ocean Blue', 'Royal Violet', 'Ocean Cyan', 'Emerald', 'Sunset Orange', 'Cherry Red', 'Royal Golden', 'Mono White'].every((n) => page.includes(n)), 'all 8 themes in picker');
 }
 
+// ---------- 7c. custom accent color (per-panel isolated) ----------
+console.log('custom accent');
+{
+  const setCustom = async (cookie, v) => {
+    const fd = new FormData();
+    fd.set('action', 'update_theme');
+    fd.set('ui_theme', 'custom');
+    fd.set('ui_accent', v);
+    const r = await call(env, 'POST', '/settings', { cookie, form: fd });
+    return await r.text();
+  };
+  const html = await setCustom(ownerCookie, '#123abc');
+  ok(html.includes('data-theme="custom"') && html.includes('--acc:#123abc'), 'custom accent applies with inline vars');
+  const bad = await setCustom(ownerCookie, 'red');
+  ok(bad.includes('Invalid color'), 'bad hex rejected');
+  const bad2 = await setCustom(ownerCookie, '#12ab45;evil');
+  ok(bad2.includes('Invalid color'), 'injection-ish value rejected');
+  // tenant isolation: PANEL_TWO picks its own color, YUVI_001 keeps its own
+  const l2 = await call(env, 'POST', '/api/login', { json: { username: 'boss2', password: 'secret123', device_info: '{}' } });
+  const c2 = cookieFrom(l2) || '';
+  ok(!!c2, 'panel2 login for isolation check');
+  await setCustom(c2, '#ff0000');
+  const p1 = await (await call(env, 'GET', '/dashboard', { cookie: ownerCookie })).text();
+  const p2 = await (await call(env, 'GET', '/dashboard', { cookie: c2 })).text();
+  ok(p1.includes('--acc:#123abc') && !p1.includes('--acc:#ff0000'), 'panel1 keeps its own accent');
+  ok(p2.includes('--acc:#ff0000') && !p2.includes('--acc:#123abc'), 'panel2 keeps its own accent');
+  const sp = await (await call(env, 'GET', '/settings', { cookie: ownerCookie })).text();
+  ok(sp.includes('Custom color') && sp.includes('#123abc'), 'picker shows current custom color');
+}
+
 // ---------- 8. inline-script audit: every rendered page's scripts must parse ----------
 // A single broken <script> kills the whole tag (sidebar toggle, copy buttons,
 // filters). node --check cannot see inside template literals, so audit the
