@@ -81,7 +81,7 @@ async function formParams(req) {
   } catch {}
   return {};
 }
-const THEMES = ['blue', 'cherry', 'gold', 'emerald'];
+const THEMES = ['blue', 'cherry', 'gold', 'emerald', 'violet', 'orange', 'cyan', 'mono'];
 async function getTheme(db, pc) {
   try { const r = await db.prepare("SELECT setting_value FROM mod_settings WHERE setting_name='ui_theme' AND panel_code=?").bind(pc).first(); if (r && THEMES.includes(r.setting_value)) return r.setting_value; } catch {}
   return 'blue';

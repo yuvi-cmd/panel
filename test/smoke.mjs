@@ -275,6 +275,26 @@ console.log('bcore + crypto');
   ok(bcoreDecrypt(enc).toString('utf8') === '{"sdk_key":"x"}', 'bcore rc4 roundtrip (compat)');
 }
 
+// ---------- 7b. UI themes (settings picker + allowlist) ----------
+console.log('ui themes');
+{
+  const setTheme = async (v) => {
+    const fd = new FormData();
+    fd.set('action', 'update_theme');
+    fd.set('ui_theme', v);
+    const r = await call(env, 'POST', '/settings', { cookie: ownerCookie, form: fd });
+    return await r.text();
+  };
+  for (const t of ['violet', 'orange', 'cyan', 'mono', 'blue']) {
+    const html = await setTheme(t);
+    ok(html.includes('data-theme="' + t + '"'), 'theme applies: ' + t);
+  }
+  const bad = await setTheme('hacker');
+  ok(bad.includes('Invalid theme'), 'invalid theme rejected');
+  const page = await (await call(env, 'GET', '/settings', { cookie: ownerCookie })).text();
+  ok(['Ocean Blue', 'Royal Violet', 'Ocean Cyan', 'Emerald', 'Sunset Orange', 'Cherry Red', 'Royal Golden', 'Mono White'].every((n) => page.includes(n)), 'all 8 themes in picker');
+}
+
 // ---------- 8. inline-script audit: every rendered page's scripts must parse ----------
 // A single broken <script> kills the whole tag (sidebar toggle, copy buttons,
 // filters). node --check cannot see inside template literals, so audit the

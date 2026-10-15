@@ -32,6 +32,10 @@ html,body{height:100%;}
 body[data-theme="cherry"]{--acc:#E11D48;--acc-d:#9F1239;--acc-soft:#FDE8ED;--acc-glow:rgba(225,29,72,0.20);--p1:#E11D48;--p2:#9F1239;--glow:rgba(225,29,72,0.20);}
 body[data-theme="gold"]{--acc:#B45309;--acc-d:#92400E;--acc-soft:#FBF0DC;--acc-glow:rgba(180,83,9,0.20);--p1:#B45309;--p2:#92400E;--glow:rgba(180,83,9,0.20);}
 body[data-theme="emerald"]{--acc:#059669;--acc-d:#047857;--acc-soft:#DFF7EC;--acc-glow:rgba(5,150,105,0.20);--p1:#059669;--p2:#047857;--glow:rgba(5,150,105,0.20);}
+body[data-theme="violet"]{--acc:#7C3AED;--acc-d:#5B21B6;--acc-soft:#F1EAFE;--acc-glow:rgba(124,58,237,0.20);--p1:#7C3AED;--p2:#5B21B6;--glow:rgba(124,58,237,0.20);}
+body[data-theme="orange"]{--acc:#EA580C;--acc-d:#9A3412;--acc-soft:#FFF0E6;--acc-glow:rgba(234,88,12,0.20);--p1:#EA580C;--p2:#9A3412;--glow:rgba(234,88,12,0.20);}
+body[data-theme="cyan"]{--acc:#0891B2;--acc-d:#155E75;--acc-soft:#E0F7FC;--acc-glow:rgba(8,145,178,0.20);--p1:#0891B2;--p2:#155E75;--glow:rgba(8,145,178,0.20);}
+body[data-theme="mono"]{--acc:#3F3F46;--acc-d:#18181B;--acc-soft:#F1F1F3;--acc-glow:rgba(24,24,27,0.18);--p1:#3F3F46;--p2:#18181B;--glow:rgba(24,24,27,0.18);}
 html[data-mode="dark"]{
   color-scheme:dark;
   --bg:#07080B; --surface:#0F1115; --surface2:#16181D; --line:#22252D;
