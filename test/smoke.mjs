@@ -275,5 +275,29 @@ console.log('bcore + crypto');
   ok(bcoreDecrypt(enc).toString('utf8') === '{"sdk_key":"x"}', 'bcore rc4 roundtrip (compat)');
 }
 
+// ---------- 8. inline-script audit: every rendered page's scripts must parse ----------
+// A single broken <script> kills the whole tag (sidebar toggle, copy buttons,
+// filters). node --check cannot see inside template literals, so audit the
+// actual rendered HTML.
+console.log('inline script audit');
+{
+  const htmlPaths = ['/login', '/register', '/reset-device', '/join-panel', '/dashboard', '/generate', '/keys', '/users', '/admins', '/permissions', '/referral', '/aes', '/api-test', '/server', '/settings', '/loader-manager', '/create-panel', '/sdk', '/sdk/generate', '/sdk/keys', '/sdk/server', '/sdk/hash'];
+  let checked = 0;
+  for (const p of htmlPaths) {
+    const r = await call(env, 'GET', p, { cookie: ownerCookie });
+    const t = await r.text();
+    if (!t.includes('<script')) { ok(false, p + ' has no scripts'); continue; }
+    const blocks = [...t.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]).filter((s) => s.trim());
+    if (!blocks.length) { ok(false, p + ' script extraction empty'); continue; }
+    let bad = null;
+    for (const code of blocks) {
+      try { new Function(code); checked += 1; }
+      catch (e) { bad = e.message + ' :: ' + code.slice(0, 140); break; }
+    }
+    ok(!bad, p + ' inline scripts parse (' + blocks.length + ' blocks)' + (bad ? ' :: ' + bad : ''));
+  }
+  ok(checked > 20, 'audited ' + checked + ' inline script blocks');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
