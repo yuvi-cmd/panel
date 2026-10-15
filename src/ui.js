@@ -218,6 +218,18 @@ html[data-mode="dark"] .mini-btn.danger{color:#F87171;}
 .mini-btn.accent{color:var(--p1);border-color:var(--p1);}
 .icon-btn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--muted);cursor:pointer;flex-shrink:0;}
 .icon-btn:hover{color:var(--ink);background:var(--surface2);}
+.icon-btn .chev{transition:transform .18s ease;}
+/* ===== horizontal key rows: one key per line, detail expands below ===== */
+.klist{display:flex;flex-direction:column;gap:10px;}
+.kitem{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.05);}
+.krow{display:flex;align-items:center;gap:10px;padding:12px 14px;}
+.kdot{width:9px;height:9px;border-radius:999px;flex-shrink:0;}
+.kkey{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;font-weight:600;}
+.kdetail{display:none;border-top:1px solid var(--line);background:var(--surface2);padding:12px 14px;}
+.kitem.open .kdetail{display:block;}
+.kitem.open .kchev{transform:rotate(180deg);}
+.kmeta{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 16px;margin-bottom:12px;font-size:12.5px;color:var(--muted);}
+.kmeta b{color:var(--ink);font-weight:700;}
 /* ===== overflow guards: nothing escapes its card ===== */
 .glass-card,.clay-card,.pagehead,.tbl-wrap,.toolbar{min-width:0;}
 .glass-card{overflow:hidden;}

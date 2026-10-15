@@ -105,24 +105,35 @@ export function panelKeyList(sess, keys, o) {
     const used = k.dev_count || 0, lim = Math.max(1, k.device_limit | 0), pct = Math.min(100, Math.round(used / lim * 100));
     const expired = k.expires_at && Date.parse(String(k.expires_at).replace(' ', 'T') + 'Z') < Date.now();
     const st = (k.is_blocked | 0) === 1 ? 'blocked' : expired ? 'expired' : 'active';
+    const dot = (k.is_blocked | 0) === 1 ? '#EF4444' : expired ? '#F59E0B' : '#10B981';
     const search = esc(((k.key_value || '') + ' ' + (k.creator || '')).toLowerCase());
-    return '<tr data-search="' + search + '" data-status="' + st + '">'
-      + '<td><div class="keycard"><span class="mono blur-sm select-none" id="pk-' + k.id + '">' + esc(k.key_value) + '</span>'
+    return '<div class="kitem" data-search="' + search + '" data-status="' + st + '">'
+      + '<div class="krow">'
+      + '<span class="kdot" style="background:' + dot + '"></span>'
+      + '<span class="mono kkey blur-sm select-none" id="pk-' + k.id + '">' + esc(k.key_value) + '</span>'
+      + '<span class="chip chip-n">' + esc(k.duration) + '</span>'
       + '<button onclick="document.getElementById(\'pk-' + k.id + '\').classList.toggle(\'blur-sm\')" class="icon-btn" aria-label="Reveal key"><i class="bi bi-eye"></i></button>'
-      + '<button onclick="doCopy(\'' + esc(k.key_value) + '\',this)" class="icon-btn" aria-label="Copy key"><i class="bi bi-clipboard"></i></button></div></td>'
-      + '<td><span class="chip chip-n">' + esc(k.duration) + '</span> <span class="chip chip-i">' + esc(k.server_type || 'PRIVATE') + '</span></td>'
-      + '<td><div class="text-xs font-bold" style="color:var(--muted)">' + used + '/' + lim + ' · ' + (k.uses | 0) + ' uses</div><div class="meter mt-1"><div style="width:' + pct + '%"></div></div></td>'
-      + '<td>' + ((k.is_blocked | 0) === 1 ? '<span class="chip chip-r">Blocked</span>' : expired ? '<span class="chip chip-a">Expired</span>' : '<span class="chip chip-g">Active</span>') + '</td>'
-      + '<td style="color:var(--muted);white-space:nowrap;">' + esc(k.expires_at || ('pending ' + (k.duration || ''))) + '<div class="text-[11px]">by ' + esc(k.creator || '?') + '</div></td>'
-      + '<td><div class="row-actions">'
-      + '<form method="POST" class="inline"><input type="hidden" name="key_id" value="' + k.id + '"><input type="hidden" name="action" value="reset_device"><button class="mini-btn" title="Reset devices"><i class="bi bi-arrow-counterclockwise"></i>Reset</button></form>'
-      + '<form method="POST" class="inline"><input type="hidden" name="key_id" value="' + k.id + '"><input type="hidden" name="action" value="edit_key"><input type="hidden" name="edit_status" value="' + (k.is_blocked ? '1' : '0') + '"><button class="mini-btn" title="' + (k.is_blocked ? 'Unblock' : 'Block') + '"><i class="bi ' + (k.is_blocked ? 'bi-unlock' : 'bi-lock') + '"></i>' + (k.is_blocked ? 'Unblock' : 'Block') + '</button></form>'
-      + '<form method="POST" class="inline" onsubmit="return confirm(\'Delete key?\')"><input type="hidden" name="key_id" value="' + k.id + '"><input type="hidden" name="action" value="delete_key"><button class="mini-btn danger" title="Delete"><i class="bi bi-trash"></i></button></form>'
-      + '</div><details class="mt-1.5"><summary class="cursor-pointer text-[11px] font-bold" style="color:var(--muted)">Extend / server</summary>'
-      + '<form method="POST" class="flex flex-wrap gap-1.5 pt-1.5"><input type="hidden" name="key_id" value="' + k.id + '"><input type="hidden" name="action" value="edit_key"><input type="hidden" name="edit_status" value="' + (k.is_blocked ? '0' : '1') + '">'
-      + '<input type="number" name="extend_val" placeholder="+days" class="clay-card px-2 py-1.5 text-xs w-20 rounded-xl"><input type="hidden" name="extend_unit" value="D">'
-      + (isOwner ? '<select name="edit_server" class="clay-card px-2 py-1.5 text-xs font-bold rounded-xl"><option value="">Server~</option><option>PRIVATE</option><option>PUBLIC</option><option>ADMIN</option><option>SAFE</option></select>' : '')
-      + '<button class="mini-btn accent">Save</button></form></details></td></tr>';
+      + '<button onclick="doCopy(\'' + esc(k.key_value) + '\',this)" class="icon-btn" aria-label="Copy key"><i class="bi bi-clipboard"></i></button>'
+      + '<button onclick="kexp(' + k.id + ')" class="icon-btn" aria-label="Expand details" aria-expanded="false"><i class="bi bi-chevron-down kchev"></i></button>'
+      + '</div>'
+      + '<div class="kdetail" id="kd-' + k.id + '">'
+      + '<div class="kmeta">'
+      + '<span>Plan <b>' + esc(k.duration) + ' · ' + esc(k.server_type || 'PRIVATE') + '</b></span>'
+      + '<span>Status <b>' + ((k.is_blocked | 0) === 1 ? 'Blocked' : expired ? 'Expired' : 'Active') + '</b></span>'
+      + '<span>Devices <b>' + used + '/' + lim + ' · ' + (k.uses | 0) + ' uses</b></span>'
+      + '<span>Expires <b>' + esc(k.expires_at || ('pending ' + (k.duration || ''))) + '</b></span>'
+      + '<span>By <b>' + esc(k.creator || '?') + '</b></span>'
+      + '</div><div class="meter mb-3"><div style="width:' + pct + '%"></div></div>'
+      + '<div class="row-actions">'
+      + '<form method="POST" class="inline"><input type="hidden" name="key_id" value="' + k.id + '"><input type="hidden" name="action" value="reset_device"><button class="mini-btn"><i class="bi bi-arrow-counterclockwise"></i>Reset devices</button></form>'
+      + '<form method="POST" class="inline"><input type="hidden" name="key_id" value="' + k.id + '"><input type="hidden" name="action" value="edit_key"><input type="hidden" name="edit_status" value="' + (k.is_blocked ? '1' : '0') + '"><button class="mini-btn"><i class="bi ' + (k.is_blocked ? 'bi-unlock' : 'bi-lock') + '"></i>' + (k.is_blocked ? 'Unblock' : 'Block') + '</button></form>'
+      + '<form method="POST" class="inline" onsubmit="return confirm(\'Delete key?\')"><input type="hidden" name="key_id" value="' + k.id + '"><input type="hidden" name="action" value="delete_key"><button class="mini-btn danger"><i class="bi bi-trash"></i>Delete</button></form>'
+      + '</div>'
+      + '<form method="POST" class="flex flex-wrap gap-1.5 pt-2.5 mt-1"><input type="hidden" name="key_id" value="' + k.id + '"><input type="hidden" name="action" value="edit_key"><input type="hidden" name="edit_status" value="' + (k.is_blocked ? '0' : '1') + '">'
+      + '<input type="number" name="extend_val" placeholder="+days" aria-label="Extend days" class="clay-card px-2 py-1.5 text-xs rounded-lg" style="width:88px;"><input type="hidden" name="extend_unit" value="D">'
+      + (isOwner ? '<select name="edit_server" class="clay-card px-2 py-1.5 text-xs font-bold rounded-lg"><option value="">Server~</option><option>PRIVATE</option><option>PUBLIC</option><option>ADMIN</option><option>SAFE</option></select>' : '')
+      + '<button class="mini-btn accent">Extend / save</button></form>'
+      + '</div></div>';
   }).join('');
   return '<div class="pagehead"><div class="ph-ic"><i class="bi bi-view-list"></i></div>'
     + '<div class="flex-1 min-w-0"><h1 class="truncate">Keys</h1><p class="truncate">' + keys.length + ' keys in scope · max 200</p></div>'
@@ -130,14 +141,15 @@ export function panelKeyList(sess, keys, o) {
     + msg + bulk
     + '<div class="toolbar"><div class="grow inp-icon"><i class="bi bi-search"></i><input id="kq" placeholder="Search key or creator…" oninput="filterKeys()" class="w-full clay-card px-4 py-2.5 text-sm rounded-xl focus:outline-none"></div>'
     + '<select id="ks" onchange="filterKeys()" class="clay-card custom-select px-3 py-2.5 text-sm font-bold rounded-xl"><option value="">All statuses</option><option value="active">Active</option><option value="blocked">Blocked</option><option value="expired">Expired</option></select></div>'
-    + '<div class="tbl-wrap"><table class="tbl" id="ktbl"><thead><tr><th>Key</th><th>Plan</th><th>Use</th><th>Status</th><th>Expiry · By</th><th>Actions</th></tr></thead><tbody>'
-    + (rows || '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:28px;">No keys found. <a href="/generate" style="color:var(--p1);font-weight:700;">Generate →</a></td></tr>')
-    + '</tbody></table></div>'
+    + '<div class="klist" id="klist">'
+    + (rows || '<div class="glass-card p-8 text-center text-sm" style="color:var(--muted)"><i class="bi bi-inbox text-4xl block mb-2" style="color:var(--faint)"></i>No keys found. <a href="/generate" style="color:var(--acc);font-weight:700;">Generate →</a></div>')
+    + '</div>'
     + '<div class="pager"><span id="kcount"></span><span class="flex gap-2"><button class="mini-btn" onclick="kPrev()">← Prev</button><button class="mini-btn" onclick="kNext()">Next →</button></span></div>'
-    + '<script>var KPAGE=1;var KPER=25;function kList(){return Array.prototype.slice.call(document.querySelectorAll("#ktbl tbody tr[data-search]"));}'
+    + '<script>var KPAGE=1;var KPER=20;function kList(){return Array.prototype.slice.call(document.querySelectorAll("#klist .kitem[data-search]"));}'
     + 'function kMatch(){var q=(document.getElementById("kq").value||"").toLowerCase(),s=document.getElementById("ks").value;return kList().filter(function(r){return (!q||r.getAttribute("data-search").indexOf(q)>=0)&&(!s||r.getAttribute("data-status")===s);});}'
     + 'function kRender(){var list=kMatch();var pages=Math.max(1,Math.ceil(list.length/KPER));if(KPAGE>pages)KPAGE=pages;list.forEach(function(r,i){r.style.display=(i>=(KPAGE-1)*KPER&&i<KPAGE*KPER)?"":"none";});document.getElementById("kcount").textContent=list.length+" keys · page "+KPAGE+" of "+pages;}'
     + 'function kPrev(){if(KPAGE>1){KPAGE--;kRender();}}function kNext(){KPAGE++;kRender();}'
+    + 'function kexp(id){var d=document.getElementById("kd-"+id);if(!d)return;var it=d.parentElement;var open=it.classList.toggle("open");var b=it.querySelector("[aria-expanded]");if(b)b.setAttribute("aria-expanded",open?"true":"false");}'
     + 'function filterKeys(){KPAGE=1;kRender();}document.addEventListener("DOMContentLoaded",kRender);</script>';
 }
 
