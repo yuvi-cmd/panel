@@ -430,6 +430,23 @@ console.log('fresh install');
   globalThis.__arcDbReady = '';
 }
 
+// ---------- 7f. DEBUG_ERRORS flag: 500s hide internals unless opted in ----------
+console.log('debug errors flag');
+{
+  const badDb = {
+    prepare() { throw new Error('boom-secret-marker'); },
+    exec: async () => {},
+  };
+  const mkfd = () => { const f = new FormData(); f.set('game', 'PUBG'); f.set('user_key', 'K'); f.set('serial', 'S'); return f; };
+  const r1 = await app.fetch(new Request('https://panel.test/connect/YUVI_001', { method: 'POST', body: mkfd() }), { DB: badDb, PANEL_CODE: 'YUVI_001', PANEL_NAME: 'T' }, {});
+  const t1 = await r1.text();
+  ok(r1.status === 500 && !t1.includes('boom-secret-marker'), '500 hides internals by default');
+  const r2 = await app.fetch(new Request('https://panel.test/connect/YUVI_001', { method: 'POST', body: mkfd() }), { DB: badDb, PANEL_CODE: 'YUVI_001', PANEL_NAME: 'T', DEBUG_ERRORS: '1' }, {});
+  const t2 = await r2.text();
+  ok(r2.status === 500 && t2.includes('boom-secret-marker'), 'DEBUG_ERRORS=1 reveals cause to operator');
+  globalThis.__arcDbReady = '';
+}
+
 // ---------- 8. inline-script audit: every rendered page's scripts must parse ----------
 // A single broken <script> kills the whole tag (sidebar toggle, copy buttons,
 // filters). node --check cannot see inside template literals, so audit the

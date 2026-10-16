@@ -13,8 +13,16 @@ const md5 = s => md5hex(s);
 const clean = (v, max = 255) => (typeof v === 'string' && v.trim() !== '' && v.trim().length <= max) ? v.trim() : '';
 
 // FIX (info-leak): never echo DB exception text to clients. Log server-side.
-async function errDetail(db, request, e) {
+// Exception: explicit operator opt-in via DEBUG_ERRORS=1 (wrangler vars) to
+// diagnose a live 500. MUST stay off in production.
+async function errDetail(db, request, e, env) {
   try { console.error('connect/encrypt error:', (e && e.stack) || e); } catch {}
+  try {
+    if (env && env.DEBUG_ERRORS === '1') {
+      const m = String((e && e.message) || e).slice(0, 200);
+      if (m) return ' [debug] ' + m;
+    }
+  } catch {}
   return '';
 }
 
@@ -108,7 +116,7 @@ export async function handleConnect(request, db, panel, env) {
         exdate: v.expiry, device: String(v.key.device_limit | 0),
       }
     });
-  } catch (e) { return J({ status: false, reason: 'SERVER ERROR' + await errDetail(db, request, e) }, 500); }
+  } catch (e) { return J({ status: false, reason: 'SERVER ERROR' + await errDetail(db, request, e, env) }, 500); }
 }
 
 export async function handleEncrypt(request, db, panel, env) {
@@ -147,5 +155,5 @@ export async function handleEncrypt(request, db, panel, env) {
       }
     };
     return J({ status: true, payload: aes256CbcEnc(JSON.stringify(inner), s.aes_key, s.aes_iv) });
-  } catch (e) { return J({ status: false, reason: 'SERVER ERROR' + await errDetail(db, request, e) }, 500); }
+  } catch (e) { return J({ status: false, reason: 'SERVER ERROR' + await errDetail(db, request, e, env) }, 500); }
 }

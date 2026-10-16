@@ -18,6 +18,11 @@ FRONTEND_ORIGIN = ""
 # Legacy fallbacks in src/crypto.js / src/p-connect.js keep old clients
 # working until a documented rotation. See SECURITY.md.
 
+# Temporary remote debugging ONLY: set to "1" to include the exception
+# message in /connect + /encrypt 500 responses. REMOVE after debugging —
+# it leaks internals by design.
+# DEBUG_ERRORS = "1"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "panel"
