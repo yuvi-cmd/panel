@@ -509,6 +509,35 @@ console.log('aes rotation');
   ok(!staleOk, 'latest payload NOT readable with rotated-out keys');
 }
 
+// ---------- 7i. tester decrypt preview (real path, server-side only) ----------
+console.log('test-decrypt preview');
+{
+  const krow = await env.DB.prepare('SELECT key_value,uses,expires_at FROM api_keys WHERE panel_code=? LIMIT 1').bind('YUVI_001').first();
+  const pv = async (body, cookie) => {
+    const r = await call(env, 'POST', '/api/test-decrypt', { cookie, json: body });
+    return { status: r.status, body: await r.json() };
+  };
+  const good = await pv({ user_key: krow.key_value, serial: 'DEV-001', endpoint: 'encrypt' }, ownerCookie);
+  ok(good.status === 200 && good.body.ok === true && good.body.http === 200, 'preview endpoint ok');
+  ok(typeof good.body.raw.payload === 'string', 'preview shows raw encrypted payload');
+  ok(good.body.decrypted && good.body.decrypted.status === true && String(good.body.decrypted.data.real || '').includes(krow.key_value), 'preview decrypts with fresh D1 keys');
+  ok(!JSON.stringify(good.body).match(/5{64}|6{32}/), 'no AES key/iv material leaks into preview');
+  const conn = await pv({ user_key: krow.key_value, serial: 'DEV-001', endpoint: 'connect' }, ownerCookie);
+  ok(conn.body.ok === true && conn.body.raw.status === true && conn.body.decrypted === null, 'connect preview passes raw through');
+  const badKey = await pv({ user_key: 'NOPE', serial: 'X', endpoint: 'encrypt' }, ownerCookie);
+  ok(badKey.body.ok === true && badKey.body.http === 403, 'backend errors pass through with status');
+  const missing = await pv({ user_key: '', serial: '' }, ownerCookie);
+  ok(missing.status === 400, 'missing fields rejected');
+  const anon = await pv({ user_key: krow.key_value, serial: 'DEV-001' });
+  ok(anon.status === 401, 'preview requires login');
+  // rotate must not touch user keys: same row keeps working, uses just count up
+  const before = await env.DB.prepare('SELECT uses,expires_at FROM api_keys WHERE key_value=?').bind(krow.key_value).first();
+  await pv({ user_key: krow.key_value, serial: 'DEV-001', endpoint: 'encrypt' }, ownerCookie);
+  await pv({ user_key: krow.key_value, serial: 'DEV-001', endpoint: 'encrypt' }, ownerCookie);
+  const after = await env.DB.prepare('SELECT uses,expires_at FROM api_keys WHERE key_value=?').bind(krow.key_value).first();
+  ok(after.uses === before.uses + 2 && after.expires_at === before.expires_at, 'rotations/tests never mutate user keys (uses +2, expiry same)');
+}
+
 // ---------- 8. inline-script audit: every rendered page's scripts must parse ----------
 // A single broken <script> kills the whole tag (sidebar toggle, copy buttons,
 // filters). node --check cannot see inside template literals, so audit the

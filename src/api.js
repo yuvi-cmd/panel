@@ -7,6 +7,7 @@
 // All timestamps stored UTC; responses include `_ist` display strings.
 
 import { verifyPassword } from './crypto.js';
+import { createDecipheriv } from 'node:crypto';
 import { deviceFingerprint } from './p-auth.js';
 import {
   apiCors,
@@ -463,6 +464,41 @@ export async function handleApi(request, db, env) {
       sdk_scope: canSeeSdk ? hashScope : null,
     });
   }
+  // ---- decrypt preview: tester runs the REAL endpoint, server decrypts --------
+  // Same /connect + /encrypt handlers, same fresh D1 AES read. AES key/IV
+  // NEVER leave the server; only the already-client-visible payload content
+  // is returned, and only to OA roles testing their own panel.
+  if (path === '/api/test-decrypt' && method === 'POST') {
+    if (!isOA) return J({ ok: false, error: 'Forbidden.' }, 403);
+    const p = await readBody(request);
+    const userKey = cleanStr(p.user_key, 50), serial = cleanStr(p.serial, 100);
+    const ep = String(p.endpoint || 'encrypt').toLowerCase() === 'connect' ? 'connect' : 'encrypt';
+    if (!userKey || !serial) return J({ ok: false, error: 'user_key and serial required.' }, 400);
+    const { handleConnect: hc, handleEncrypt: he } = await import('./p-connect.js');
+    const fd = new FormData();
+    fd.set('game', 'PUBG');
+    fd.set('user_key', userKey);
+    fd.set('serial', serial);
+    const sub = new Request('https://internal/' + ep + '/' + myPanel, { method: 'POST', body: fd });
+    const res = ep === 'connect' ? await hc(sub, db, myPanel, env) : await he(sub, db, myPanel, env);
+    const http = res.status;
+    const text = await res.text();
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch {}
+    let decrypted = null;
+    if (ep === 'encrypt' && parsed && parsed.status === true && typeof parsed.payload === 'string') {
+      const s2 = await db.prepare("SELECT setting_name,setting_value FROM mod_settings WHERE panel_code=? AND setting_name IN ('aes_key','aes_iv')").bind(myPanel).all()
+        .then((r) => Object.fromEntries((r.results || []).map((x) => [x.setting_name, x.setting_value]))).catch(() => ({}));
+      try {
+        const d = createDecipheriv('aes-256-cbc', Buffer.from(s2.aes_key, 'hex'), Buffer.from(s2.aes_iv, 'hex'));
+        decrypted = JSON.parse(Buffer.concat([d.update(parsed.payload, 'base64'), d.final()]).toString('utf8'));
+      } catch {
+        decrypted = { error: 'decrypt failed (keys rotated mid-test?)' };
+      }
+    }
+    return J({ ok: true, http, raw: parsed || text, decrypted });
+  }
+
   // ---- panels (tenant mgmt; super-admin / professor only) -----------------------------------
   if (path === '/api/panels' && method === 'GET') {
     if (!(myId === 1 || isProfessor(sess))) return J({ ok: false, error: 'Forbidden.' }, 403);
