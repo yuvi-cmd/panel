@@ -107,6 +107,42 @@ export function mundoAesKeyHex(salt) {
   return Buffer.from(raw, 'latin1').toString('hex');
 }
 
+// ---------- AES-256-CBC via WebCrypto (native in Workers AND Node) ----------
+// Identical wire format to a node:crypto AES-256-CBC+PKCS#7 implementation
+// (base64 ciphertext), so clients see zero protocol change — but with no
+// runtime-compat dependency on the hot path.
+function hexToBytes(hex) {
+  const s = String(hex || '').trim();
+  const out = new Uint8Array(s.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(s.substr(i * 2, 2), 16);
+  return out;
+}
+
+function bytesToB64(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+function b64ToBytes(b64) {
+  const bin = atob(String(b64 || '').trim());
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+export async function aes256CbcEncrypt(json, keyHex, ivHex) {
+  const key = await crypto.subtle.importKey('raw', hexToBytes(keyHex), { name: 'AES-CBC' }, false, ['encrypt']);
+  const ct = await crypto.subtle.encrypt({ name: 'AES-CBC', iv: hexToBytes(ivHex) }, key, new TextEncoder().encode(String(json)));
+  return bytesToB64(new Uint8Array(ct));
+}
+
+export async function aes256CbcDecryptToString(payloadB64, keyHex, ivHex) {
+  const key = await crypto.subtle.importKey('raw', hexToBytes(keyHex), { name: 'AES-CBC' }, false, ['decrypt']);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-CBC', iv: hexToBytes(ivHex) }, key, b64ToBytes(payloadB64));
+  return new TextDecoder().decode(pt);
+}
+
 // ---------- password (SHA-256 salt$hash, Worker-safe) ----------
 export async function sha256Hex(s) {
   const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));

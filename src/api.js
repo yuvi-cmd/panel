@@ -6,8 +6,7 @@
 // the deployed web app origin when cross-origin (credentials: include).
 // All timestamps stored UTC; responses include `_ist` display strings.
 
-import { verifyPassword } from './crypto.js';
-import { createDecipheriv } from 'node:crypto';
+import { verifyPassword, aes256CbcDecryptToString } from './crypto.js';
 import { deviceFingerprint } from './p-auth.js';
 import {
   apiCors,
@@ -490,8 +489,7 @@ export async function handleApi(request, db, env) {
       const s2 = await db.prepare("SELECT setting_name,setting_value FROM mod_settings WHERE panel_code=? AND setting_name IN ('aes_key','aes_iv')").bind(myPanel).all()
         .then((r) => Object.fromEntries((r.results || []).map((x) => [x.setting_name, x.setting_value]))).catch(() => ({}));
       try {
-        const d = createDecipheriv('aes-256-cbc', Buffer.from(s2.aes_key, 'hex'), Buffer.from(s2.aes_iv, 'hex'));
-        decrypted = JSON.parse(Buffer.concat([d.update(parsed.payload, 'base64'), d.final()]).toString('utf8'));
+        decrypted = JSON.parse(await aes256CbcDecryptToString(parsed.payload, s2.aes_key, s2.aes_iv));
       } catch {
         decrypted = { error: 'decrypt failed (keys rotated mid-test?)' };
       }

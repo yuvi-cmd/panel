@@ -292,6 +292,15 @@ console.log('bcore + crypto');
   ok(await verifyPassword('pw123', h) && !(await verifyPassword('nope', h)), 'password hash roundtrip');
   const enc = bcoreEncrypt('{"sdk_key":"x"}');
   ok(bcoreDecrypt(enc).toString('utf8') === '{"sdk_key":"x"}', 'bcore rc4 roundtrip (compat)');
+  // AES-256-CBC moved to WebCrypto: wire format must stay byte-identical
+  const { aes256CbcEncrypt, aes256CbcDecryptToString } = await import('../src/crypto.js');
+  const { createCipheriv } = await import('node:crypto');
+  const pt = '{"status":true,"data":{"real":"PUBG-K-S-Hunter2"}}';
+  const K = 'a'.repeat(64), IV = 'b'.repeat(32);
+  const nodeCt = (() => { const c = createCipheriv('aes-256-cbc', Buffer.from(K, 'hex'), Buffer.from(IV, 'hex')); return Buffer.concat([c.update(pt, 'utf8'), c.final()]).toString('base64'); })();
+  const subtleCt = await aes256CbcEncrypt(pt, K, IV);
+  ok(nodeCt === subtleCt, 'subtle ciphertext identical to node:crypto (protocol unchanged)');
+  ok(await aes256CbcDecryptToString(subtleCt, K, IV) === pt, 'subtle decrypt roundtrip');
 }
 
 // ---------- 7b. UI themes (settings picker + allowlist) ----------

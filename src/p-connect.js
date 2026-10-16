@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv } from 'node:crypto';
+import { aes256CbcEncrypt } from './crypto.js';
 import { md5hex } from './crypto.js';
 
 export const ARCX_LIBS = {
@@ -34,8 +34,7 @@ export function arcxSaltFromEnv(env) {
 }
 
 export function aes256CbcEnc(json, keyHex, ivHex) {
-  const c = createCipheriv('aes-256-cbc', Buffer.from(keyHex, 'hex'), Buffer.from(ivHex, 'hex'));
-  return Buffer.concat([c.update(json, 'utf8'), c.final()]).toString('base64');
+  return aes256CbcEncrypt(json, keyHex, ivHex);
 }
 
 async function loadSettings(db, panel) {
@@ -154,6 +153,6 @@ export async function handleEncrypt(request, db, panel, env) {
         Floating: get('Floating', 'on'), Memory: get('Memory', 'on'), Setting: get('Setting', 'on'), exdate: v.expiry, device: String(v.key.device_limit | 0),
       }
     };
-    return J({ status: true, payload: aes256CbcEnc(JSON.stringify(inner), s.aes_key, s.aes_iv) });
+    return J({ status: true, payload: await aes256CbcEnc(JSON.stringify(inner), s.aes_key, s.aes_iv) });
   } catch (e) { return J({ status: false, reason: 'SERVER ERROR' + await errDetail(db, request, e, env) }, 500); }
 }
