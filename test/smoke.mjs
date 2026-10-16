@@ -450,6 +450,26 @@ console.log('debug errors flag');
   globalThis.__arcDbReady = '';
 }
 
+// ---------- 7g. extending a pending key must not corrupt duration ----------
+console.log('pending extend');
+{
+  const g = await call(env, 'POST', '/api/generate', { cookie: ownerCookie, json: { duration: '7D', device_limit: 1, bulk_amount: 1 } });
+  const kv = (await g.json()).keys[0];
+  const row = await env.DB.prepare('SELECT id,duration,expires_at FROM api_keys WHERE key_value=?').bind(kv).first();
+  ok(row && !row.expires_at, 'new key is pending (no expiry yet)');
+  const e = await call(env, 'POST', '/api/keys', { cookie: ownerCookie, json: { action: 'edit_key', key_id: row.id, edit_status: '1', extend_val: 5, extend_unit: 'D' } });
+  ok((await e.json()).ok === true, 'extend pending key via API');
+  const after = await env.DB.prepare('SELECT duration,expires_at FROM api_keys WHERE id=?').bind(row.id).first();
+  ok(after.duration === '7D', 'duration untouched (was mangled to 7D+5D before fix)');
+  ok(after.expires_at && Date.parse(after.expires_at.replace(' ', 'T') + 'Z') > Date.now() + 11 * 864e5, 'real expiry set ~12 days out');
+  const fd = new FormData();
+  fd.set('game', 'PUBG');
+  fd.set('user_key', kv);
+  fd.set('serial', 'DEV-EXT');
+  const c = await call(env, 'POST', '/connect/YUVI_001', { form: fd });
+  ok(c.status === 200 && (await c.json()).status === true, 'extended pending key works on first use');
+}
+
 // ---------- 8. inline-script audit: every rendered page's scripts must parse ----------
 // A single broken <script> kills the whole tag (sidebar toggle, copy buttons,
 // filters). node --check cannot see inside template literals, so audit the

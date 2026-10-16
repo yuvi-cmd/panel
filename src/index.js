@@ -389,8 +389,14 @@ export default {
             const ev = parseInt(p.extend_val, 10) || 0, eu = String(p.extend_unit || 'D').toUpperCase() === 'H' ? 'hours' : 'days';
             await db.prepare('UPDATE api_keys SET is_blocked=? WHERE id=?').bind(blk, k.id).run();
             if (ev > 0) {
-              if (!k.expires_at) await db.prepare('UPDATE api_keys SET duration=? WHERE id=?').bind((k.duration || '') + '+' + ev + eu[0], k.id).run().catch(() => {});
-              else await db.prepare("UPDATE api_keys SET expires_at=datetime(expires_at,?) WHERE id=?").bind('+' + ev + ' ' + eu, k.id).run();
+              // FIX: never mangle duration on pending keys ('30D+5D' fails the
+              // first-use parser -> 500). Materialise a real expires_at instead.
+              if (!k.expires_at) {
+                const dm = String(k.duration || '').toUpperCase().match(/^(\d+)([DH])$/);
+                const base = dm ? (dm[2] === 'D' ? (+dm[1]) * 864e5 : (+dm[1]) * 36e5) : 0;
+                const exp = new Date(Date.now() + base + (eu === 'hours' ? ev * 36e5 : ev * 864e5)).toISOString().slice(0, 19).replace('T', ' ');
+                await db.prepare('UPDATE api_keys SET expires_at=? WHERE id=?').bind(exp, k.id).run();
+              } else await db.prepare("UPDATE api_keys SET expires_at=datetime(expires_at,?) WHERE id=?").bind('+' + ev + ' ' + eu, k.id).run();
             }
             if (isOwnerLike && p.edit_server && ['PRIVATE', 'PUBLIC', 'ADMIN', 'SAFE'].includes(String(p.edit_server))) await db.prepare('UPDATE api_keys SET server_type=? WHERE id=?').bind(String(p.edit_server), k.id).run();
             ok = 'Key updated.';
