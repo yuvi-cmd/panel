@@ -28,6 +28,8 @@ import {
 
 const KEY_PRICING = { '2H': 10, '1D': 80, '3D': 150, '7D': 250, '15D': 350, '30D': 500, '60D': 900 };
 const KEY_DURATIONS = ['2H', '1D', '3D', '7D', '15D', '30D', '60D'];
+// Bump on every behaviour-changing release; visible at /api/health.
+const WORKER_VERSION = '1.2.0';
 
 function arcxRand(len) {
   const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -94,8 +96,9 @@ export async function handleApi(request, db, env) {
   const J = (obj, code = 200, extra) => json(obj, code, { ...cors, ...(extra || {}) });
 
   // ---- public ---------------------------------------------------------------
+  // v reports the running build so deploys can be verified remotely.
   if (path === '/api/health') {
-    return J({ ok: true, panel: env.PANEL_CODE || 'YUVI_001', time_utc: new Date().toISOString() });
+    return J({ ok: true, panel: env.PANEL_CODE || 'YUVI_001', time_utc: new Date().toISOString(), v: WORKER_VERSION });
   }
 
   if (path === '/api/login' && method === 'POST') {

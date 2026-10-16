@@ -110,6 +110,9 @@ console.log('json api auth');
 
   const anon = await call(env, 'GET', '/api/dashboard');
   ok(anon.status === 401, 'dashboard requires auth');
+  const h = await call(env, 'GET', '/api/health');
+  const hb = await h.json();
+  ok(h.status === 200 && hb.ok === true && typeof hb.v === 'string', 'health reports running version (' + hb.v + ')');
 }
 
 // ---------- 3. generate + keys ----------
