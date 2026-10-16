@@ -470,6 +470,45 @@ console.log('pending extend');
   ok(c.status === 200 && (await c.json()).status === true, 'extended pending key works on first use');
 }
 
+// ---------- 7h. AES rotation takes effect immediately, every time ----------
+// Proves /encrypt always uses the CURRENT keys (fresh D1 read per request,
+// zero caching): rotate 3x, each payload must decrypt ONLY with its own keys.
+console.log('aes rotation');
+{
+  const { createDecipheriv } = await import('node:crypto');
+  const dec = (payload, keyHex, ivHex) => {
+    const d = createDecipheriv('aes-256-cbc', Buffer.from(keyHex, 'hex'), Buffer.from(ivHex, 'hex'));
+    return Buffer.concat([d.update(payload, 'base64'), d.final()]).toString('utf8');
+  };
+  const setAES = async (k, v) => {
+    await env.DB.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES (?,?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value").bind('aes_key', k, 'YUVI_001').run();
+    await env.DB.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES (?,?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value").bind('aes_iv', v, 'YUVI_001').run();
+  };
+  const krow = await env.DB.prepare('SELECT key_value FROM api_keys WHERE panel_code=? LIMIT 1').bind('YUVI_001').first();
+  const encCall = async () => {
+    const f = new FormData();
+    f.set('game', 'PUBG');
+    f.set('user_key', krow.key_value);
+    f.set('serial', 'DEV-001'); // already bound in §6: reuse avoids device-limit noise
+    const r = await call(env, 'POST', '/encrypt/YUVI_001', { form: f });
+    return { status: r.status, body: await r.json() };
+  };
+  const K = ['1'.repeat(64), '3'.repeat(64), '5'.repeat(64)];
+  const V = ['2'.repeat(32), '4'.repeat(32), '6'.repeat(32)];
+  const payloads = [];
+  for (let i = 0; i < 3; i++) {
+    await setAES(K[i], V[i]); // rotate (1st set + 2 rotations)
+    const r = await encCall();
+    ok(r.status === 200 && typeof r.body.payload === 'string', 'encrypt ok with AES set #' + (i + 1));
+    payloads.push(r.body.payload);
+    ok(JSON.parse(dec(r.body.payload, K[i], V[i])).status === true, 'payload #' + (i + 1) + ' decrypts with current keys');
+  }
+  ok(new Set(payloads).size === 3, 'every rotation changes the ciphertext');
+  let staleOk = true;
+  try { JSON.parse(dec(payloads[2], K[0], V[0])); } catch { staleOk = false; }
+  ok(!staleOk, 'latest payload NOT readable with rotated-out keys');
+}
+
 // ---------- 8. inline-script audit: every rendered page's scripts must parse ----------
 // A single broken <script> kills the whole tag (sidebar toggle, copy buttons,
 // filters). node --check cannot see inside template literals, so audit the
