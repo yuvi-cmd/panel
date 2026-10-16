@@ -45,6 +45,19 @@ const MIGRATE_COLS = [
   ['panels', 'encryption_subscription', 'INTEGER NOT NULL DEFAULT 0'], ['panels', 'tg_subscription', 'INTEGER NOT NULL DEFAULT 0'],
   ['panels', 'mundo_service', 'INTEGER NOT NULL DEFAULT 0'], ['panels', 'admin_role', 'INTEGER NOT NULL DEFAULT 0'], ['panels', 'reseller_role', 'INTEGER NOT NULL DEFAULT 0'],
   ['api_keys', 'server_type', "TEXT NOT NULL DEFAULT 'PRIVATE'"],
+  // Full hot-path coverage: old databases (pre-column) otherwise throw on
+  // device-bind writes AFTER a real key is found -> HTTP 500 SERVER ERROR.
+  // Each ALTER is a no-op when the column already exists.
+  ['users', 'username', 'TEXT'], ['users', 'password_hash', 'TEXT'], ['users', 'role', 'TEXT'],
+  ['users', 'panel_code', 'TEXT'], ['users', 'created_at', 'TEXT'],
+  ['panels', 'is_active', 'INTEGER NOT NULL DEFAULT 1'],
+  ['api_keys', 'key_value', 'TEXT'], ['api_keys', 'duration', 'TEXT'],
+  ['api_keys', 'device_limit', 'INTEGER NOT NULL DEFAULT 1'], ['api_keys', 'uses', 'INTEGER NOT NULL DEFAULT 0'],
+  ['api_keys', 'expires_at', 'TEXT'], ['api_keys', 'panel_code', 'TEXT'],
+  ['api_keys', 'is_active', 'INTEGER NOT NULL DEFAULT 1'], ['api_keys', 'is_blocked', 'INTEGER NOT NULL DEFAULT 0'],
+  ['api_keys', 'created_by', 'INTEGER NOT NULL DEFAULT 1'],
+  ['key_devices', 'key_id', 'INTEGER'], ['key_devices', 'device_uuid', 'TEXT'],
+  ['key_devices', 'panel_code', 'TEXT'], ['key_devices', 'last_seen', 'TEXT'],
 ];
 
 async function ensureDB(db, panelCode) {

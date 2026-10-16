@@ -341,6 +341,60 @@ console.log('custom accent');
   ok(sp.includes('Custom color') && sp.includes('#123abc'), 'picker shows current custom color');
 }
 
+// ---------- 7d. legacy DB self-heal (old DB + real key must not 500) ----------
+// Simulates a pre-column database: tables exist but lack columns the hot
+// path writes (key_devices.panel_code, api_keys.expires_at/uses, ...).
+// ensureDB must heal via ALTERs; /connect + /encrypt must then succeed.
+console.log('legacy db heal');
+{
+  const { DatabaseSync } = await import('node:sqlite');
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec(`
+    CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'RESELLER', panel_code TEXT NOT NULL DEFAULT 'YUVI_001', balance INTEGER NOT NULL DEFAULT 0, created_at TEXT);
+    CREATE TABLE panels (panel_code TEXT PRIMARY KEY, is_active INTEGER NOT NULL DEFAULT 1);
+    CREATE TABLE api_keys (id INTEGER PRIMARY KEY AUTOINCREMENT, key_value TEXT NOT NULL, duration TEXT NOT NULL DEFAULT '30D', device_limit INTEGER NOT NULL DEFAULT 1, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', created_by INTEGER NOT NULL DEFAULT 1);
+    CREATE TABLE key_devices (key_id INTEGER NOT NULL, device_uuid TEXT NOT NULL, PRIMARY KEY (key_id, device_uuid));
+    CREATE TABLE mod_settings (setting_name TEXT NOT NULL, setting_value TEXT, panel_code TEXT NOT NULL, PRIMARY KEY (setting_name, panel_code));
+  `);
+  const wrap = (s, a) => ({
+    first: async () => { try { return s.get(...a) ?? null; } catch { return null; } },
+    all: async () => { try { return { results: s.all(...a) }; } catch { return { results: [] }; } },
+    run: async () => { const i = s.run(...a); return { meta: { last_row_id: Number(i.lastInsertRowid), changes: i.changes } }; },
+  });
+  const db2 = {
+    prepare: (sql) => { const st = sqlite.prepare(sql); const b = (...a) => wrap(st, a); return { bind: b, first: () => b().first(), all: () => b().all(), run: () => b().run() }; },
+    exec: async (sql) => sqlite.exec(sql),
+  };
+  const env2 = { DB: db2, PANEL_CODE: 'YUVI_001', PANEL_NAME: 'T' };
+  const call2 = async (method, path, opts = {}) => {
+    const h = { ...(opts.headers || {}) };
+    if (opts.cookie) h.Cookie = opts.cookie;
+    let body;
+    if (opts.json !== undefined) { h['Content-Type'] = 'application/json'; body = JSON.stringify(opts.json); }
+    else if (opts.form !== undefined) body = opts.form;
+    return app.fetch(new Request('https://panel.test' + path, { method, headers: h, body }), env2, {});
+  };
+  const { hashPassword: hp } = await import('../src/crypto.js');
+  await db2.prepare("INSERT INTO users (username,password_hash,role,panel_code) VALUES (?,?,?,?)").bind('oldboss', await hp('pw1234'), 'OWNER', 'YUVI_001').run();
+  await db2.prepare("INSERT INTO panels (panel_code,is_active) VALUES ('YUVI_001',1)").run();
+  await db2.prepare("INSERT INTO api_keys (key_value,duration,device_limit,panel_code,created_by) VALUES ('30D-LEGACYKEY01', '30D',1,'YUVI_001',1)").run();
+  globalThis.__arcDbReady = ''; // force ensureDB to run (and heal) on this DB
+  const fd = new FormData();
+  fd.set('game', 'PUBG');
+  fd.set('user_key', '30D-LEGACYKEY01');
+  fd.set('serial', 'OLDDEV');
+  const c = await call2('POST', '/connect/YUVI_001', { form: fd });
+  const cb = await c.json().catch(() => ({}));
+  ok(c.status === 200 && cb.status === true, 'legacy DB: connect binds device without 500 (got ' + c.status + ')');
+  await db2.prepare("UPDATE panels SET expires_at='2099-01-01 00:00:00' WHERE panel_code='YUVI_001'").bind().run();
+  await db2.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES ('aes_key',?,?)").bind('e'.repeat(64), 'YUVI_001').run();
+  await db2.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES ('aes_iv',?,?)").bind('f'.repeat(32), 'YUVI_001').run();
+  const e = await call2('POST', '/encrypt/YUVI_001', { form: fd });
+  const eb = await e.json().catch(() => ({}));
+  ok(e.status === 200 && eb.status === true && typeof eb.payload === 'string', 'legacy DB: encrypt returns payload after heal');
+  globalThis.__arcDbReady = '';
+}
+
 // ---------- 8. inline-script audit: every rendered page's scripts must parse ----------
 // A single broken <script> kills the whole tag (sidebar toggle, copy buttons,
 // filters). node --check cannot see inside template literals, so audit the
