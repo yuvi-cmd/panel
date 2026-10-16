@@ -248,6 +248,22 @@ console.log('connect + encrypt');
   const e2 = await call(env, 'POST', '/encrypt/YUVI_001', { form: fd });
   const e2b = await e2.json();
   ok(e2.status === 200 && e2b.status === true && typeof e2b.payload === 'string', 'encrypt returns payload after activation+aes');
+
+  // panels created with a duration honour panels.expires_at without voucher
+  env.DB.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES ('aes_key',?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value").bind('c'.repeat(64), 'PANEL_TWO').run();
+  env.DB.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES ('aes_iv',?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value").bind('d'.repeat(32), 'PANEL_TWO').run();
+  const k2row = await env.DB.prepare('SELECT key_value FROM api_keys WHERE panel_code=? LIMIT 1').bind('PANEL_TWO').first();
+  const fd2 = new FormData();
+  fd2.set('game', 'PUBG');
+  fd2.set('user_key', k2row.key_value);
+  fd2.set('serial', 'DEV-002');
+  const e3 = await call(env, 'POST', '/encrypt/PANEL_TWO', { form: fd2 });
+  const e3b = await e3.json();
+  ok(e3.status === 200 && e3b.status === true && typeof e3b.payload === 'string', 'encrypt honours panels.expires_at (no voucher needed)');
+  // ...but an expired panel duration still blocks
+  await env.DB.prepare("UPDATE panels SET expires_at='2000-01-01 00:00:00' WHERE panel_code='PANEL_TWO'").bind().run();
+  const e4 = await call(env, 'POST', '/encrypt/PANEL_TWO', { form: fd2 });
+  ok(e4.status === 403 && (await e4.json()).reason === 'PANEL NOT ACTIVATED', 'expired panel duration blocks encrypt');
 }
 
 // ---------- 7. bcore tenant-squatting fix + crypto helpers ----------

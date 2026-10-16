@@ -122,11 +122,14 @@ export async function handleEncrypt(request, db, panel, env) {
   const game = clean(fd.get('game'), 50), userKey = clean(fd.get('user_key'), 50), serial = clean(fd.get('serial'), 100);
   if (!game || !userKey || !serial || game !== 'PUBG') return J({ status: false, reason: 'INVALID PARAMETER' }, 400);
   try {
-    const prow = await db.prepare('SELECT is_active FROM panels WHERE panel_code=?').bind(panel).first().catch(() => null);
+    const prow = await db.prepare('SELECT is_active,expires_at FROM panels WHERE panel_code=?').bind(panel).first().catch(() => null);
     if (!prow || (prow.is_active | 0) !== 1) return J({ status: false, reason: 'USER OR GAME NOT REGISTERED' }, 403);
-    // panel expiry via panel owner
+    // Panel activation: voucher redeem sets users.panel_expiry, but panels
+    // created with a duration already carry panels.expires_at (previously
+    // written but never honoured — /encrypt stayed blocked). Either counts.
+    const notPast = (s) => { const ms = Date.parse(String(s || '').replace(' ', 'T') + 'Z'); return !isNaN(ms) && ms > Date.now(); };
     const owner = await db.prepare("SELECT panel_expiry FROM users WHERE panel_code=? AND role='OWNER' ORDER BY id ASC LIMIT 1").bind(panel).first().catch(() => null);
-    if (!owner || !owner.panel_expiry || Date.parse(String(owner.panel_expiry).replace(' ', 'T') + 'Z') < Date.now()) return J({ status: false, reason: 'PANEL NOT ACTIVATED' }, 403);
+    if (!notPast(owner?.panel_expiry) && !notPast(prow.expires_at)) return J({ status: false, reason: 'PANEL NOT ACTIVATED' }, 403);
     const s = await loadSettings(db, panel);
     if (!s.aes_key || !s.aes_iv || !/^[0-9a-fA-F]{64}$/.test(s.aes_key) || !/^[0-9a-fA-F]{32}$/.test(s.aes_iv)) return J({ status: false, reason: 'ENCRYPTION NOT CONFIGURED' }, 500);
     const mnt = await db.prepare('SELECT is_active,reason FROM mod_maintenance WHERE panel_code=?').bind(panel).first().catch(() => null);
