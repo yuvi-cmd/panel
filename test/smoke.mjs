@@ -395,6 +395,41 @@ console.log('legacy db heal');
   globalThis.__arcDbReady = '';
 }
 
+// ---------- 7e. fresh install: empty DB auto-creates full schema ----------
+// Proves zero-manual-SQL setup: first request builds all 18 tables + indexes.
+console.log('fresh install');
+{
+  const { DatabaseSync: D3 } = await import('node:sqlite');
+  const sqlite3 = new D3(':memory:'); // zero tables
+  const wrap3 = (s, a) => ({
+    first: async () => { try { return s.get(...a) ?? null; } catch { return null; } },
+    all: async () => { try { return { results: s.all(...a) }; } catch { return { results: [] }; } },
+    run: async () => { const i = s.run(...a); return { meta: { last_row_id: Number(i.lastInsertRowid), changes: i.changes } }; },
+  });
+  const db3 = {
+    prepare: (sql) => { const st = sqlite3.prepare(sql); const b = (...a) => wrap3(st, a); return { bind: b, first: () => b().first(), all: () => b().all(), run: () => b().run() }; },
+    exec: async (sql) => sqlite3.exec(sql),
+  };
+  const env3 = { DB: db3, PANEL_CODE: 'YUVI_001', PANEL_NAME: 'T' };
+  globalThis.__arcDbReady = ''; // force cold-start path
+  const r0 = await app.fetch(new Request('https://panel.test/setup'), env3, {});
+  ok(r0.status === 200, 'GET /setup renders on empty DB (got ' + r0.status + ')');
+  const tables = (await db3.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all()).results.map((r) => r.name).sort();
+  const want = ['activation_keys', 'api_keys', 'bcore_key_bindings', 'bcore_keys', 'key_devices', 'loader_config', 'loader_files', 'mod_loaders', 'mod_maintenance', 'mod_settings', 'mundo_key_bindings', 'mundo_keys', 'panels', 'referrals', 'sdk_hash_vault', 'sdk_server_status', 'sessions', 'users'];
+  ok(JSON.stringify(tables) === JSON.stringify(want), 'all 18 tables auto-created (' + tables.length + '/18)');
+  const idx = (await db3.prepare("SELECT name FROM sqlite_master WHERE type='index' AND sql IS NOT NULL").all()).results.map((r) => r.name);
+  ok(['idx_users_panel', 'idx_api_panel', 'idx_dev_panel', 'idx_sess_user'].every((n) => idx.includes(n)), 'indexes auto-created');
+  const fd = new FormData();
+  fd.set('username', 'freshboss');
+  fd.set('password', 'pw1234');
+  const r1 = await app.fetch(new Request('https://panel.test/setup', { method: 'POST', body: fd }), env3, {});
+  const ck3 = (r1.headers.get('Set-Cookie') || '').match(/sdk_session=([^;]+)/)?.[0] || '';
+  ok(r1.status === 302 && !!ck3, 'first admin created with zero manual SQL');
+  const d3 = await app.fetch(new Request('https://panel.test/dashboard', { headers: { Cookie: ck3 } }), env3, {});
+  ok(d3.status === 200, 'dashboard works right after auto-setup');
+  globalThis.__arcDbReady = '';
+}
+
 // ---------- 8. inline-script audit: every rendered page's scripts must parse ----------
 // A single broken <script> kills the whole tag (sidebar toggle, copy buttons,
 // filters). node --check cannot see inside template literals, so audit the

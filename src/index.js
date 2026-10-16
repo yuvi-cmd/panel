@@ -35,6 +35,13 @@ CREATE TABLE IF NOT EXISTS sdk_hash_vault (id INTEGER PRIMARY KEY AUTOINCREMENT,
 CREATE TABLE IF NOT EXISTS sdk_server_status (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', engine TEXT NOT NULL, maintenance_mode INTEGER NOT NULL DEFAULT 0, maintenance_message TEXT, updated_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE(panel_code, engine));
 CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at INTEGER NOT NULL);
 `;
+const INDEX_SQL = `
+CREATE INDEX IF NOT EXISTS idx_dev_panel ON key_devices(panel_code);
+CREATE INDEX IF NOT EXISTS idx_loader_panel ON loader_files(panel_code);
+CREATE INDEX IF NOT EXISTS idx_mundo_panel ON mundo_keys(panel_code);
+CREATE INDEX IF NOT EXISTS idx_bcore_panel ON bcore_keys(panel_code);
+CREATE INDEX IF NOT EXISTS idx_sess_user ON sessions(user_id);
+`;
 const MIGRATE_COLS = [
   ['users', 'full_name', "TEXT NOT NULL DEFAULT ''"], ['users', 'invited_by', 'INTEGER'],
   ['users', 'balance', 'INTEGER NOT NULL DEFAULT 0'], ['users', 'referral_limit', 'INTEGER NOT NULL DEFAULT 0'],
@@ -68,6 +75,8 @@ async function ensureDB(db, panelCode) {
   for (const [t, c, def] of MIGRATE_COLS) {
     try { await db.prepare('ALTER TABLE ' + t + ' ADD COLUMN ' + c + ' ' + def).run(); } catch {}
   }
+  // Indexes last: they reference columns that legacy DBs only gain above.
+  try { await db.exec(INDEX_SQL); } catch {}
   try { await db.prepare('INSERT OR IGNORE INTO panels (panel_code, is_active) VALUES (?,1)').bind(panelCode).run(); } catch {}
   globalThis.__arcDbReady = panelCode;
 }
