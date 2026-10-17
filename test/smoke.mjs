@@ -180,6 +180,85 @@ console.log('users admin');
   ok(!!leg && leg.role !== 'OWNER', 'legacy OWNER referral coerced to ' + (leg && leg.role));
 }
 
+// ---------- 4b. tenant account limit + auto-join (Tenants page) ----------
+console.log('tenant account limit + auto join');
+{
+  const mkPanel = async (code, lim) => {
+    const fd = new FormData();
+    fd.set('action', 'create');
+    fd.set('custom_code', code);
+    fd.set('duration', '30');
+    fd.set('account_limit', String(lim));
+    return call(env, 'POST', '/create-panel', { form: fd, cookie: ownerCookie });
+  };
+  const setLimit = async (code, lim) => {
+    const fd = new FormData();
+    fd.set('action', 'set_limit');
+    fd.set('target_panel', code);
+    fd.set('account_limit', String(lim));
+    return call(env, 'POST', '/create-panel', { form: fd, cookie: ownerCookie });
+  };
+  const autoOn = async (code) => {
+    const fd = new FormData();
+    fd.set('action', 'auto_join');
+    fd.set('target_panel', code);
+    return call(env, 'POST', '/create-panel', { form: fd, cookie: ownerCookie });
+  };
+  const panelRow = async (code) => env.DB.prepare('SELECT account_limit, auto_join FROM panels WHERE panel_code=?').bind(code).first();
+
+  const c1 = await mkPanel('LIMITED', 2);
+  ok(c1.status === 200, '/create-panel with account limit renders');
+  const p1 = await panelRow('LIMITED');
+  ok(p1 && (p1.account_limit | 0) === 2 && (p1.auto_join | 0) === 0, 'panel created with account_limit=2');
+
+  await setLimit('LIMITED', 5);
+  ok((((await panelRow('LIMITED')) || {}).account_limit | 0) === 5, 'limit increased to 5 (DB)');
+  await setLimit('LIMITED', 0);
+  ok((((await panelRow('LIMITED')) || {}).account_limit | 0) === 0, 'limit back to unlimited (0)');
+
+  await autoOn('LIMITED');
+  const jh1 = await (await call(env, 'GET', '/join-panel')).text();
+  ok(jh1.includes('value="LIMITED"'), 'join page prefills auto tenant code');
+  ok((((await panelRow('LIMITED')) || {}).auto_join | 0) === 1, 'auto_join=1 saved in DB');
+
+  await mkPanel('AUTO2', 0);
+  await autoOn('AUTO2');
+  ok((((await panelRow('LIMITED')) || {}).auto_join | 0) === 0, 'auto-join is single-winner (first cleared)');
+  const jh2 = await (await call(env, 'GET', '/join-panel')).text();
+  ok(jh2.includes('value="AUTO2"'), 'join page follows latest auto tenant');
+  await autoOn('AUTO2');
+  const noAuto = (await env.DB.prepare('SELECT panel_code FROM panels WHERE auto_join=1').bind().all()).results;
+  const jh3 = await (await call(env, 'GET', '/join-panel')).text();
+  ok(noAuto.length === 0 && !jh3.includes('value="AUTO2"'), 'auto-join toggles off cleanly');
+
+  await mkPanel('LIM3', 2);
+  env.DB.prepare("INSERT INTO users (full_name,username,password_hash,role,panel_code) VALUES ('U1','lim_u1','x','RESELLER','LIM3')").bind().run();
+  env.DB.prepare("INSERT INTO users (full_name,username,password_hash,role,panel_code) VALUES ('U2','lim_u2','x','RESELLER','LIM3')").bind().run();
+  const jfd = new FormData();
+  jfd.set('panel_code', 'LIM3');
+  jfd.set('username', 'lim_owner');
+  jfd.set('password', 'pass1234');
+  const jres = await call(env, 'POST', '/join-panel', { form: jfd });
+  const jhtml = await jres.text();
+  ok(jres.status === 200 && jhtml.includes('account limit full'), 'join blocked when tenant limit full (2/2)');
+  await setLimit('LIM3', 3);
+  const jres2 = await call(env, 'POST', '/join-panel', { form: jfd });
+  ok(jres2.status === 302, 'join allowed after limit increased');
+
+  env.DB.prepare("INSERT INTO referrals (code,role,duration,balance,panel_code,created_by) VALUES ('REF-LIM3','RESELLER',30,0,'LIM3',1)").bind().run();
+  const rfd = new FormData();
+  rfd.set('full_name', 'Extra User');
+  rfd.set('username', 'lim_extra');
+  rfd.set('password', 'pass1234');
+  rfd.set('referral_code', 'REF-LIM3');
+  const rres = await call(env, 'POST', '/register', { form: rfd });
+  const rhtml = await rres.text();
+  ok(rres.status === 200 && rhtml.includes('account limit full'), 'referral register blocked when tenant full (3/3)');
+  await setLimit('LIM3', 4);
+  const rres2 = await call(env, 'POST', '/register', { form: rfd });
+  ok(rres2.status === 302, 'referral register allowed after limit increase');
+}
+
 // ---------- 5. tenant isolation ----------
 console.log('tenant isolation');
 let panel2KeyId = 0;

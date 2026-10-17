@@ -80,7 +80,7 @@ export function resetPage(o) {
 export function joinPage(o) {
   const inner = alerts(o.error || '', o.msg || '')
     + '<form method="POST" class="space-y-3.5">'
-    + '<div><label class="label-dark">Panel Code</label><input type="text" name="panel_code" required class="clay-input font-mono" placeholder="YUVI_001"></div>'
+    + '<div><label class="label-dark">Panel Code</label><input type="text" name="panel_code" required class="clay-input font-mono" placeholder="YUVI_001" value="' + esc(o.defaultCode || '') + '"></div>'
     + '<div><label class="label-dark">Username</label><input type="text" name="username" required class="clay-input"></div>'
     + '<div><label class="label-dark">Password</label><input type="password" name="password" required class="clay-input"></div>'
     + '<div class="text-[11px] text-slate-500 bg-slate-50 border rounded-xl p-3">Sirf us panel me jo abhi khaali hai (koi OWNER nahi) — pehla admin banoge.</div>'

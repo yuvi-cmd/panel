@@ -1,4 +1,19 @@
-# CHANGES.md — this pass (2026-10-14)
+# CHANGES.md
+
+## Pass 2026-10-17 — tenant account limits + auto join
+
+- `panels.account_limit` (0 = unlimited): set while creating a tenant or
+  change later with the stepper on the Tenants page — persisted in D1.
+- `panels.auto_join`: mark any tenant as auto → `/join-panel` pre-fills
+  its panel code by default (single winner; toggling off clears).
+- Enforcement: `/join-panel` claims and `/register` (referral) are
+  rejected once a tenant reaches its account limit.
+- `/create-panel`: new `set_limit` + `auto_join` actions; create form
+  accepts `account_limit`; cards show used/limit, remaining, AUTO badge.
+- `schema.sql` + `ensureDB` migration add both columns to existing DBs.
+- `test/smoke.mjs`: +13 tests — **125/125 passing** on Node 26.
+
+## Pass 2026-10-14 — full panel hardening + web port
 
 ## Worker (`worker/`)
 

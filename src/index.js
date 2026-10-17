@@ -15,7 +15,7 @@ import { handleConnect, handleEncrypt } from './p-connect.js';
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL DEFAULT '', username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'RESELLER', invited_by INTEGER, balance INTEGER NOT NULL DEFAULT 0, referral_limit INTEGER NOT NULL DEFAULT 0, can_generate_referral INTEGER NOT NULL DEFAULT 1, validity TEXT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', is_blocked INTEGER NOT NULL DEFAULT 0, panel_expiry TEXT, device_fingerprint TEXT, last_login TEXT, last_reset TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE INDEX IF NOT EXISTS idx_users_panel ON users(panel_code);
-CREATE TABLE IF NOT EXISTS panels (panel_code TEXT PRIMARY KEY, duration INTEGER NOT NULL DEFAULT 30, expires_at TEXT, is_active INTEGER NOT NULL DEFAULT 1, encryption_subscription INTEGER NOT NULL DEFAULT 0, tg_subscription INTEGER NOT NULL DEFAULT 0, mundo_service INTEGER NOT NULL DEFAULT 0, admin_role INTEGER NOT NULL DEFAULT 0, reseller_role INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS panels (panel_code TEXT PRIMARY KEY, duration INTEGER NOT NULL DEFAULT 30, expires_at TEXT, is_active INTEGER NOT NULL DEFAULT 1, encryption_subscription INTEGER NOT NULL DEFAULT 0, tg_subscription INTEGER NOT NULL DEFAULT 0, mundo_service INTEGER NOT NULL DEFAULT 0, admin_role INTEGER NOT NULL DEFAULT 0, reseller_role INTEGER NOT NULL DEFAULT 0, account_limit INTEGER NOT NULL DEFAULT 0, auto_join INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS api_keys (id INTEGER PRIMARY KEY AUTOINCREMENT, key_value TEXT NOT NULL, duration TEXT NOT NULL DEFAULT '30D', device_limit INTEGER NOT NULL DEFAULT 1, uses INTEGER NOT NULL DEFAULT 0, expires_at TEXT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', is_active INTEGER NOT NULL DEFAULT 1, is_blocked INTEGER NOT NULL DEFAULT 0, created_by INTEGER NOT NULL DEFAULT 1, server_type TEXT NOT NULL DEFAULT 'PRIVATE', UNIQUE(key_value, panel_code));
 CREATE INDEX IF NOT EXISTS idx_api_panel ON api_keys(panel_code);
 CREATE INDEX IF NOT EXISTS idx_api_created ON api_keys(created_by);
@@ -58,6 +58,7 @@ const MIGRATE_COLS = [
   ['users', 'username', 'TEXT'], ['users', 'password_hash', 'TEXT'], ['users', 'role', 'TEXT'],
   ['users', 'panel_code', 'TEXT'], ['users', 'created_at', 'TEXT'],
   ['panels', 'is_active', 'INTEGER NOT NULL DEFAULT 1'],
+  ['panels', 'account_limit', 'INTEGER NOT NULL DEFAULT 0'], ['panels', 'auto_join', 'INTEGER NOT NULL DEFAULT 0'],
   ['api_keys', 'key_value', 'TEXT'], ['api_keys', 'duration', 'TEXT'],
   ['api_keys', 'device_limit', 'INTEGER NOT NULL DEFAULT 1'], ['api_keys', 'uses', 'INTEGER NOT NULL DEFAULT 0'],
   ['api_keys', 'expires_at', 'TEXT'], ['api_keys', 'panel_code', 'TEXT'],
@@ -216,6 +217,11 @@ export default {
         const ref = await db.prepare('SELECT * FROM referrals WHERE code=? AND used=0').bind(code).first().catch(() => null);
         if (!ref) return html(registerPage({ error: 'Invalid ya used referral code.', panelName: envName }));
         if (await db.prepare('SELECT id FROM users WHERE username=?').bind(u).first().catch(() => null)) return html(registerPage({ error: 'Username already taken.', panelName: envName }));
+        const plim = (((await db.prepare('SELECT account_limit FROM panels WHERE panel_code=?').bind(ref.panel_code).first().catch(() => null)) || {}).account_limit) | 0;
+        if (plim > 0) {
+          const pcnt = ((await db.prepare('SELECT COUNT(*) c FROM users WHERE panel_code=?').bind(ref.panel_code).first().catch(() => ({ c: 0 }))).c) | 0;
+          if (pcnt >= plim) return html(registerPage({ error: 'Tenant account limit full (' + pcnt + '/' + plim + ').', panelName: envName }));
+        }
         const validity = new Date(Date.now() + (ref.duration | 0) * 864e5).toISOString().slice(0, 19).replace('T', ' ');
         // FIX (privilege-escalation): referral registration may only create
         // ADMIN or RESELLER accounts. Legacy OWNER-role referrals are coerced
@@ -248,16 +254,22 @@ export default {
         const p = await formParams(request);
         const pc = String(p.panel_code || '').toUpperCase().replace(/\s+/g, '');
         const u = String(p.username || '').trim(), pw = String(p.password || '');
-        if (!pc || u.length < 3 || pw.length < 4) return html(joinPage({ error: 'Sahi panel code / username / password (min 4) do.', panelName: envName }));
+        if (!pc || u.length < 3 || pw.length < 4) return html(joinPage({ error: 'Sahi panel code / username / password (min 4) do.', panelName: envName, defaultCode: pc }));
         const prow = await db.prepare('SELECT * FROM panels WHERE panel_code=?').bind(pc).first().catch(() => null);
-        if (!prow) return html(joinPage({ error: 'Panel not found.', panelName: envName }));
+        if (!prow) return html(joinPage({ error: 'Panel not found.', panelName: envName, defaultCode: pc }));
         const own = await db.prepare("SELECT id FROM users WHERE panel_code=? AND role='OWNER'").bind(pc).first().catch(() => null);
-        if (own) return html(joinPage({ error: 'Panel already claimed hai.', panelName: envName }));
-        if (await db.prepare('SELECT id FROM users WHERE username=?').bind(u).first().catch(() => null)) return html(joinPage({ error: 'Username taken.', panelName: envName }));
+        if (own) return html(joinPage({ error: 'Panel already claimed hai.', panelName: envName, defaultCode: pc }));
+        if (await db.prepare('SELECT id FROM users WHERE username=?').bind(u).first().catch(() => null)) return html(joinPage({ error: 'Username taken.', panelName: envName, defaultCode: pc }));
+        const lim = prow.account_limit | 0;
+        if (lim > 0) {
+          const cnt = ((await db.prepare('SELECT COUNT(*) c FROM users WHERE panel_code=?').bind(pc).first().catch(() => ({ c: 0 }))).c) | 0;
+          if (cnt >= lim) return html(joinPage({ error: 'Tenant account limit full (' + cnt + '/' + lim + ').', panelName: envName, defaultCode: pc }));
+        }
         await db.prepare('INSERT INTO users (full_name,username,password_hash,role,balance,validity,panel_code) VALUES (?,?,?,?,?,?,?)').bind(pc + ' Admin', u, await hashPassword(pw), 'OWNER', 999999, prow.expires_at || null, pc).run();
         return redir('/login?msg=' + encodeURIComponent('Panel claimed! Please login.'));
       }
-      return html(joinPage({ panelName: envName }));
+      const defRow = await db.prepare('SELECT panel_code FROM panels WHERE auto_join=1 LIMIT 1').first().catch(() => null);
+      return html(joinPage({ panelName: envName, defaultCode: (defRow && defRow.panel_code) || '' }));
     }
     if (path === '/logout') {
       const t = parseCookies(request)['sdk_session'];
@@ -665,15 +677,25 @@ export default {
           let code = String(p.custom_code || '').toUpperCase().replace(/[^A-Z0-9_]/g, '').slice(0, 15);
           if (!code) { const rb = new Uint8Array(3); crypto.getRandomValues(rb); code = 'PNL' + [...rb].map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase(); }
           const dur = Math.max(1, parseInt(p.duration, 10) || 30);
+          const lim = Math.max(0, Math.min(100000, parseInt(p.account_limit, 10) || 0));
           if (await db.prepare('SELECT panel_code FROM panels WHERE panel_code=?').bind(code).first().catch(() => null)) error = 'Panel code exists.';
           else {
             const exp = new Date(Date.now() + dur * 864e5).toISOString().slice(0, 19).replace('T', ' ');
-            await db.prepare('INSERT INTO panels (panel_code,duration,expires_at,is_active) VALUES (?,?,?,1)').bind(code, dur, exp).run();
-            ok = 'Panel ' + code + ' created.';
+            await db.prepare('INSERT INTO panels (panel_code,duration,expires_at,is_active,account_limit) VALUES (?,?,?,1,?)').bind(code, dur, exp, lim).run();
+            ok = 'Panel ' + code + ' created (acct limit: ' + (lim === 0 ? 'unlimited' : lim) + ').';
           }
         } else if (p.action === 'toggle_status' && p.target_panel) {
           if (String(p.target_panel) === 'YUVI_001' && mainPanel === 'YUVI_001') error = 'Main panel protected.';
           else { await db.prepare('UPDATE panels SET is_active=1-is_active WHERE panel_code=?').bind(String(p.target_panel)).run(); ok = 'Status toggled.'; }
+        } else if (p.action === 'set_limit' && p.target_panel) {
+          const lim = Math.max(0, Math.min(100000, parseInt(p.account_limit, 10) || 0));
+          await db.prepare('UPDATE panels SET account_limit=? WHERE panel_code=?').bind(lim, String(p.target_panel)).run();
+          ok = String(p.target_panel) + ' account limit: ' + (lim === 0 ? 'unlimited' : lim) + '.';
+        } else if (p.action === 'auto_join' && p.target_panel) {
+          const t = String(p.target_panel);
+          const cur = await db.prepare('SELECT auto_join FROM panels WHERE panel_code=?').bind(t).first().catch(() => null);
+          if (cur && (cur.auto_join | 0) === 1) { await db.prepare('UPDATE panels SET auto_join=0').run(); ok = 'Auto-join OFF.'; }
+          else { await db.prepare('UPDATE panels SET auto_join=CASE WHEN panel_code=? THEN 1 ELSE 0 END').bind(t).run(); ok = 'Auto-join ON: ' + t + ' (join page default).'; }
         } else if (p.action === 'delete_panel' && p.target_panel) {
           const t = String(p.target_panel);
           if (t === myPanel) error = 'Own panel delete nahi.';
