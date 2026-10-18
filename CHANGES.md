@@ -1,5 +1,28 @@
 # CHANGES.md
 
+## Pass 2026-10-18 (3) — mod versions: connect DB-driven + Set Mod/Loader 2-tab
+
+- `connect` API ab lib URL **hardcode nahi** karta. Naya `mod_versions`
+  table (panel_code, name UNIQUE, tag, url, sort) source of truth hai:
+  key ke `server_type` → version name match → PRIVATE → first version.
+  `lib_url` / `version_label` / `plan` sab panel ke versions se.
+- Har panel owner apne versions add/delete/rename kar sakta hai koi bhi
+  naam (PRIVATE / ADMIN / VIP…), aur tag bhi custom (FREE / PAID / SAFE /
+  PUBLIC…) — suggested list extend hoti rehti hai.
+- Set Mod/Loader page redesign: **Mod Config card hata** (Server page pe
+  hai), ab do tabs — "Mod URL" (version select + name/tag/URL edit; yahi
+  URL connect bhejta hai) aur "Versions" (add/delete + row me inline
+  "Set tag").
+- Pehli baar lazily 4 starter versions seed hote hain (purane
+  `loader_files` URL jeette hain, warna legacy links) + `mod_settings`
+  marker — owner sab delete kare to wapas seed nahi hote.
+- Generate page ke Server Type pills + Keys page ka server dropdown ab
+  panel ke versions se dynamic; `/generate` POST, keys edit aur
+  `/api/generate` custom version names accept karte hain.
+- `WORKER_VERSION` 1.3.0 → 1.4.0. `test/smoke.mjs`: +8 tests (seeding,
+  DB-driven lib_url, label/plan from tag, custom VIP e2e, 19 tables) —
+  **148/148 passing**.
+
 ## Pass 2026-10-18 (2) — worker-only repo (`web/` removed)
 
 - Standalone Next.js frontend (`web/`, 38 files) removed — repo ab sirf

@@ -63,6 +63,8 @@ export function panelDashboard(sess, stats, balanceText) {
 
 export function panelGenerate(sess, o) {
   const isOwner = sess.role === 'OWNER' || sess.role === 'PROFESSOR';
+  const srvList = ((o.versions && o.versions.length) ? o.versions : ['PRIVATE', 'PUBLIC', 'ADMIN', 'SAFE'].map(s => ({ name: s, tag: '' })))
+    .map(v => ({ name: String(v.name || '').toUpperCase(), tag: String(v.tag || '').toUpperCase() }));
   const msg = o.ok ? alertBox('ok', 'Keys Generated!', esc(o.ok))
     : o.error ? alertBox('err', 'Error', esc(o.error)) : '';
   const pills = KEY_DURATIONS.map(d => '<div class="pill' + (d === '30D' ? ' on' : '') + '" data-dur="' + d + '" onclick="pickDur(this)">' + d + '<div style="font-size:10px;opacity:.8">Rs' + KEY_PRICING[d] + '</div></div>').join('');
@@ -79,7 +81,7 @@ export function panelGenerate(sess, o) {
     + '<label class="feature-card flex-1" id="bulkCard" style="margin:0"><input type="checkbox" name="is_bulk" id="f-bulk" value="1" onchange="bulkToggle(this)"><span class="text-sm font-bold">Bulk mode</span></label></div>'
     + '<div class="grid grid-cols-5 gap-2 mt-3" id="amtQuick">' + quick + '</div></div>'
     + '<div class="clay-card p-4 rounded-2xl"><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2"><span class="inline-flex items-center justify-center w-5 h-5 rounded-lg avatar-premium text-white text-[10px] font-black mr-1">4</span> Custom Key <span class="normal-case font-medium text-slate-400">(sirf single key par — bulk me auto OFF)</span></label><input type="text" name="custom_key" id="f-custom" maxlength="50" placeholder="Optional — khaali chhodo to auto key" class="w-full clay-card px-4 py-3 text-sm font-mono rounded-2xl focus:outline-none"></div>'
-    + (isOwner ? '<div class="clay-card p-4 rounded-2xl"><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2"><span class="inline-flex items-center justify-center w-5 h-5 rounded-lg avatar-premium text-white text-[10px] font-black mr-1">5</span> Server Type (OWNER)</label><input type="hidden" name="server_type" id="f-srv" value="PRIVATE"><div class="grid grid-cols-2 md:grid-cols-4 gap-2">' + ['PRIVATE', 'PUBLIC', 'ADMIN', 'SAFE'].map(s => '<div class="pill' + (s === 'PRIVATE' ? ' on' : '') + '" data-srv="' + s + '" onclick="pickSrv(this)">' + s + '</div>').join('') + '</div></div>' : '')
+    + (isOwner ? '<div class="clay-card p-4 rounded-2xl"><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2"><span class="inline-flex items-center justify-center w-5 h-5 rounded-lg avatar-premium text-white text-[10px] font-black mr-1">5</span> Server Type (OWNER) <span class="normal-case font-medium text-slate-400">— Mod / loader versions</span></label><input type="hidden" name="server_type" id="f-srv" value="' + esc(srvList[0].name) + '"><div class="grid grid-cols-2 md:grid-cols-4 gap-2">' + srvList.map((s, i) => '<div class="pill' + (i === 0 ? ' on' : '') + '" data-srv="' + esc(s.name) + '" onclick="pickSrv(this)">' + esc(s.name) + (s.tag ? '<div style="font-size:10px;opacity:.8">' + esc(s.tag) + '</div>' : '') + '</div>').join('') + '</div></div>' : '')
     + '<div class="costbar"><div><p class="text-[10px] font-extrabold text-slate-400 uppercase">Total Cost</p><p class="text-3xl font-black text-slate-800" id="costOut">Rs 500</p></div><p class="text-[11px] text-slate-500 font-semibold text-right" id="costSub">1 key × 1 device</p></div>'
     + '<button class="btn-premium w-full py-4 rounded-2xl font-extrabold text-sm uppercase tracking-wider"><i class="bi bi-magic"></i> Generate Key(s)</button>'
     + '</div></form>'
@@ -99,6 +101,8 @@ const SRV_BADGE = { PRIVATE: 'bg-blue-50 text-blue-600', PUBLIC: 'bg-emerald-50 
 
 export function panelKeyList(sess, keys, o) {
   const isOwner = sess.role === 'OWNER' || sess.role === 'PROFESSOR';
+  const srvOpts = ((o.versions && o.versions.length) ? o.versions : ['PRIVATE', 'PUBLIC', 'ADMIN', 'SAFE'].map(s => ({ name: s })))
+    .map(v => '<option>' + esc(String(v.name).toUpperCase()) + '</option>').join('');
   const msg = o.ok ? alertBox('ok', 'Done', esc(o.ok)) : o.error ? alertBox('err', 'Error', esc(o.error)) : '';
   const bulk = isOwner ? '<form method="POST" onsubmit="return confirm(\'Bulk action pakka?\')" class="glass-card p-4 mb-4 flex flex-wrap gap-2 items-center"><input type="hidden" name="bulk" value="1"><select name="action" class="clay-card px-3 py-2 text-xs font-bold rounded-xl"><option value="delete_expired">Delete Expired</option><option value="delete_all">Delete ALL (panel)</option><option value="extend_all">Extend ALL +</option></select><input type="number" name="extend_val" placeholder="days" class="clay-card px-3 py-2 text-xs w-24 rounded-xl"><input type="hidden" name="extend_unit" value="D"><button class="btn-premium px-4 py-2 rounded-xl text-xs font-bold">Apply</button></form>' : '';
   const rows = keys.map(k => {
@@ -131,7 +135,7 @@ export function panelKeyList(sess, keys, o) {
       + '</div>'
       + '<form method="POST" class="flex flex-wrap gap-1.5 pt-2.5 mt-1"><input type="hidden" name="key_id" value="' + k.id + '"><input type="hidden" name="action" value="edit_key"><input type="hidden" name="edit_status" value="' + (k.is_blocked ? '0' : '1') + '">'
       + '<input type="number" name="extend_val" placeholder="+days" aria-label="Extend days" class="clay-card px-2 py-1.5 text-xs rounded-lg" style="width:88px;"><input type="hidden" name="extend_unit" value="D">'
-      + (isOwner ? '<select name="edit_server" class="clay-card px-2 py-1.5 text-xs font-bold rounded-lg"><option value="">Server~</option><option>PRIVATE</option><option>PUBLIC</option><option>ADMIN</option><option>SAFE</option></select>' : '')
+      + (isOwner ? '<select name="edit_server" class="clay-card px-2 py-1.5 text-xs font-bold rounded-lg"><option value="">Server~</option>' + srvOpts + '</select>' : '')
       + '<button class="mini-btn accent">Extend / save</button></form>'
       + '</div></div>';
   }).join('');

@@ -121,14 +121,54 @@ export function createPanelPage(list, o) {
 }
 
 export function loaderPage(o) {
-  const msg = o.ok ? alertBox('ok', 'Saved', esc(o.ok)) : '';
-  const slot = (s, label, icon, tint) => '<div class="clay-card p-3.5 rounded-2xl"><label class="flex items-center gap-2 text-xs font-extrabold text-slate-600 uppercase tracking-wider mb-2"><span class="w-8 h-8 rounded-xl ' + tint + ' text-white flex items-center justify-center shrink-0"><i class="bi ' + icon + '"></i></span>' + label + ' lib URL</label><input type="text" name="lib_' + s + '" value="' + esc((o.libs && o.libs[s]) || '') + '" placeholder="https://... .zip (khali = GitHub fallback)" class="w-full clay-card px-3 py-2.5 text-xs font-mono rounded-xl focus:outline-none"></div>';
-  const feats = [['ESP', 'bi-eye'], ['Item', 'bi-box-seam'], ['AIM', 'bi-crosshair'], ['SilentAim', 'bi-magnet'], ['BulletTrack', 'bi-activity'], ['Floating', 'bi-cloud'], ['Memory', 'bi-cpu'], ['Setting', 'bi-gear']];
-  return hero('bi-box-seam-fill', 'Set Mod/Loader', 'Version + lib URLs + mod config', '') + msg
-    + '<form method="POST" class="glass-card p-5 md:p-6 mb-4 relative overflow-hidden"><input type="hidden" name="form_type" value="loader_config"><div class="absolute top-0 left-0 right-0 h-1 avatar-premium"></div><h3 class="font-black mb-1"><i class="bi bi-tag-fill mr-1"></i>Loader Version</h3><p class="text-[11px] text-slate-500 mb-3">Client isi version se update check karega.</p><div class="flex flex-wrap gap-2 items-center"><div class="stepper"><button type="button" onclick="nstep(\'ld-v\',-1,1,99)">−</button><input type="number" step="0.1" min="1" max="99" id="ld-v" name="version" value="' + esc(o.version || '1.0') + '"><button type="button" onclick="nstep(\'ld-v\',1,1,99)">+</button></div><button class="btn-premium px-6 py-2.5 rounded-xl text-xs font-extrabold">Save Version</button></div></form>'
-    + '<form method="POST" class="glass-card p-5 md:p-6 mb-4 relative overflow-hidden"><input type="hidden" name="form_type" value="lib_urls"><div class="absolute top-0 left-0 right-0 h-1 avatar-premium"></div><h3 class="font-black mb-1"><i class="bi bi-link-45deg mr-1"></i>Lib URLs</h3><p class="text-[11px] text-slate-500 mb-3">Zip upload Worker me nahi hota — yahan direct .zip link do. Khaali = GitHub fallback.</p><div class="grid grid-cols-1 md:grid-cols-2 gap-3">' + slot('PRIVATE', 'PRIVATE (paid)', 'bi-lock-fill', 'avatar-premium') + slot('PUBLIC', 'PUBLIC (free)', 'bi-globe', 'avatar-premium') + slot('ADMIN', 'ADMIN', 'bi-shield-fill', 'avatar-premium') + slot('SAFE', 'SAFE', 'bi-check2-circle', 'avatar-premium') + '</div><button class="btn-premium w-full py-3 rounded-xl text-xs font-extrabold uppercase mt-3">Save Lib URLs</button></form>'
-    + '<form method="POST" class="glass-card p-5 md:p-6 relative overflow-hidden"><input type="hidden" name="form_type" value="mod_config"><div class="absolute top-0 left-0 right-0 h-1 avatar-premium"></div><h3 class="font-black mb-1"><i class="bi bi-toggles mr-1"></i>Mod Config</h3><p class="text-[11px] text-slate-500 mb-3">Server page wala config — yahan se bhi badal sakte ho.</p><div class="grid md:grid-cols-3 gap-2">'
-    + ['modname', 'mod_status', 'credit'].map(k => '<div><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">' + k + '</label><input type="text" name="' + k + '" value="' + esc((o.mod && o.mod[k]) || '') + '" class="w-full clay-card px-3 py-2.5 text-sm rounded-xl focus:outline-none"></div>').join('')
-    + '</div><div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3">' + feats.map(f => '<label class="feature-card' + (((o.mod && o.mod[f[0]]) || 'on') === 'on' ? ' checked' : '') + '"><input type="checkbox" name="' + f[0] + '" ' + (((o.mod && o.mod[f[0]]) || 'on') === 'on' ? 'checked' : '') + ' onchange="this.closest(\'.feature-card\').classList.toggle(\'checked\',this.checked)"><i class="bi ' + f[1] + ' text-slate-400"></i><span class="text-xs font-bold">' + f[0] + '</span></label>').join('') + '</div><button class="btn-premium w-full py-3 rounded-xl text-xs font-extrabold uppercase mt-3">Save Mod Config</button></form>'
-    + '<script>function nstep(id,d,mn,mx){var e=document.getElementById(id);if(!e)return;var v=Math.round(((parseFloat(e.value||mn)||mn)+d)*10)/10;v=Math.max(mn,Math.min(mx,v));e.value=v;}</script>';
+  const msg = o.error ? alertBox('err', 'Error', esc(o.error)) : o.ok ? alertBox('ok', 'Saved', esc(o.ok)) : '';
+  const versions = o.versions || [];
+  const tags = o.tags || ['FREE', 'PAID', 'PUBLIC', 'PRIVATE', 'SAFE'];
+  const badge = (t) => {
+    const s = String(t || '').toUpperCase();
+    if (!s) return '<span class="chip chip-n">NO TAG</span>';
+    return '<span class="chip ' + (s === 'FREE' || s === 'PUBLIC' ? 'chip-g' : s === 'PAID' ? 'chip-a' : 'chip-i') + '">' + esc(s) + '</span>';
+  };
+  const datalist = '<datalist id="ld-tags">' + tags.map(t => '<option value="' + esc(t) + '"></option>').join('') + '</datalist>';
+  const first = versions[0] || null;
+  const picker = versions.length
+    ? '<label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Version select karo</label><select id="vs-pick" onchange="ldPick(this)" class="w-full clay-card px-3 py-2.5 text-sm font-bold rounded-xl mb-3">' + versions.map((v, i) => '<option value="' + v.id + '"' + (i === 0 ? ' selected' : '') + ' data-name="' + esc(v.name) + '" data-tag="' + esc(v.tag || '') + '" data-url="' + esc(v.url || '') + '">' + esc(v.name) + (v.tag ? ' — ' + esc(String(v.tag).toUpperCase()) : '') + '</option>').join('') + '</select>'
+    : '<p class="text-xs font-bold text-slate-500 mb-3">Koi version nahi — pehle "Versions" tab me add karo.</p>';
+  const fld = (label, id, name, val, extra) => '<div><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">' + label + '</label><input type="text" id="' + id + '" name="' + name + '" value="' + esc(val) + '" ' + extra + ' class="w-full clay-card px-3 py-2.5 text-sm rounded-xl focus:outline-none"></div>';
+  const tab1 = '<div id="ldt1">'
+    + '<form method="POST" class="glass-card p-5 md:p-6 mb-4 relative overflow-hidden"><input type="hidden" name="form_type" value="version_save"><input type="hidden" name="id" id="vs-id" value="' + (first ? first.id : '') + '"><div class="absolute top-0 left-0 right-0 h-1 avatar-premium"></div><h3 class="font-black mb-1"><i class="bi bi-link-45deg mr-1"></i>Mod URL</h3><p class="text-[11px] text-slate-500 mb-3">Yeh URL <b>connect API</b> client ko bhejta hai — key ke server type ke hisaab se.</p>'
+    + picker
+    + '<div class="grid grid-cols-1 md:grid-cols-2 gap-3">'
+    + fld('Version name', 'vs-name', 'name', first ? first.name : '', 'placeholder="PRIVATE" maxlength="30" style="text-transform:uppercase"')
+    + fld('Tag (FREE / PAID / …)', 'vs-tag', 'tag', first ? (first.tag || '') : '', 'list="ld-tags" placeholder="FREE" maxlength="20" style="text-transform:uppercase"')
+    + '</div>'
+    + '<div class="mt-3"><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Lib URL (.zip)</label><input type="text" id="vs-url" name="url" value="' + esc(first ? (first.url || '') : '') + '" placeholder="https://.../lib.zip" class="w-full clay-card px-3 py-2.5 text-xs font-mono rounded-xl focus:outline-none"></div>'
+    + (versions.length ? '<button class="btn-premium w-full py-3 rounded-xl text-xs font-extrabold uppercase mt-3">Save</button>' : '')
+    + '</form></div>';
+  const addForm = '<form method="POST" class="glass-card p-5 md:p-6 mb-4 relative overflow-hidden"><input type="hidden" name="form_type" value="version_add"><div class="absolute top-0 left-0 right-0 h-1 avatar-premium"></div><h3 class="font-black mb-1"><i class="bi bi-plus-circle mr-1"></i>Add version</h3><p class="text-[11px] text-slate-500 mb-3">Naya name (PRIVATE / ADMIN / FREE…) + tag — URL "Mod URL" tab me set hoga.</p><div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">'
+    + fld('Name', 'va-name', 'name', '', 'placeholder="VIP" maxlength="30" style="text-transform:uppercase"')
+    + fld('Tag', 'va-tag', 'tag', '', 'list="ld-tags" placeholder="PAID" maxlength="20" style="text-transform:uppercase"')
+    + '<button class="btn-premium py-2.5 rounded-xl text-xs font-extrabold uppercase">Add version</button>'
+    + '</div></form>';
+  const rows = versions.map(v => '<div class="clay-card p-3.5 rounded-2xl mb-2">'
+    + '<div class="flex flex-wrap items-center gap-2">'
+    + '<b class="font-black text-sm">' + esc(v.name) + '</b>' + badge(v.tag)
+    + '<span class="text-[10px] font-mono break-all flex-1 min-w-[140px]" style="color:var(--muted)">' + (v.url ? esc(v.url) : 'URL set nahi — Mod URL tab me daalo') + '</span>'
+    + '<button type="button" class="mini-btn" onclick="ldEdit(' + v.id + ')"><i class="bi bi-pencil"></i> Edit</button>'
+    + '<form method="POST" class="inline" onsubmit="return confirm(\'Version delete?\')"><input type="hidden" name="form_type" value="version_del"><input type="hidden" name="id" value="' + v.id + '"><button class="mini-btn danger"><i class="bi bi-trash"></i></button></form>'
+    + '</div>'
+    + '<form method="POST" class="flex flex-wrap gap-2 items-center mt-2.5"><input type="hidden" name="form_type" value="version_save"><input type="hidden" name="id" value="' + v.id + '"><input type="hidden" name="name" value="' + esc(v.name) + '"><input type="hidden" name="url" value="' + esc(v.url || '') + '">'
+    + '<input type="text" name="tag" value="' + esc(v.tag || '') + '" list="ld-tags" maxlength="20" placeholder="TAG" style="width:150px;text-transform:uppercase" class="clay-card px-2.5 py-1.5 text-xs font-bold rounded-lg focus:outline-none">'
+    + '<button class="mini-btn accent">Set tag</button></form>'
+    + '</div>').join('');
+  const tab2 = '<div id="ldt2" style="display:none">' + addForm
+    + '<div class="glass-card p-4 md:p-5">' + (rows || '<p class="text-xs font-bold text-slate-500 text-center py-4">Abhi koi version nahi.</p>') + '</div></div>';
+  return hero('bi-box-seam-fill', 'Set Mod/Loader', 'Versions + tags — connect inhi se lib URL bhejta hai', '') + msg + datalist
+    + '<form method="POST" class="glass-card p-4 mb-4 flex flex-wrap gap-2 items-center"><input type="hidden" name="form_type" value="loader_config"><b class="text-xs font-extrabold uppercase tracking-wider text-slate-500"><i class="bi bi-tag-fill mr-1"></i>Loader version</b><div class="stepper"><button type="button" onclick="nstep(\'ld-v\',-1,1,99)">−</button><input type="number" step="0.1" min="1" max="99" id="ld-v" name="version" value="' + esc(o.version || '1.0') + '"><button type="button" onclick="nstep(\'ld-v\',1,1,99)">+</button></div><button class="btn-premium px-5 py-2.5 rounded-xl text-xs font-extrabold">Save</button></form>'
+    + '<div class="flex gap-2 mb-4"><div class="pill on" data-t="t1" onclick="ldShow(\'t1\')"><i class="bi bi-link-45deg"></i> Mod URL</div><div class="pill" data-t="t2" onclick="ldShow(\'t2\')"><i class="bi bi-tags"></i> Versions</div></div>'
+    + tab1 + tab2
+    + '<script>function ldShow(t){var a=document.getElementById(\'ldt1\'),b=document.getElementById(\'ldt2\');a.style.display=t===\'t1\'?\'\':\'none\';b.style.display=t===\'t2\'?\'\':\'none\';var ps=document.querySelectorAll(\'.pill[data-t]\');for(var i=0;i<ps.length;i++)ps[i].classList.toggle(\'on\',ps[i].getAttribute(\'data-t\')===t);}'
+    + 'function ldPick(sel){var op=sel.options[sel.selectedIndex];if(!op)return;document.getElementById(\'vs-id\').value=op.value;document.getElementById(\'vs-name\').value=op.getAttribute(\'data-name\')||\'\';document.getElementById(\'vs-tag\').value=op.getAttribute(\'data-tag\')||\'\';document.getElementById(\'vs-url\').value=op.getAttribute(\'data-url\')||\'\';}'
+    + 'function ldEdit(id){var s=document.getElementById(\'vs-pick\');if(!s)return;for(var i=0;i<s.options.length;i++){if(s.options[i].value===String(id)){s.selectedIndex=i;break;}}ldPick(s);ldShow(\'t1\');}'
+    + 'function nstep(id,d,mn,mx){var e=document.getElementById(id);if(!e)return;var v=Math.round(((parseFloat(e.value||mn)||mn)+d)*10)/10;v=Math.max(mn,Math.min(mx,v));e.value=v;}</script>';
 }

@@ -10,7 +10,7 @@ import { serverPage as sdkServerPage, hashPage as sdkHashPage } from './pages-se
 import { panelDashboard, panelGenerate, panelKeyList, KEY_PRICING, KEY_DURATIONS, arcxRand } from './p-dash.js';
 import { usersPage, adminsPage, permissionsPage, referralPage } from './p-users.js';
 import { serverPage, settingsPage, aesPage, apiTestPage, createPanelPage, loaderPage, MOD_FIELDS } from './p-system.js';
-import { handleConnect, handleEncrypt } from './p-connect.js';
+import { handleConnect, handleEncrypt, ensureModVersions } from './p-connect.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL DEFAULT '', username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'RESELLER', invited_by INTEGER, balance INTEGER NOT NULL DEFAULT 0, referral_limit INTEGER NOT NULL DEFAULT 0, can_generate_referral INTEGER NOT NULL DEFAULT 1, validity TEXT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', is_blocked INTEGER NOT NULL DEFAULT 0, panel_expiry TEXT, device_fingerprint TEXT, last_login TEXT, last_reset TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS mod_settings (setting_name TEXT NOT NULL, setting_val
 CREATE TABLE IF NOT EXISTS mod_maintenance (panel_code TEXT PRIMARY KEY, is_active INTEGER NOT NULL DEFAULT 0, reason TEXT);
 CREATE TABLE IF NOT EXISTS loader_config (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL UNIQUE, version REAL NOT NULL DEFAULT 1.0, updated_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS loader_files (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL, file_name TEXT NOT NULL, file_path TEXT NOT NULL, server_type TEXT NOT NULL DEFAULT 'PRIVATE', uploaded_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS mod_versions (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL, name TEXT NOT NULL, tag TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '', sort INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE(panel_code, name));
 CREATE TABLE IF NOT EXISTS referrals (code TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'RESELLER', duration INTEGER NOT NULL DEFAULT 30, balance INTEGER NOT NULL DEFAULT 0, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', created_by INTEGER, used INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS activation_keys (id INTEGER PRIMARY KEY AUTOINCREMENT, activation_key TEXT NOT NULL UNIQUE, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', name TEXT, duration_months INTEGER NOT NULL DEFAULT 1, expires_at TEXT NOT NULL, is_used INTEGER NOT NULL DEFAULT 0, used_by TEXT, used_at TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS mod_loaders (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', app_name TEXT NOT NULL DEFAULT '', package_name TEXT NOT NULL DEFAULT '', sha256 TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '', is_blocked INTEGER NOT NULL DEFAULT 0, expires_at TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), request_count INTEGER NOT NULL DEFAULT 0, last_ping TEXT, is_binded INTEGER NOT NULL DEFAULT 0);
@@ -333,7 +334,13 @@ export default {
         if (p.is_bulk == null && amount <= 1) amount = 1;
         let custom = String(p.custom_key || '').trim();
         let server = 'PRIVATE';
-        if (isOwnerLike) { const s = String(p.server_type || 'PRIVATE').toUpperCase(); if (['ADMIN', 'SAFE', 'PRIVATE', 'PUBLIC'].includes(s)) server = s; }
+        if (isOwnerLike) {
+          const s = String(p.server_type || 'PRIVATE').toUpperCase();
+          if (/^[A-Z0-9 _.-]{1,30}$/.test(s)) {
+            if (['ADMIN', 'SAFE', 'PRIVATE', 'PUBLIC'].includes(s)) server = s;
+            else if (await db.prepare('SELECT id FROM mod_versions WHERE panel_code=? AND UPPER(name)=?').bind(myPanel, s).first().catch(() => null)) server = s;
+          }
+        }
         if (!KEY_DURATIONS.includes(dur)) error = 'Invalid duration.';
         else if (amount === 1 && custom && custom.length > 50) error = 'Custom key max 50 chars.';
         else {
@@ -375,7 +382,9 @@ export default {
           }
         }
       }
-      return P('generate', 'Generate Keys', panelGenerate(sess, { ok, error, keys }));
+      await ensureModVersions(db, myPanel);
+      const gvers = await db.prepare('SELECT name,tag FROM mod_versions WHERE panel_code=? ORDER BY sort ASC, id ASC').bind(myPanel).all().then(r => r.results || []).catch(() => []);
+      return P('generate', 'Generate Keys', panelGenerate(sess, { ok, error, keys, versions: gvers }));
     }
 
     // ---------- PANEL KEY LIST ----------
@@ -420,7 +429,10 @@ export default {
                 await db.prepare('UPDATE api_keys SET expires_at=? WHERE id=?').bind(exp, k.id).run();
               } else await db.prepare("UPDATE api_keys SET expires_at=datetime(expires_at,?) WHERE id=?").bind('+' + ev + ' ' + eu, k.id).run();
             }
-            if (isOwnerLike && p.edit_server && ['PRIVATE', 'PUBLIC', 'ADMIN', 'SAFE'].includes(String(p.edit_server))) await db.prepare('UPDATE api_keys SET server_type=? WHERE id=?').bind(String(p.edit_server), k.id).run();
+            if (isOwnerLike && p.edit_server) {
+              const es = String(p.edit_server).toUpperCase();
+              if (/^[A-Z0-9 _.-]{1,30}$/.test(es) && (['PRIVATE', 'PUBLIC', 'ADMIN', 'SAFE'].includes(es) || await db.prepare('SELECT id FROM mod_versions WHERE panel_code=? AND UPPER(name)=?').bind(myPanel, es).first().catch(() => null))) await db.prepare('UPDATE api_keys SET server_type=? WHERE id=?').bind(es, k.id).run();
+            }
             ok = 'Key updated.';
           }
         }
@@ -431,7 +443,8 @@ export default {
       else if (myRole === 'RESELLER') { q += 'AND k.created_by=? '; args.push(myId); }
       q += 'ORDER BY k.id DESC LIMIT 200';
       const rows = (await db.prepare(q).bind(...args).all().catch(() => ({ results: [] }))).results || [];
-      return P('keys', 'Key Manager', panelKeyList(sess, rows, { ok, error }));
+      const kvers = await db.prepare('SELECT name,tag FROM mod_versions WHERE panel_code=? ORDER BY sort ASC, id ASC').bind(myPanel).all().then(r => r.results || []).catch(() => []);
+      return P('keys', 'Key Manager', panelKeyList(sess, rows, { ok, error, versions: kvers }));
     }
 
     // ---------- USERS ----------
@@ -662,35 +675,56 @@ export default {
       return P('settings', 'Settings', settingsPage(sess, { ok, error, panelName: pn }, { connect: base + '/connect/' + myPanel, encrypt: base + '/encrypt/' + myPanel }, { name: thName, accent: thAcc ? thAcc.acc : null }));
     }
 
-    // ---------- LOADER ----------
+    // ---------- LOADER / MOD VERSIONS ----------
     if (path === '/loader-manager') {
       if (needOA()) return deny();
-      let ok = '';
+      let ok = '', error = '';
+      const nameOk = (s) => /^[A-Z0-9][A-Z0-9 _.-]{0,29}$/.test(s);
+      const tagOk = (s) => s === '' || /^[A-Z0-9 _.-]{1,20}$/.test(s);
+      const urlOk = (s) => s === '' || (/^https?:\/\//i.test(s) && s.length <= 500);
+      const vTaken = async (nm, exId) => !!(await db.prepare('SELECT id FROM mod_versions WHERE panel_code=? AND UPPER(name)=UPPER(?)' + (exId ? ' AND id<>?' : '')).bind(...(exId ? [myPanel, nm, exId] : [myPanel, nm])).first().catch(() => null));
+      await ensureModVersions(db, myPanel);
       if (method === 'POST') {
         const p = await formParams(request);
         if (p.form_type === 'loader_config') {
           const v = Math.max(1.0, parseFloat(p.version) || 1.0);
           await db.prepare('INSERT INTO loader_config (panel_code,version) VALUES (?,?) ON CONFLICT(panel_code) DO UPDATE SET version=excluded.version').bind(myPanel, v).run(); ok = 'Version saved.';
-        } else if (p.form_type === 'lib_urls') {
-          for (const s of ['PRIVATE', 'PUBLIC', 'ADMIN', 'SAFE']) {
-            const u = String(p['lib_' + s] || '').trim().slice(0, 500);
-            await db.prepare('DELETE FROM loader_files WHERE panel_code=? AND server_type=?').bind(myPanel, s).run();
-            if (u) await db.prepare('INSERT INTO loader_files (panel_code,file_name,file_path,server_type) VALUES (?,?,?,?)').bind(myPanel, 'loader_' + myPanel + '_' + s + '.url', u, s).run();
+        } else if (p.form_type === 'version_add') {
+          const nm = String(p.name || '').trim().toUpperCase().slice(0, 30);
+          const tg = String(p.tag || '').trim().toUpperCase().slice(0, 20);
+          if (!nameOk(nm)) error = 'Name 1-30: letters/numbers/space . _ -';
+          else if (!tagOk(tg)) error = 'Tag max 20: letters/numbers/space . _ -';
+          else if (await vTaken(nm)) error = 'Version "' + nm + '" already exists.';
+          else {
+            const mx = await db.prepare('SELECT COALESCE(MAX(sort),-1) m FROM mod_versions WHERE panel_code=?').bind(myPanel).first().catch(() => ({}));
+            await db.prepare('INSERT INTO mod_versions (panel_code,name,tag,url,sort) VALUES (?,?,?,?,?)').bind(myPanel, nm, tg, '', (mx?.m | 0) + 1).run();
+            ok = nm + ' added — URL Mod URL tab me set karo.';
           }
-          ok = 'Lib URLs saved.';
-        } else if (p.form_type === 'mod_config') {
-          for (const k of ['modname', 'mod_status', 'credit', 'ESP', 'Item', 'AIM', 'SilentAim', 'BulletTrack', 'Floating', 'Memory', 'Setting']) {
-            const v = ['ESP', 'Item', 'AIM', 'SilentAim', 'BulletTrack', 'Floating', 'Memory', 'Setting'].includes(k) ? (p[k] != null ? 'on' : 'off') : String(p[k] ?? '').slice(0, 255);
-            if (p[k] !== undefined || k !== 'modname' && k !== 'mod_status' && k !== 'credit')
-              await db.prepare('INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES (?,?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value').bind(k, v, myPanel).run();
+        } else if (p.form_type === 'version_save') {
+          const id = parseInt(p.id, 10) || 0;
+          const row = await db.prepare('SELECT id FROM mod_versions WHERE id=? AND panel_code=?').bind(id, myPanel).first().catch(() => null);
+          const nm = String(p.name || '').trim().toUpperCase().slice(0, 30);
+          const tg = String(p.tag || '').trim().toUpperCase().slice(0, 20);
+          const u = String(p.url || '').trim().slice(0, 500);
+          if (!row) error = 'Version nahi mila.';
+          else if (!nameOk(nm)) error = 'Name 1-30: letters/numbers/space . _ -';
+          else if (!tagOk(tg)) error = 'Tag max 20: letters/numbers/space . _ -';
+          else if (!urlOk(u)) error = 'URL https:// se start hona chahiye (max 500).';
+          else if (await vTaken(nm, id)) error = 'Version "' + nm + '" already exists.';
+          else {
+            await db.prepare('UPDATE mod_versions SET name=?,tag=?,url=? WHERE id=? AND panel_code=?').bind(nm, tg, u, id, myPanel).run();
+            ok = nm + ' saved.';
           }
-          ok = 'Mod config saved.';
+        } else if (p.form_type === 'version_del') {
+          const id = parseInt(p.id, 10) || 0;
+          await db.prepare('DELETE FROM mod_versions WHERE id=? AND panel_code=?').bind(id, myPanel).run();
+          ok = 'Version deleted.';
         }
       }
+      const versions = await db.prepare('SELECT id,name,tag,url FROM mod_versions WHERE panel_code=? ORDER BY sort ASC, id ASC').bind(myPanel).all().then(r => r.results || []).catch(() => []);
       const ver = await db.prepare('SELECT version FROM loader_config WHERE panel_code=?').bind(myPanel).first().catch(() => null);
-      const libs = await db.prepare('SELECT server_type,file_path FROM loader_files WHERE panel_code=?').bind(myPanel).all().then(r => Object.fromEntries((r.results || []).map(x => [x.server_type, x.file_path]))).catch(() => ({}));
-      const mod = await db.prepare('SELECT setting_name,setting_value FROM mod_settings WHERE panel_code=?').bind(myPanel).all().then(r => Object.fromEntries((r.results || []).map(x => [x.setting_name, x.setting_value]))).catch(() => ({}));
-      return P('loader-manager', 'Set Mod/Loader', loaderPage({ ok, version: ver?.version || '1.0', libs, mod }));
+      const tags = [...new Set(['FREE', 'PAID', 'PUBLIC', 'PRIVATE', 'SAFE'].concat(versions.map(v => String(v.tag || '').toUpperCase()).filter(Boolean)))];
+      return P('loader-manager', 'Set Mod/Loader', loaderPage({ ok, error, version: ver?.version || '1.0', versions, tags }));
     }
 
     // ---------- CREATE PANEL ----------

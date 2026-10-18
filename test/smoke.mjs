@@ -382,15 +382,49 @@ let panel2KeyId = 0;
 // ---------- 6. connect / encrypt contracts ----------
 console.log('connect + encrypt');
 {
+  // Mod versions: loader page seeds defaults; owner saves the PRIVATE lib
+  // URL from the panel (no hardcoded fallback in connect anymore).
+  const rl = await call(env, 'GET', '/loader-manager', { cookie: ownerCookie });
+  ok(rl.status === 200, 'loader-manager renders for owner');
+  const seeded = await env.DB.prepare('SELECT COUNT(*) n FROM mod_versions WHERE panel_code=?').bind('YUVI_001').first();
+  ok((seeded.n | 0) >= 4, 'default versions seeded on first use (' + (seeded.n | 0) + ')');
+  const pvr = await env.DB.prepare("SELECT id FROM mod_versions WHERE panel_code='YUVI_001' AND name='PRIVATE'").first();
+  const fsv = new FormData();
+  fsv.set('form_type', 'version_save'); fsv.set('id', String(pvr.id)); fsv.set('name', 'PRIVATE'); fsv.set('tag', 'PAID'); fsv.set('url', 'https://cdn.example.com/private.zip');
+  const rsv = await call(env, 'POST', '/loader-manager', { cookie: ownerCookie, form: fsv });
+  ok(rsv.status === 200, 'version_save via loader page ok');
+
   const fd = new FormData();
   fd.set('game', 'PUBG');
-  // fetch key_value of first panel1 key directly
-  const row = await env.DB.prepare('SELECT key_value FROM api_keys WHERE panel_code=? LIMIT 1').bind('YUVI_001').first();
+  // fetch key_value of a PRIVATE panel1 key directly
+  const row = await env.DB.prepare("SELECT key_value FROM api_keys WHERE panel_code=? AND server_type='PRIVATE' LIMIT 1").bind('YUVI_001').first();
   fd.set('user_key', row.key_value);
   fd.set('serial', 'DEV-001');
   const c = await call(env, 'POST', '/connect/YUVI_001', { form: fd });
   const cb = await c.json();
-  ok(c.status === 200 && cb.status === true && cb.data && cb.data.lib_url, 'connect ok returns lib_url');
+  ok(c.status === 200 && cb.status === true && cb.data && cb.data.lib_url === 'https://cdn.example.com/private.zip', 'connect lib_url comes from mod_versions');
+  ok(cb.data && cb.data.version === 'PRIVATE PAID' && cb.data.plan === 'PAID', 'connect version label + plan from tag');
+
+  // Custom version end-to-end: add VIP (GOLD), generate a VIP key, connect.
+  const fa = new FormData();
+  fa.set('form_type', 'version_add'); fa.set('name', 'VIP'); fa.set('tag', 'GOLD');
+  await call(env, 'POST', '/loader-manager', { cookie: ownerCookie, form: fa });
+  const vip = await env.DB.prepare("SELECT id FROM mod_versions WHERE panel_code='YUVI_001' AND name='VIP'").first();
+  ok(!!vip, 'custom version added');
+  const fsv2 = new FormData();
+  fsv2.set('form_type', 'version_save'); fsv2.set('id', String(vip.id)); fsv2.set('name', 'VIP'); fsv2.set('tag', 'GOLD'); fsv2.set('url', 'https://cdn.example.com/vip.zip');
+  await call(env, 'POST', '/loader-manager', { cookie: ownerCookie, form: fsv2 });
+  const fg = new FormData();
+  fg.set('duration', '30D'); fg.set('device_limit', '1'); fg.set('bulk_amount', '1'); fg.set('server_type', 'VIP');
+  const rg = await call(env, 'POST', '/generate', { cookie: ownerCookie, form: fg });
+  ok(rg.status === 200, 'VIP key generated via /generate');
+  const vk = await env.DB.prepare("SELECT key_value FROM api_keys WHERE panel_code='YUVI_001' AND server_type='VIP' ORDER BY id DESC LIMIT 1").first();
+  ok(!!vk, 'VIP key stored with custom server_type');
+  const fdv = new FormData();
+  fdv.set('game', 'PUBG'); fdv.set('user_key', vk.key_value); fdv.set('serial', 'DEV-VIP');
+  const cv = await call(env, 'POST', '/connect/YUVI_001', { form: fdv });
+  const cbv = await cv.json();
+  ok(cv.status === 200 && cbv.data && cbv.data.lib_url === 'https://cdn.example.com/vip.zip' && cbv.data.version === 'VIP GOLD' && cbv.data.plan === 'GOLD', 'custom version serves its own URL/label/plan');
 
   const fdBad = new FormData();
   fdBad.set('game', 'OTHER');
@@ -587,8 +621,8 @@ console.log('fresh install');
   const r0 = await app.fetch(new Request('https://panel.test/setup'), env3, {});
   ok(r0.status === 200, 'GET /setup renders on empty DB (got ' + r0.status + ')');
   const tables = (await db3.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all()).results.map((r) => r.name).sort();
-  const want = ['activation_keys', 'api_keys', 'bcore_key_bindings', 'bcore_keys', 'key_devices', 'loader_config', 'loader_files', 'mod_loaders', 'mod_maintenance', 'mod_settings', 'mundo_key_bindings', 'mundo_keys', 'panels', 'referrals', 'sdk_hash_vault', 'sdk_server_status', 'sessions', 'users'];
-  ok(JSON.stringify(tables) === JSON.stringify(want), 'all 18 tables auto-created (' + tables.length + '/18)');
+  const want = ['activation_keys', 'api_keys', 'bcore_key_bindings', 'bcore_keys', 'key_devices', 'loader_config', 'loader_files', 'mod_loaders', 'mod_maintenance', 'mod_settings', 'mod_versions', 'mundo_key_bindings', 'mundo_keys', 'panels', 'referrals', 'sdk_hash_vault', 'sdk_server_status', 'sessions', 'users'];
+  ok(JSON.stringify(tables) === JSON.stringify(want), 'all 19 tables auto-created (' + tables.length + '/19)');
   const idx = (await db3.prepare("SELECT name FROM sqlite_master WHERE type='index' AND sql IS NOT NULL").all()).results.map((r) => r.name);
   ok(['idx_users_panel', 'idx_api_panel', 'idx_dev_panel', 'idx_sess_user'].every((n) => idx.includes(n)), 'indexes auto-created');
   const fd = new FormData();

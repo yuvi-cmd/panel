@@ -1,13 +1,38 @@
 import { aes256CbcEncrypt } from './crypto.js';
 import { md5hex } from './crypto.js';
 
-export const ARCX_LIBS = {
-  PUBLIC: 'https://github.com/yuvicodes-lab/ONLINE-MOD/raw/refs/heads/main/lib_public.zip',
+// Legacy starter lib URLs — used ONLY to seed editable "versions" rows the
+// first time a panel is touched. After that, Set Mod/Loader (mod_versions)
+// is the single source of truth: connect never hardcodes a URL.
+const LEGACY_LIBS = {
   PRIVATE: 'https://github.com/yuvicodes-lab/ONLINE-MOD/raw/refs/heads/main/libbgmi.zip',
+  PUBLIC: 'https://github.com/yuvicodes-lab/ONLINE-MOD/raw/refs/heads/main/lib_public.zip',
   ADMIN: 'https://github.com/yuvicodes-lab/ONLINE-MOD/raw/refs/heads/main/lib_admin.zip',
   SAFE: 'https://github.com/yuvicodes-lab/ONLINE-MOD/raw/refs/heads/main/lib_safe.zip',
 };
-export const ARCX_VERSIONS = { PUBLIC: 'PUBLIC FREE', PRIVATE: 'PRIVATE PAID', ADMIN: 'ADMIN PRIVATE • PAID', SAFE: 'SAFE FREE' };
+
+// One-time per panel: seed 4 starter versions (existing loader_files URLs
+// win, else legacy links). A mod_settings marker stops re-seeding after the
+// owner deletes versions on purpose.
+export async function ensureModVersions(db, panel) {
+  try {
+    const marker = await db.prepare("SELECT setting_value FROM mod_settings WHERE panel_code=? AND setting_name='modvers_seeded'").bind(panel).first().catch(() => null);
+    if (marker) return;
+    const n = await db.prepare('SELECT COUNT(*) n FROM mod_versions WHERE panel_code=?').bind(panel).first().catch(() => null);
+    if (!n || (n.n | 0) === 0) {
+      const r = await db.prepare('SELECT server_type,file_path FROM loader_files WHERE panel_code=?').bind(panel).all().catch(() => ({ results: [] }));
+      const libs = {};
+      for (const row of r.results || []) libs[String(row.server_type || '').toUpperCase()] = String(row.file_path || '');
+      const seed = [['PRIVATE', 'PAID'], ['PUBLIC', 'FREE'], ['ADMIN', 'PAID'], ['SAFE', 'FREE']];
+      for (let i = 0; i < seed.length; i++) {
+        const nm = seed[i][0], tg = seed[i][1];
+        const u = /^https?:\/\//i.test(libs[nm] || '') ? libs[nm] : LEGACY_LIBS[nm];
+        await db.prepare('INSERT INTO mod_versions (panel_code,name,tag,url,sort) VALUES (?,?,?,?,?)').bind(panel, nm, tg, u, i).run().catch(() => {});
+      }
+    }
+    await db.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES ('modvers_seeded','1',?) ON CONFLICT(setting_name,panel_code) DO NOTHING").bind(panel).run().catch(() => {});
+  } catch {}
+}
 
 const md5 = s => md5hex(s);
 const clean = (v, max = 255) => (typeof v === 'string' && v.trim() !== '' && v.trim().length <= max) ? v.trim() : '';
@@ -44,13 +69,14 @@ async function loadSettings(db, panel) {
   return m;
 }
 
-async function libOverride(db, panel, serverType) {
-  try {
-    const r = await db.prepare('SELECT file_path FROM loader_files WHERE panel_code=? AND server_type=? ORDER BY uploaded_at DESC LIMIT 1').bind(panel, serverType).first().catch(() => null);
-    const fp = r && r.file_path ? String(r.file_path) : '';
-    if (/^https?:\/\//i.test(fp)) return fp;
-  } catch {}
-  return null;
+// Pick the panel's version row for a key's server type: exact name match,
+// then PRIVATE, then the first version by sort order.
+async function versionFor(db, panel, st) {
+  const pick = (sql, binds) => db.prepare(sql).bind(...binds).first().catch(() => null);
+  let r = await pick('SELECT id,name,tag,url FROM mod_versions WHERE panel_code=? AND UPPER(name)=? LIMIT 1', [panel, st]);
+  if (!r) r = await pick("SELECT id,name,tag,url FROM mod_versions WHERE panel_code=? AND UPPER(name)='PRIVATE' LIMIT 1", [panel]);
+  if (!r) r = await pick('SELECT id,name,tag,url FROM mod_versions WHERE panel_code=? ORDER BY sort ASC, id ASC LIMIT 1', [panel]);
+  return r || null;
 }
 
 async function verifyKey(db, panel, userKey, serial) {
@@ -101,14 +127,17 @@ export async function handleConnect(request, db, panel, env) {
     const get = (k, d) => (k in s && s[k] != null ? String(s[k]) : d);
     const real = 'PUBG-' + userKey + '-' + serial + '-' + arcxSaltFromEnv(env);
     const token = md5(real), enc = md5(token + 'VIPENC');
-    let st = String(v.key.server_type || 'PRIVATE').toUpperCase();
-    if (!['ADMIN', 'SAFE', 'PRIVATE', 'PUBLIC'].includes(st)) st = 'PRIVATE';
-    const lib = (await libOverride(db, panel, st)) || ARCX_LIBS[st];
+    const st = (String(v.key.server_type || 'PRIVATE').toUpperCase().replace(/[^A-Z0-9 _.-]/g, '').slice(0, 30)) || 'PRIVATE';
+    let ver = await versionFor(db, panel, st);
+    if (!ver) { await ensureModVersions(db, panel); ver = await versionFor(db, panel, st); }
+    const lib = ver && ver.url ? String(ver.url) : '';
+    const label = ver ? (String(ver.name) + (ver.tag ? ' ' + String(ver.tag) : '')).toUpperCase() : st;
+    const plan = ver && ver.tag ? String(ver.tag).toUpperCase() : (st === 'PUBLIC' || st === 'SAFE' ? 'FREE' : 'PAID');
     return J({
       status: true, data: {
         real, token, Enc: enc, EXP: v.expiry, rng: Math.floor(Date.now() / 1000),
         server_type: st, key_mode: st, mode: st === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
-        version: ARCX_VERSIONS[st], version_label: ARCX_VERSIONS[st], plan: (st === 'PUBLIC' || st === 'SAFE') ? 'FREE' : 'PAID',
+        version: label, version_label: label, plan,
         lib_url: lib, lib, modname: get('modname', 'YUVI MOD'), mod_status: get('mod_status', 'Online'), credit: get('credit', 'Yuvi Panel'),
         ESP: get('ESP', 'on'), Item: get('Item', 'on'), AIM: get('AIM', 'on'), SilentAim: get('SilentAim', 'on'), BulletTrack: get('BulletTrack', 'on'),
         Floating: get('Floating', 'on'), Memory: get('Memory', 'on'), Setting: get('Setting', 'on'),

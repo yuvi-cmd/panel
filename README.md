@@ -30,7 +30,7 @@ Pehli baar site par `/setup` khol ke admin banao. Purane DB par bhi safe hai —
 
 ## Note (PHP se farak)
 
-- `loader-manager` me **zip upload nahi** (Worker me disk nahi hota) — uski jagah 4 slot me **lib URL** save hota hai, `connect` API wahi URL deta hai, khaali ho to GitHub fallback.
+- `loader-manager` (Set Mod/Loader) me **versions** hain — har version ka name + tag (FREE/PAID/SAFE…) + lib URL; `connect` API har key ke server type ka URL **sirf isi panel config se** bhejta hai (koi hardcoded fallback nahi). Pehli baar 4 starter versions seed hote hain (editable/deletable). Zip upload nahi (Worker me disk nahi hota) — direct `.zip` link do.
 - CSRF check nahi hai, Turnstile nahi hai (PHP login me bhi verify nahi tha).
 - `/blocked` route nahi hai (zip me uska file tha hi nahi).
 - `/sdk/api-test`, `/sdk/encryption`, `/sdk/settings` nahi hain (zip me unke file missing hain).

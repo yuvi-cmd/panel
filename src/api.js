@@ -29,7 +29,7 @@ import {
 const KEY_PRICING = { '2H': 10, '1D': 80, '3D': 150, '7D': 250, '15D': 350, '30D': 500, '60D': 900 };
 const KEY_DURATIONS = ['2H', '1D', '3D', '7D', '15D', '30D', '60D'];
 // Bump on every behaviour-changing release; visible at /api/health.
-const WORKER_VERSION = '1.3.0';
+const WORKER_VERSION = '1.4.0';
 
 function arcxRand(len) {
   const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -277,7 +277,7 @@ export async function handleApi(request, db, env) {
     let server = 'PRIVATE';
     if (isOwnerLike) {
       const s = String(p.server_type || 'PRIVATE').toUpperCase();
-      if (['ADMIN', 'SAFE', 'PRIVATE', 'PUBLIC'].includes(s)) server = s;
+      if (/^[A-Z0-9 _.-]{1,30}$/.test(s) && (['ADMIN', 'SAFE', 'PRIVATE', 'PUBLIC'].includes(s) || await db.prepare('SELECT id FROM mod_versions WHERE panel_code=? AND UPPER(name)=?').bind(myPanel, s).first().catch(() => null))) server = s;
     }
     if (!KEY_DURATIONS.includes(dur)) return J({ ok: false, error: 'Invalid duration.' }, 400);
     if (!(await assertPanelActive(db, myPanel))) return J({ ok: false, error: 'Panel not found.' }, 404);
