@@ -25,6 +25,11 @@
   global polish — 36px buttons, hover/active states, native number
   spinners off; permission quota + create-panel + aes rows wrap karte
   hain bina squeeze ke.
+- Stepper redesign (har page): ab ek hi integrated input-group —
+  `−`/`+` buttons input ke border ke andar, beech me centered value,
+  focus par accent ring, hover highlight; unit labels (days, acct
+  limit, month(s)) stepper ke bahar; sab jagah same look — Generate
+  page, Tenants, AES/Activation, Loader, Referrals, Permissions.
 
 ## Pass 2026-10-17 — tenant account limits + auto join / default lock
 

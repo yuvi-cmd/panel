@@ -126,11 +126,15 @@ html[data-mode="dark"] .stat-ic{color:#C7C9FD;}
 .back-link:hover{color:var(--ink);background:var(--surface2);}
 .pill{padding:10px 14px;border-radius:10px;font-weight:800;font-size:13px;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--muted);text-align:center;transition:all 0.2s;}
 .pill.on{background:var(--p1);color:#fff;border-color:var(--p1);box-shadow:0 1px 2px var(--glow);}
-.stepper{display:flex;align-items:center;gap:6px;min-width:0;}
-.stepper button{width:36px;height:36px;border-radius:10px;font-size:18px;font-weight:900;line-height:1;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;background:var(--surface);border:1px solid var(--line);color:var(--ink);transition:border-color .15s,background .15s,color .15s,transform .1s;}
-.stepper button:hover{border-color:var(--acc);color:var(--acc-d);background:var(--acc-soft);}
-.stepper button:active{transform:scale(.9);}
-.stepper input{min-width:0;text-align:center;}
+.stepper{display:inline-flex;align-items:stretch;min-height:44px;min-width:0;border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden;vertical-align:middle;transition:border-color .15s,box-shadow .15s;}
+.stepper:focus-within{border-color:var(--acc);box-shadow:0 0 0 3px var(--acc-soft);}
+.stepper button{width:40px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;font-size:18px;font-weight:900;line-height:1;cursor:pointer;background:transparent;border:0;color:var(--muted);transition:background .15s,color .15s;}
+.stepper button:hover{background:var(--acc-soft);color:var(--acc-d);}
+.stepper button:active{background:var(--acc-soft);}
+.stepper button:first-child{border-right:1px solid var(--line);}
+.stepper button:last-child{border-left:1px solid var(--line);}
+.stepper input{flex:1 1 64px;width:auto;min-width:0;border:0;background:transparent;color:var(--ink);font-weight:800;font-size:15px;text-align:center;padding:0 2px;-webkit-appearance:none;appearance:none;}
+.stepper input:focus{outline:none;}
 input[type=number]{-webkit-appearance:textfield;-moz-appearance:textfield;appearance:textfield;}
 input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 .costbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;border-radius:12px;background:var(--surface2);border:1px solid var(--line);}
