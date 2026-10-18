@@ -1,5 +1,14 @@
 # CHANGES.md
 
+## Pass 2026-10-18 (2) — worker-only repo (`web/` removed)
+
+- Standalone Next.js frontend (`web/`, 38 files) removed — repo ab sirf
+  **Cloudflare Worker + D1**. HTML panel hi single UI; koi Vercel/Next
+  build dependency nahi bachi.
+- Alag `vercel-panel` track drop. `FRONTEND_ORIGIN` CORS var generic
+  rahega (future me koi bhi cross-origin frontend ke liye kaam aayega).
+- Docs/comments se Next.js/Vercel zikr hata ke neutral kar diya.
+
 ## Pass 2026-10-18 — single PROFESSOR + referral roles & admin quota
 
 - Single main owner: `/setup` now creates id 1 with role `PROFESSOR`
@@ -78,7 +87,7 @@
 - New `test/smoke.mjs`: 39 integration tests (node:sqlite, zero deps) —
   **39/39 passing** on Node 26.
 
-## Web (`web/`, new)
+## Web (`web/`, new) — 2026-10-18 ko removed (worker-only repo)
 
 - Next.js 14.2.35 + React 18 + TS + Tailwind 3 + lucide-react. Light SaaS
   theme (white sidebar/header, `#F8FAFC` bg, `#4F46E5` accent, Inter).

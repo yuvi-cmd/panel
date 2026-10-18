@@ -6,7 +6,8 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 PANEL_CODE = "YUVI_001"
 PANEL_NAME = "YUVI PANEL"
-# Origin of the Next.js frontend (e.g. "https://panel.example.com").
+# Origin of the frontend app (e.g. "https://panel.example.com") — only
+# needed when it is cross-origin to this Worker.
 # Required for cross-origin /api/* calls with credentials. Same-origin
 # deployments can leave this empty.
 FRONTEND_ORIGIN = ""

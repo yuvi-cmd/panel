@@ -112,7 +112,7 @@ export function clearSessionCookie() {
   return 'sdk_session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax';
 }
 
-// ---- CORS for the Next.js frontend ------------------------------------------
+// ---- CORS for cross-origin frontends -------------------------------------
 export function apiCors(req, env) {
   const origin = req.headers.get('Origin') || '';
   const allowed = typeof env?.FRONTEND_ORIGIN === 'string' ? env.FRONTEND_ORIGIN.trim() : '';

@@ -1,4 +1,4 @@
-// JSON API for the Next.js frontend (Phase-1 bridge).
+// JSON API for panel frontends (cookie session + FRONTEND_ORIGIN CORS).
 // Reuses the SAME tables, session cookie (sdk_session) and tenant-scoping
 // rules as the HTML panel. Preserves /connect/* and /encrypt/* contracts.
 //
@@ -425,7 +425,7 @@ export async function handleApi(request, db, env) {
   }
 
   // ---- AES status (no secrets leave the server) ------------------------------------
-  // The Next.js /enc-api page uses this: booleans + expiry only. Key/IV values
+  // Enc-api consumers use this: booleans + expiry only. Key/IV values
   // are NEVER returned. Rotation stays on the HTML /aes route (main owner).
   if (path === '/api/aes-status' && method === 'GET') {
     if (!(myRole === 'OWNER' || myRole === 'PROFESSOR')) return J({ ok: false, error: 'Forbidden.' }, 403);
