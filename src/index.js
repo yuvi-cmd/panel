@@ -254,18 +254,21 @@ export default {
         const p = await formParams(request);
         const pc = String(p.panel_code || '').toUpperCase().replace(/\s+/g, '');
         const u = String(p.username || '').trim(), pw = String(p.password || '');
-        if (!pc || u.length < 3 || pw.length < 4) return html(joinPage({ error: 'Sahi panel code / username / password (min 4) do.', panelName: envName, defaultCode: pc }));
+        if (!pc || u.length < 3 || pw.length < 4) return html(joinPage({ error: 'Sahi panel code / username / password (min 4) do.', panelName: envName, keepCode: pc }));
         const prow = await db.prepare('SELECT * FROM panels WHERE panel_code=?').bind(pc).first().catch(() => null);
-        if (!prow) return html(joinPage({ error: 'Panel not found.', panelName: envName, defaultCode: pc }));
+        if (!prow) return html(joinPage({ error: 'Panel not found.', panelName: envName, keepCode: pc }));
         const own = await db.prepare("SELECT id FROM users WHERE panel_code=? AND role='OWNER'").bind(pc).first().catch(() => null);
-        if (own) return html(joinPage({ error: 'Panel already claimed hai.', panelName: envName, defaultCode: pc }));
-        if (await db.prepare('SELECT id FROM users WHERE username=?').bind(u).first().catch(() => null)) return html(joinPage({ error: 'Username taken.', panelName: envName, defaultCode: pc }));
+        if (own) return html(joinPage({ error: 'Panel already claimed hai.', panelName: envName, keepCode: pc }));
+        if (await db.prepare('SELECT id FROM users WHERE username=?').bind(u).first().catch(() => null)) return html(joinPage({ error: 'Username taken.', panelName: envName, keepCode: pc }));
         const lim = prow.account_limit | 0;
         if (lim > 0) {
           const cnt = ((await db.prepare('SELECT COUNT(*) c FROM users WHERE panel_code=?').bind(pc).first().catch(() => ({ c: 0 }))).c) | 0;
-          if (cnt >= lim) return html(joinPage({ error: 'Tenant account limit full (' + cnt + '/' + lim + ').', panelName: envName, defaultCode: pc }));
+          if (cnt >= lim) return html(joinPage({ error: 'Tenant account limit full (' + cnt + '/' + lim + ').', panelName: envName, keepCode: pc }));
         }
         await db.prepare('INSERT INTO users (full_name,username,password_hash,role,balance,validity,panel_code) VALUES (?,?,?,?,?,?,?)').bind(pc + ' Admin', u, await hashPassword(pw), 'OWNER', 999999, prow.expires_at || null, pc).run();
+        // Owner panel default: exactly one account (the owner). Admin can raise
+        // the limit from the Tenants page; a pre-set limit is respected.
+        await db.prepare('UPDATE panels SET account_limit=1 WHERE panel_code=? AND (account_limit IS NULL OR account_limit=0)').bind(pc).run().catch(() => {});
         return redir('/login?msg=' + encodeURIComponent('Panel claimed! Please login.'));
       }
       const defRow = await db.prepare('SELECT panel_code FROM panels WHERE auto_join=1 LIMIT 1').first().catch(() => null);

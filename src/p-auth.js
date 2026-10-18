@@ -78,15 +78,19 @@ export function resetPage(o) {
 }
 
 export function joinPage(o) {
+  const locked = !!o.defaultCode;
+  const codeVal = esc(o.defaultCode || o.keepCode || '');
   const inner = alerts(o.error || '', o.msg || '')
     + '<form method="POST" class="space-y-3.5">'
-    + '<div><label class="label-dark">Panel Code</label><input type="text" name="panel_code" required class="clay-input font-mono" placeholder="YUVI_001" value="' + esc(o.defaultCode || '') + '"></div>'
+    + '<div><label class="label-dark">Panel Code</label><input type="text" name="panel_code" required class="clay-input font-mono' + (locked ? ' opacity-70' : '') + '" placeholder="YUVI_001" value="' + codeVal + '"' + (locked ? ' readonly' : '') + '>'
+    + (locked ? '<p class="text-[11px] font-semibold mt-1.5" style="color:var(--muted)"><i class="bi bi-lock-fill"></i> Default tenant se locked hai — code change nahi hoga.</p>' : '')
+    + '</div>'
     + '<div><label class="label-dark">Username</label><input type="text" name="username" required class="clay-input"></div>'
     + '<div><label class="label-dark">Password</label><input type="password" name="password" required class="clay-input"></div>'
-    + '<div class="text-[11px] text-slate-500 bg-slate-50 border rounded-xl p-3">Sirf us panel me jo abhi khaali hai (koi OWNER nahi) — pehla admin banoge.</div>'
+    + '<div class="text-[11px] text-slate-500 bg-slate-50 border rounded-xl p-3">Claim hone par <b>sirf 1 Owner account</b> banta hai. Panel khaali hona chahiye (koi OWNER nahi).</div>'
     + '<button class="btn-premium w-full py-4 rounded-2xl font-extrabold text-sm uppercase">Join as Owner</button></form>'
     + '<div class="text-center mt-4"><a href="/login" class="text-xs text-blue-700 font-bold">Back to Login</a></div>';
-  return shell(o.panelName, 'Join Panel', 'Claim empty panel as owner', inner);
+  return shell(o.panelName, 'Join Panel', locked ? 'Default tenant — code locked' : 'Claim empty panel as owner', inner);
 }
 
 // SHA-256 hex via WebCrypto (login fingerprint ke liye, PHP hash() parity)

@@ -219,6 +219,7 @@ console.log('tenant account limit + auto join');
   await autoOn('LIMITED');
   const jh1 = await (await call(env, 'GET', '/join-panel')).text();
   ok(jh1.includes('value="LIMITED"'), 'join page prefills auto tenant code');
+  ok(jh1.includes('readonly') && jh1.includes('locked hai'), 'join page locks panel code when default set');
   ok((((await panelRow('LIMITED')) || {}).auto_join | 0) === 1, 'auto_join=1 saved in DB');
 
   await mkPanel('AUTO2', 0);
@@ -229,7 +230,7 @@ console.log('tenant account limit + auto join');
   await autoOn('AUTO2');
   const noAuto = (await env.DB.prepare('SELECT panel_code FROM panels WHERE auto_join=1').bind().all()).results;
   const jh3 = await (await call(env, 'GET', '/join-panel')).text();
-  ok(noAuto.length === 0 && !jh3.includes('value="AUTO2"'), 'auto-join toggles off cleanly');
+  ok(noAuto.length === 0 && !jh3.includes('value="AUTO2"') && !jh3.includes('readonly'), 'auto-join toggles off cleanly (code editable again)');
 
   await mkPanel('LIM3', 2);
   env.DB.prepare("INSERT INTO users (full_name,username,password_hash,role,panel_code) VALUES ('U1','lim_u1','x','RESELLER','LIM3')").bind().run();
@@ -244,6 +245,7 @@ console.log('tenant account limit + auto join');
   await setLimit('LIM3', 3);
   const jres2 = await call(env, 'POST', '/join-panel', { form: jfd });
   ok(jres2.status === 302, 'join allowed after limit increased');
+  ok((((await panelRow('LIM3')) || {}).account_limit | 0) === 3, 'pre-set limit respected on claim');
 
   env.DB.prepare("INSERT INTO referrals (code,role,duration,balance,panel_code,created_by) VALUES ('REF-LIM3','RESELLER',30,0,'LIM3',1)").bind().run();
   const rfd = new FormData();
@@ -257,6 +259,34 @@ console.log('tenant account limit + auto join');
   await setLimit('LIM3', 4);
   const rres2 = await call(env, 'POST', '/register', { form: rfd });
   ok(rres2.status === 302, 'referral register allowed after limit increase');
+
+  // claimed owner panel defaults to exactly one account (owner only)
+  const claimFd = new FormData();
+  claimFd.set('panel_code', 'AUTO2');
+  claimFd.set('username', 'auto2_owner');
+  claimFd.set('password', 'pass1234');
+  const claim = await call(env, 'POST', '/join-panel', { form: claimFd });
+  ok(claim.status === 302, 'AUTO2 claimed as owner');
+  ok((((await panelRow('AUTO2')) || {}).account_limit | 0) === 1, 'claimed panel defaults to 1 account (owner only)');
+  const claim2Fd = new FormData();
+  claim2Fd.set('panel_code', 'AUTO2');
+  claim2Fd.set('username', 'auto2_second');
+  claim2Fd.set('password', 'pass1234');
+  const claim2 = await call(env, 'POST', '/join-panel', { form: claim2Fd });
+  const claim2html = await claim2.text();
+  ok(claim2.status === 200 && claim2html.includes('already claimed'), 'second claim blocked (one owner per panel)');
+  env.DB.prepare("INSERT INTO referrals (code,role,duration,balance,panel_code,created_by) VALUES ('REF-AUTO2','RESELLER',30,0,'AUTO2',1)").bind().run();
+  const ofd = new FormData();
+  ofd.set('full_name', 'Auto Two User');
+  ofd.set('username', 'auto2_user');
+  ofd.set('password', 'pass1234');
+  ofd.set('referral_code', 'REF-AUTO2');
+  const ores = await call(env, 'POST', '/register', { form: ofd });
+  const ohtml = await ores.text();
+  ok(ores.status === 200 && ohtml.includes('account limit full'), 'owner-only panel blocks referrals until limit raised (1/1)');
+  await setLimit('AUTO2', 2);
+  const ores2 = await call(env, 'POST', '/register', { form: ofd });
+  ok(ores2.status === 302, 'referral allowed after admin raises limit (2)');
 }
 
 // ---------- 5. tenant isolation ----------
