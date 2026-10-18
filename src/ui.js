@@ -126,8 +126,13 @@ html[data-mode="dark"] .stat-ic{color:#C7C9FD;}
 .back-link:hover{color:var(--ink);background:var(--surface2);}
 .pill{padding:10px 14px;border-radius:10px;font-weight:800;font-size:13px;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--muted);text-align:center;transition:all 0.2s;}
 .pill.on{background:var(--p1);color:#fff;border-color:var(--p1);box-shadow:0 1px 2px var(--glow);}
-.stepper{display:flex;align-items:center;gap:10px;}
-.stepper button{width:42px;height:42px;border-radius:10px;font-size:20px;font-weight:900;line-height:1;background:var(--surface);border:1px solid var(--line);color:var(--ink);}
+.stepper{display:flex;align-items:center;gap:6px;min-width:0;}
+.stepper button{width:36px;height:36px;border-radius:10px;font-size:18px;font-weight:900;line-height:1;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;background:var(--surface);border:1px solid var(--line);color:var(--ink);transition:border-color .15s,background .15s,color .15s,transform .1s;}
+.stepper button:hover{border-color:var(--acc);color:var(--acc-d);background:var(--acc-soft);}
+.stepper button:active{transform:scale(.9);}
+.stepper input{min-width:0;text-align:center;}
+input[type=number]{-webkit-appearance:textfield;-moz-appearance:textfield;appearance:textfield;}
+input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 .costbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;border-radius:12px;background:var(--surface2);border:1px solid var(--line);}
 .theme-swatch{height:64px;border-radius:12px;margin-bottom:10px;border:1px solid var(--line);}
 .sw{position:relative;width:60px;height:32px;flex-shrink:0;display:inline-block;}

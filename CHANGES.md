@@ -20,6 +20,11 @@
 - `WORKER_VERSION` 1.2.0 → 1.3.0. `test/smoke.mjs`: +8 tests (PROFESSOR
   setup/migration, OWNER referral minting, admin coercion, quota
   enforcement) — **140/140 passing** on Node 26.
+- UI pass (fit/overlap): referral generate form mobile par 1-column
+  stack (Role / Duration / Balance), Balance bhi stepper; steppers ka
+  global polish — 36px buttons, hover/active states, native number
+  spinners off; permission quota + create-panel + aes rows wrap karte
+  hain bina squeeze ke.
 
 ## Pass 2026-10-17 — tenant account limits + auto join / default lock
 
