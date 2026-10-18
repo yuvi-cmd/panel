@@ -88,9 +88,11 @@ console.log('setup + auth');
   fd.set('username', 'boss');
   fd.set('password', 'secret123');
   const r2 = await call(env, 'POST', '/setup', { form: fd });
-  ok(r2.status === 302 && r2.headers.get('Location') === '/dashboard', 'POST /setup creates first OWNER');
+  ok(r2.status === 302 && r2.headers.get('Location') === '/dashboard', 'POST /setup creates main owner');
   var ownerCookie = cookieFrom(r2);
   ok(!!ownerCookie, 'setup sets session cookie');
+  const mainRole = ((await env.DB.prepare('SELECT role FROM users WHERE id=1').bind().first()) || {}).role;
+  ok(mainRole === 'PROFESSOR', 'main owner id 1 is the single PROFESSOR (got ' + mainRole + ')');
 }
 
 // ---------- 2. JSON login + dashboard ----------
@@ -99,7 +101,7 @@ console.log('json api auth');
   const r = await call(env, 'POST', '/api/login', { json: { username: 'boss', password: 'secret123', device_info: '{}' } });
   ok(r.status === 200, 'POST /api/login 200');
   const b = await r.json();
-  ok(b.ok === true && b.user.role === 'OWNER', 'login returns OWNER user', JSON.stringify(b).slice(0, 120));
+  ok(b.ok === true && b.user.role === 'PROFESSOR', 'login returns PROFESSOR (main owner)', JSON.stringify(b).slice(0, 120));
   var ownerApiCookie = cookieFrom(r) || ownerCookie;
   ok(!!ownerApiCookie, 'login sets session cookie');
 
@@ -143,10 +145,15 @@ console.log('users admin');
   ok(refb.ok === true && /^REF-/.test(refb.code), 'referral generated');
   ok(refb.role === 'RESELLER', 'referral role respected');
 
-  // OWNER-role referral must NOT be mintable anymore
+  // v1.3: owner may mint OWNER-role referrals (partner panel owners)
   const ref2 = await call(env, 'POST', '/api/referral', { cookie: ownerCookie, json: { action: 'generate', role: 'OWNER', duration: 30, balance: 0 } });
   const ref2b = await ref2.json();
-  ok(ref2b.ok === true && ref2b.role !== 'OWNER', 'OWNER referral coerced, got ' + ref2b.role);
+  ok(ref2b.ok === true && ref2b.role === 'OWNER', 'owner mints OWNER referral');
+
+  // PROFESSOR must never be mintable (single main professor)
+  const refP = await call(env, 'POST', '/api/referral', { cookie: ownerCookie, json: { action: 'generate', role: 'PROFESSOR', duration: 30, balance: 0 } });
+  const refPb = await refP.json();
+  ok(refPb.ok === true && refPb.role === 'RESELLER', 'PROFESSOR referral coerced to RESELLER');
 
   const fd = new FormData();
   fd.set('full_name', 'Res Eller');
@@ -166,7 +173,7 @@ console.log('users admin');
   const tb = await t.json();
   ok(t.status === 200 && tb.ok === true, 'toggle_block works (no ReferenceError)');
 
-  // legacy OWNER-role referral in DB must coerce to non-OWNER on register
+  // v1.3: owner-minted OWNER referral registers as OWNER
   env.DB.prepare("INSERT INTO referrals (code,role,duration,balance,panel_code,created_by) VALUES ('REF-LEGACY-OWNER','OWNER',30,0,'YUVI_001',1)").bind().run();
   const fd2 = new FormData();
   fd2.set('full_name', 'Legacy Owner');
@@ -177,7 +184,51 @@ console.log('users admin');
   const users2 = await call(env, 'GET', '/api/users', { cookie: ownerCookie });
   const ub2 = await users2.json();
   const leg = ub2.items.find((u) => u.username === 'leg1');
-  ok(!!leg && leg.role !== 'OWNER', 'legacy OWNER referral coerced to ' + (leg && leg.role));
+  ok(!!leg && leg.role === 'OWNER', 'owner-minted OWNER referral -> OWNER account');
+
+  // admin-minted OWNER-role code stays RESELLER-only (no escalation)
+  env.DB.prepare("INSERT INTO users (full_name,username,password_hash,role,panel_code) VALUES ('Ad Min','adm1','x','ADMIN','YUVI_001')").bind().run();
+  const adm1 = (await env.DB.prepare("SELECT id FROM users WHERE username='adm1'").bind().first()) || {};
+  env.DB.prepare("INSERT INTO referrals (code,role,duration,balance,panel_code,created_by) VALUES ('REF-ADMIN-OWNER','OWNER',30,0,'YUVI_001',?)").bind(adm1.id).run();
+  const fd3 = new FormData();
+  fd3.set('full_name', 'Adm Child');
+  fd3.set('username', 'admleg1');
+  fd3.set('password', 'pass1234');
+  fd3.set('referral_code', 'REF-ADMIN-OWNER');
+  await call(env, 'POST', '/register', { form: fd3 });
+  const users3 = await call(env, 'GET', '/api/users', { cookie: ownerCookie });
+  const ub3 = await users3.json();
+  const admleg = ub3.items.find((u) => u.username === 'admleg1');
+  ok(!!admleg && admleg.role === 'RESELLER', 'admin-minted OWNER code coerced to RESELLER');
+
+  // admin referral quota: owner sets limit, admin exhausts + gets blocked
+  const refA = await call(env, 'POST', '/api/referral', { cookie: ownerCookie, json: { action: 'generate', role: 'ADMIN', duration: 30, balance: 0 } });
+  const refAb = await refA.json();
+  ok(refAb.ok === true && refAb.role === 'ADMIN', 'owner mints ADMIN referral');
+  const fda = new FormData();
+  fda.set('full_name', 'Admin Quota');
+  fda.set('username', 'adm2');
+  fda.set('password', 'pass1234');
+  fda.set('referral_code', refAb.code);
+  await call(env, 'POST', '/register', { form: fda });
+  const lr = await call(env, 'POST', '/api/login', { json: { username: 'adm2', password: 'pass1234', device_info: '{}' } });
+  const adm2Cookie = cookieFrom(lr);
+  ok(!!adm2Cookie, 'admin2 can login');
+  const g1 = await call(env, 'POST', '/api/referral', { cookie: adm2Cookie, json: { action: 'generate', role: 'OWNER', duration: 30, balance: 0 } });
+  const g1b = await g1.json();
+  ok(g1.status === 200 && g1b.role === 'RESELLER', 'admin can mint only RESELLER (got ' + (g1b.role || g1.status) + ')');
+  const users4 = await call(env, 'GET', '/api/users', { cookie: ownerCookie });
+  const ub4 = await users4.json();
+  const adm2 = ub4.items.find((u) => u.username === 'adm2');
+  const qf = new FormData();
+  qf.set('target_id', String(adm2.id));
+  qf.set('action', 'update_limit');
+  qf.set('ref_limit', '1');
+  const qr = await call(env, 'POST', '/referral', { cookie: ownerCookie, form: qf });
+  ok(qr.status === 200, 'owner sets admin referral quota from referral page');
+  const g2 = await call(env, 'POST', '/api/referral', { cookie: adm2Cookie, json: { action: 'generate', role: 'RESELLER', duration: 30, balance: 0 } });
+  const g2b = await g2.json();
+  ok(g2.status === 403 && /limit reached/.test(g2b.error || ''), 'admin blocked after quota exhausted (got ' + g2.status + ')');
 }
 
 // ---------- 4b. tenant account limit + auto-join (Tenants page) ----------

@@ -8,7 +8,7 @@ export function panelLayout(o) {
   const isOA = role === 'OWNER' || role === 'ADMIN' || role === 'PROFESSOR';
   const isOwner = role === 'OWNER' || role === 'PROFESSOR';
   const isProf = role === 'PROFESSOR';
-  const canSeeSdk = (sess.id === 1 && role === 'OWNER') || isProf;
+  const canSeeSdk = sess.id === 1 || isProf;
   const initial = esc(String(sess.username || 'U').substring(0, 1).toUpperCase());
   const MGMT = isOA
     ? sideLabel('Management')

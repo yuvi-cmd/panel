@@ -1,5 +1,26 @@
 # CHANGES.md
 
+## Pass 2026-10-18 — single PROFESSOR + referral roles & admin quota
+
+- Single main owner: `/setup` now creates id 1 with role `PROFESSOR`
+  (top of PROFESSOR > OWNER > ADMIN > RESELLER). Existing installs are
+  migrated in place during `ensureDB` (`id=1 AND role='OWNER'` →
+  `PROFESSOR`, idempotent). PROFESSOR can never be minted via referral.
+- Claim/role-dependent lookups now recognise PROFESSOR: panel re-claim
+  guard (`/join-panel`), SDK gate (id 1), panel-expiry lookup
+  (`/connect|/encrypt`), generate-page owner copy, nav SDK link.
+- Referral roles: owner/professor can mint `OWNER`, `ADMIN` and
+  `RESELLER` codes; Admin only `RESELLER`. `/register` honours
+  OWNER/ADMIN roles only when the code's minter is OWNER/PROFESSOR —
+  admin-minted & legacy codes still coerce to RESELLER.
+- `/referral`: Owner panel — "Admin Reseller Quota" section (per-Admin
+  toggle + limit stepper, 0 = ∞); Admin panel — quota banner
+  (`used/limit`, ON/OFF) and generation blocked with reason once the
+  owner-set limit is reached or referrals are turned off.
+- `WORKER_VERSION` 1.2.0 → 1.3.0. `test/smoke.mjs`: +8 tests (PROFESSOR
+  setup/migration, OWNER referral minting, admin coercion, quota
+  enforcement) — **140/140 passing** on Node 26.
+
 ## Pass 2026-10-17 — tenant account limits + auto join / default lock
 
 - `panels.account_limit` (0 = unlimited): set while creating a tenant or

@@ -58,16 +58,36 @@ export function permissionsPage(list, o) {
 }
 
 export function referralPage(sess, list, o) {
-  const isOwner = sess.role === 'OWNER';
-  const msg = o.ok ? alertBox('ok', 'Referral Generated!', '<code class="font-mono font-black">' + esc(o.ok) + '</code> <button onclick="doCopy(\'' + esc(o.ok) + '\',this)" class="underline font-bold">Copy</button>') : o.error ? alertBox('err', 'Error', esc(o.error)) : '';
+  const ownerLike = sess.role === 'OWNER' || sess.role === 'PROFESSOR';
+  const saved = o.ok === 'Saved.';
+  const msg = o.ok ? alertBox('ok', saved ? 'Quota Saved' : 'Referral Generated!', saved ? 'Admin referral quota updated.' : '<code class="font-mono font-black">' + esc(o.ok) + '</code> <button onclick="doCopy(\'' + esc(o.ok) + '\',this)" class="underline font-bold">Copy</button>') : o.error ? alertBox('err', 'Error', esc(o.error)) : '';
+  const quota = o.quota;
+  const quotaFull = !!quota && quota.limit > 0 && quota.used >= quota.limit;
+  const quotaBlocked = !!quota && (!quota.can || quotaFull);
+  const quotaBar = quota
+    ? '<div class="flex flex-wrap items-center gap-1.5 mb-4"><span class="text-[11px] font-extrabold px-2.5 py-1 rounded-lg ' + (quota.can ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500') + '">Referrals ' + (quota.can ? 'ON' : 'OFF') + '</span><span class="text-[11px] font-extrabold px-2.5 py-1 rounded-lg bg-blue-50 text-blue-600">Quota: ' + (quota.limit > 0 ? quota.used + ' / ' + quota.limit + ' used' : '∞ unlimited') + '</span><span class="text-[11px] font-bold text-slate-400">Owner-controlled</span></div>'
+    : '';
   const rows = list.map(r => '<div class="clay-card p-3.5 rounded-2xl"><div class="flex items-center gap-2"><code class="flex-1 font-mono text-sm font-black min-w-0 break-all">' + esc(r.code) + '</code><button type="button" onclick="doCopy(\'' + esc(r.code) + '\',this)" title="Copy" class="clay-card w-9 h-9 rounded-xl text-slate-500 shrink-0"><i class="bi bi-clipboard"></i></button><form method="POST" onsubmit="return confirm(\'Delete referral?\')" class="shrink-0"><input type="hidden" name="del_code" value="' + esc(r.code) + '"><button name="action" value="delete_ref" class="clay-card px-3 py-2 rounded-xl text-red-500 text-[11px] font-extrabold"><i class="bi bi-trash"></i> Delete</button></form></div>'
     + '<div class="flex gap-1.5 mt-2 flex-wrap"><span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-blue-50 text-blue-600">' + esc(r.role) + '</span><span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-purple-50 text-purple-600">' + r.duration + ' days</span><span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-amber-50 text-amber-600">Rs ' + r.balance + '</span>' + (r.used ? '<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-red-50 text-red-500">USED</span>' : '<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-500">FRESH</span>') + '</div></div>').join('');
-  return hero('bi-diagram-3-fill', 'Referrals', list.length + ' codes • role + validity + balance', '') + msg
-    + '<form method="POST" class="glass-card p-5 md:p-6 mb-4 relative overflow-hidden"><input type="hidden" name="action" value="generate"><div class="absolute top-0 left-0 right-0 h-1 avatar-premium"></div>'
+  const genForm = quotaBlocked
+    ? alertBox('err', 'Referral Locked', quota.can ? 'Owner-set limit poori ho gayi (' + quota.used + '/' + quota.limit + ').' : 'Owner ne tumhara referral generation OFF kar diya hai.')
+    : '<form method="POST" class="glass-card p-5 md:p-6 mb-4 relative overflow-hidden"><input type="hidden" name="action" value="generate"><div class="absolute top-0 left-0 right-0 h-1 avatar-premium"></div>'
     + '<h3 class="font-black mb-3"><i class="bi bi-plus-circle mr-1"></i>Generate Referral Code</h3><div class="grid grid-cols-3 gap-2">'
-    + '<div><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Role</label><select name="role" class="w-full clay-card custom-select px-3 py-2.5 text-xs font-extrabold rounded-xl">' + (isOwner ? '<option>ADMIN</option>' : '') + '<option selected>RESELLER</option></select></div>'
+    + '<div><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Role</label><select name="role" class="w-full clay-card custom-select px-3 py-2.5 text-xs font-extrabold rounded-xl">' + (ownerLike ? '<option>OWNER</option><option>ADMIN</option>' : '') + '<option selected>RESELLER</option></select></div>'
     + '<div><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Days</label><div class="stepper clay-card px-1 rounded-xl"><button type="button" class="font-black px-1.5" onclick="nstep(\'rf-d\',-1,1,3650)">−</button><input type="number" id="rf-d" name="duration" value="30" min="1" max="3650" class="w-12 text-center font-black bg-transparent focus:outline-none text-sm"><button type="button" class="font-black px-1.5" onclick="nstep(\'rf-d\',1,1,3650)">+</button></div></div>'
     + '<div><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Balance Rs</label><input type="number" name="balance" value="0" min="0" class="w-full clay-card px-3 py-2.5 text-xs font-bold rounded-xl"></div></div>'
-    + '<button class="btn-premium w-full py-3.5 rounded-2xl text-xs font-extrabold uppercase mt-3"><i class="bi bi-magic"></i> Generate Code</button></form>'
+    + '<button class="btn-premium w-full py-3.5 rounded-2xl text-xs font-extrabold uppercase mt-3"><i class="bi bi-magic"></i> Generate Code</button></form>';
+  const adminRows = (o.admins || []).map(u => '<div class="clay-card p-3.5 rounded-2xl"><div class="flex items-center gap-2.5">'
+    + '<div class="w-9 h-9 rounded-lg avatar-premium text-white flex items-center justify-center font-extrabold text-sm shrink-0">' + esc(u.username.substring(0, 1).toUpperCase()) + '</div>'
+    + '<div class="flex-1 min-w-0"><p class="font-bold text-[13px] truncate">' + esc(u.username) + '</p>'
+    + '<div class="flex gap-1.5 mt-1 flex-wrap"><span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg ' + ((u.can_generate_referral | 0) ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400') + '">Referral ' + ((u.can_generate_referral | 0) ? 'ON' : 'OFF') + '</span><span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-blue-50 text-blue-600">Limit: ' + ((u.referral_limit | 0) || '∞') + '</span></div></div>'
+    + '<form method="POST" class="shrink-0"><input type="hidden" name="target_id" value="' + u.id + '"><input type="hidden" name="action" value="toggle_ref"><label class="sw"><input type="checkbox"' + ((u.can_generate_referral | 0) ? ' checked' : '') + ' onchange="this.form.submit()"><span class="tr"></span></label></form></div>'
+    + '<form method="POST" class="flex gap-2 mt-3 items-center"><input type="hidden" name="target_id" value="' + u.id + '"><input type="hidden" name="action" value="update_limit"><div class="stepper clay-card px-2 rounded-xl"><button type="button" class="font-black px-2" onclick="nstep(\'rl-' + u.id + '\',-1,0,9999)">−</button><input type="number" id="rl-' + u.id + '" name="ref_limit" min="0" max="9999" value="' + (u.referral_limit | 0) + '" class="w-16 text-center font-black bg-transparent focus:outline-none"><button type="button" class="font-black px-2" onclick="nstep(\'rl-' + u.id + '\',1,0,9999)">+</button></div><span class="text-[11px] text-slate-400 font-bold">0 = ∞</span><button class="btn-premium px-4 py-2 rounded-xl text-xs font-extrabold ml-auto">Set Limit</button></form></div>').join('');
+  const adminQuota = ownerLike
+    ? '<div class="glass-card p-5 md:p-6 mb-4 relative overflow-hidden"><div class="absolute top-0 left-0 right-0 h-1 avatar-premium"></div>'
+    + '<h3 class="font-black mb-1"><i class="bi bi-person-gear mr-1"></i>Admin Reseller Quota</h3><p class="text-[11px] text-slate-400 font-bold mb-3">Har Admin kitne reseller referral nikaal sakta hai • 0 = ∞</p>'
+    + '<div class="space-y-3">' + (adminRows || '<div class="clay-card p-4 text-center text-xs font-bold text-slate-400 rounded-2xl">Abhi koi Admin nahi hai</div>') + '</div></div>'
+    : '';
+  return hero('bi-diagram-3-fill', 'Referrals', list.length + ' codes • role + validity + balance', '') + msg + quotaBar + genForm + adminQuota
     + '<div class="grid grid-cols-1 md:grid-cols-2 gap-3">' + (rows || '<div class="glass-card p-8 text-center text-sm text-slate-400">No referrals yet</div>') + '</div>' + NSTEP;
 }

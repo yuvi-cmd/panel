@@ -29,7 +29,7 @@ import {
 const KEY_PRICING = { '2H': 10, '1D': 80, '3D': 150, '7D': 250, '15D': 350, '30D': 500, '60D': 900 };
 const KEY_DURATIONS = ['2H', '1D', '3D', '7D', '15D', '30D', '60D'];
 // Bump on every behaviour-changing release; visible at /api/health.
-const WORKER_VERSION = '1.2.0';
+const WORKER_VERSION = '1.3.0';
 
 function arcxRand(len) {
   const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -360,9 +360,10 @@ export async function handleApi(request, db, env) {
     if (!isOA) return J({ ok: false, error: 'Forbidden.' }, 403);
     const p = await readBody(request);
     if (p.action === 'generate') {
-      // FIX: OWNER may only mint ADMIN/RESELLER (never OWNER/PROFESSOR via referral).
+      // v1.3: OWNER/PROFESSOR may mint OWNER/ADMIN/RESELLER; ADMIN only
+      // RESELLER; PROFESSOR is never mintable (single professor).
       const rr = String(p.role || 'RESELLER').toUpperCase();
-      const role = isOwnerLike && ['ADMIN', 'RESELLER'].includes(rr) ? rr : 'RESELLER';
+      const role = isOwnerLike && ['OWNER', 'ADMIN', 'RESELLER'].includes(rr) ? rr : 'RESELLER';
       const dur = Math.min(3650, Math.max(1, parseInt(p.duration, 10) || 30));
       const bal = Math.max(0, parseInt(p.balance, 10) || 0);
       if (!isOwnerLike) {

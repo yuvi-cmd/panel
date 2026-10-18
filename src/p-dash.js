@@ -62,7 +62,7 @@ export function panelDashboard(sess, stats, balanceText) {
 }
 
 export function panelGenerate(sess, o) {
-  const isOwner = sess.role === 'OWNER';
+  const isOwner = sess.role === 'OWNER' || sess.role === 'PROFESSOR';
   const msg = o.ok ? alertBox('ok', 'Keys Generated!', esc(o.ok))
     : o.error ? alertBox('err', 'Error', esc(o.error)) : '';
   const pills = KEY_DURATIONS.map(d => '<div class="pill' + (d === '30D' ? ' on' : '') + '" data-dur="' + d + '" onclick="pickDur(this)">' + d + '<div style="font-size:10px;opacity:.8">Rs' + KEY_PRICING[d] + '</div></div>').join('');

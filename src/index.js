@@ -79,6 +79,9 @@ async function ensureDB(db, panelCode) {
   // Indexes last: they reference columns that legacy DBs only gain above.
   try { await db.exec(INDEX_SQL); } catch {}
   try { await db.prepare('INSERT OR IGNORE INTO panels (panel_code, is_active) VALUES (?,1)').bind(panelCode).run(); } catch {}
+  // v1.3: main owner (id 1) is THE single PROFESSOR. Legacy installs that
+  // created id 1 as OWNER are upgraded in place (idempotent).
+  try { await db.prepare("UPDATE users SET role='PROFESSOR' WHERE id=1 AND role='OWNER'").run(); } catch {}
   globalThis.__arcDbReady = panelCode;
 }
 
@@ -172,7 +175,7 @@ export default {
         const u = String(p.username || '').trim(), pw = String(p.password || '');
         if (u.length < 3 || pw.length < 4) return html(authPage({ mode: 'setup', error: 'Username min 3, password min 4.', panelName: envName }));
         if (await db.prepare('SELECT id FROM users WHERE username=?').bind(u).first().catch(() => null)) return html(authPage({ mode: 'setup', error: 'Username already hai.', panelName: envName }));
-        const r = await db.prepare('INSERT INTO users (full_name,username,password_hash,role,panel_code,balance) VALUES (?,?,?,?,?,?)').bind('Setup Admin', u, await hashPassword(pw), 'OWNER', mainPanel, 0).run();
+        const r = await db.prepare('INSERT INTO users (full_name,username,password_hash,role,panel_code,balance) VALUES (?,?,?,?,?,?)').bind('Setup Admin', u, await hashPassword(pw), 'PROFESSOR', mainPanel, 0).run();
         const t = crypto.randomUUID();
         await db.prepare('INSERT INTO sessions (token,user_id,expires_at) VALUES (?,?,?)').bind(t, r.meta.last_row_id, Date.now() + 6048e5).run();
         return redir('/dashboard', sessCookie(t, request));
@@ -223,10 +226,14 @@ export default {
           if (pcnt >= plim) return html(registerPage({ error: 'Tenant account limit full (' + pcnt + '/' + plim + ').', panelName: envName }));
         }
         const validity = new Date(Date.now() + (ref.duration | 0) * 864e5).toISOString().slice(0, 19).replace('T', ' ');
-        // FIX (privilege-escalation): referral registration may only create
-        // ADMIN or RESELLER accounts. Legacy OWNER-role referrals are coerced
-        // to ADMIN so a leaked code can't mint a new panel OWNER.
-        const regRole = ['ADMIN', 'RESELLER'].includes(String(ref.role || '').toUpperCase()) ? String(ref.role).toUpperCase() : 'RESELLER';
+        // v1.3 single-professor policy: PROFESSOR is never mintable via
+        // referral. OWNER/ADMIN/RESELLER codes are honoured only when the
+        // minter is OWNER/PROFESSOR; ADMIN-minted + legacy codes stay
+        // RESELLER-only so a leaked code can't escalate.
+        const minter = ref.created_by ? await db.prepare('SELECT role FROM users WHERE id=?').bind(ref.created_by).first().catch(() => null) : null;
+        const minterOwner = !!(minter && (minter.role === 'OWNER' || minter.role === 'PROFESSOR'));
+        const wantRole = String(ref.role || '').toUpperCase();
+        const regRole = minterOwner && ['OWNER', 'ADMIN', 'RESELLER'].includes(wantRole) ? wantRole : 'RESELLER';
         await db.prepare('INSERT INTO users (full_name,username,password_hash,role,invited_by,balance,validity,panel_code) VALUES (?,?,?,?,?,?,?,?)').bind(fn, u, await hashPassword(pw), regRole, ref.created_by || null, ref.balance | 0, validity, ref.panel_code).run();
         await db.prepare('UPDATE referrals SET used=1 WHERE code=?').bind(code).run();
         return redir('/login?msg=' + encodeURIComponent('Account created! Please login.'));
@@ -257,7 +264,7 @@ export default {
         if (!pc || u.length < 3 || pw.length < 4) return html(joinPage({ error: 'Sahi panel code / username / password (min 4) do.', panelName: envName, keepCode: pc }));
         const prow = await db.prepare('SELECT * FROM panels WHERE panel_code=?').bind(pc).first().catch(() => null);
         if (!prow) return html(joinPage({ error: 'Panel not found.', panelName: envName, keepCode: pc }));
-        const own = await db.prepare("SELECT id FROM users WHERE panel_code=? AND role='OWNER'").bind(pc).first().catch(() => null);
+        const own = await db.prepare("SELECT id FROM users WHERE panel_code=? AND role IN ('OWNER','PROFESSOR')").bind(pc).first().catch(() => null);
         if (own) return html(joinPage({ error: 'Panel already claimed hai.', panelName: envName, keepCode: pc }));
         if (await db.prepare('SELECT id FROM users WHERE username=?').bind(u).first().catch(() => null)) return html(joinPage({ error: 'Username taken.', panelName: envName, keepCode: pc }));
         const lim = prow.account_limit | 0;
@@ -501,20 +508,24 @@ export default {
     if (path === '/referral') {
       if (needOA()) return deny();
       let ok = '', error = '';
+      // Admin referral quota (owner-set): fetched once per request, reused by
+      // both the generate action and the page banner.
+      let me = null, used = 0;
+      if (!isOwnerLike) {
+        me = await db.prepare('SELECT can_generate_referral,referral_limit FROM users WHERE id=?').bind(myId).first().catch(() => ({}));
+        used = ((await db.prepare('SELECT COUNT(*) c FROM referrals WHERE created_by=?').bind(myId).first().catch(() => ({ c: 0 }))).c) | 0;
+      }
       if (method === 'POST') {
         const p = await formParams(request);
         if (p.action === 'generate') {
           const rr = String(p.role || 'RESELLER').toUpperCase();
-          // FIX: never mint OWNER/PROFESSOR via referral (see /register coercion).
-          let role = ((myRole === 'OWNER' || myRole === 'PROFESSOR') && ['ADMIN', 'RESELLER'].includes(rr)) ? rr : 'RESELLER';
+          // v1.3: owner/professor may mint OWNER/ADMIN/RESELLER codes; admin
+          // only RESELLER. PROFESSOR is never mintable (single professor).
+          const role = (isOwnerLike && ['OWNER', 'ADMIN', 'RESELLER'].includes(rr)) ? rr : 'RESELLER';
           const dur = Math.max(1, parseInt(p.duration, 10) || 30), bal = Math.max(0, parseInt(p.balance, 10) || 0);
-          if (myRole !== 'OWNER' && myRole !== 'PROFESSOR') {
-            const me = await db.prepare('SELECT can_generate_referral,referral_limit FROM users WHERE id=?').bind(myId).first().catch(() => ({}));
+          if (!isOwnerLike) {
             if (!(me?.can_generate_referral | 0)) error = 'Referral generation disabled for you.';
-            else if ((me?.referral_limit | 0) > 0) {
-              const c = await db.prepare('SELECT COUNT(*) c FROM referrals WHERE created_by=?').bind(myId).first().catch(() => ({ c: 99 }));
-              if ((c?.c || 0) >= (me.referral_limit | 0)) error = 'Referral limit reached.';
-            }
+            else if ((me?.referral_limit | 0) > 0 && used >= (me.referral_limit | 0)) error = 'Referral limit reached.';
           }
           if (!error) {
             const rb = new Uint8Array(4); crypto.getRandomValues(rb);
@@ -523,15 +534,27 @@ export default {
             ok = code;
           }
         } else if (p.action === 'delete_ref' && p.del_code) {
-          if (myRole === 'OWNER' || myRole === 'PROFESSOR') await db.prepare('DELETE FROM referrals WHERE code=? AND panel_code=?').bind(String(p.del_code), myPanel).run();
+          if (isOwnerLike) await db.prepare('DELETE FROM referrals WHERE code=? AND panel_code=?').bind(String(p.del_code), myPanel).run();
           else await db.prepare('DELETE FROM referrals WHERE code=? AND created_by=?').bind(String(p.del_code), myId).run();
           return redir('/referral');
+        } else if ((p.action === 'toggle_ref' || p.action === 'update_limit') && isOwnerLike) {
+          // Owner controls how many resellers an Admin may mint (0 = ∞).
+          const tid = parseInt(p.target_id, 10) || 0;
+          if (tid && tid !== myId) {
+            if (p.action === 'toggle_ref') await db.prepare('UPDATE users SET can_generate_referral=1-can_generate_referral WHERE id=? AND panel_code=?').bind(tid, myPanel).run();
+            else await db.prepare('UPDATE users SET referral_limit=? WHERE id=? AND panel_code=?').bind(Math.max(0, parseInt(p.ref_limit, 10) || 0), tid, myPanel).run();
+            ok = 'Saved.';
+          }
         }
       }
-      const list = (myRole === 'OWNER' || myRole === 'PROFESSOR')
+      const list = isOwnerLike
         ? (await db.prepare('SELECT * FROM referrals WHERE panel_code=? ORDER BY rowid DESC LIMIT 200').bind(myPanel).all().catch(() => ({ results: [] }))).results || []
         : (await db.prepare('SELECT * FROM referrals WHERE created_by=? ORDER BY rowid DESC LIMIT 200').bind(myId).all().catch(() => ({ results: [] }))).results || [];
-      return P('referral', 'Referrals', referralPage(sess, list, { ok, error }));
+      const admins = isOwnerLike
+        ? (await db.prepare("SELECT id,username,role,can_generate_referral,referral_limit FROM users WHERE panel_code=? AND role='ADMIN' AND id!=? ORDER BY id DESC LIMIT 50").bind(myPanel, myId).all().catch(() => ({ results: [] }))).results || []
+        : [];
+      const quota = isOwnerLike ? null : { can: !!(me?.can_generate_referral | 0), limit: me?.referral_limit | 0, used };
+      return P('referral', 'Referrals', referralPage(sess, list, { ok, error, quota, admins }));
     }
 
     // ---------- AES ----------
@@ -715,8 +738,8 @@ export default {
       return P('create-panel', 'New Tenant', createPanelPage(list, { ok, error }));
     }
 
-    // ---------- SDK (id==1 OWNER gate, same as PHP) ----------
-    const sdkGate = () => ((myId === 1 && myRole === 'OWNER') || isProfessor(sess) ? null : redir('/dashboard'));
+    // ---------- SDK (main-owner only, same as PHP) ----------
+    const sdkGate = () => (myId === 1 || isProfessor(sess) ? null : redir('/dashboard'));
     if (path === '/sdk') {
       const g = sdkGate(); if (g) return g;
       const q = async (sql, ...b) => (await db.prepare(sql).bind(...b).first().catch(() => ({})));

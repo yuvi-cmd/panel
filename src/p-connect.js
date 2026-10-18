@@ -135,7 +135,7 @@ export async function handleEncrypt(request, db, panel, env) {
     // created with a duration already carry panels.expires_at (previously
     // written but never honoured — /encrypt stayed blocked). Either counts.
     const notPast = (s) => { const ms = Date.parse(String(s || '').replace(' ', 'T') + 'Z'); return !isNaN(ms) && ms > Date.now(); };
-    const owner = await db.prepare("SELECT panel_expiry FROM users WHERE panel_code=? AND role='OWNER' ORDER BY id ASC LIMIT 1").bind(panel).first().catch(() => null);
+    const owner = await db.prepare("SELECT panel_expiry FROM users WHERE panel_code=? AND role IN ('OWNER','PROFESSOR') ORDER BY id ASC LIMIT 1").bind(panel).first().catch(() => null);
     if (!notPast(owner?.panel_expiry) && !notPast(prow.expires_at)) return J({ status: false, reason: 'PANEL NOT ACTIVATED' }, 403);
     const s = await loadSettings(db, panel);
     if (!s.aes_key || !s.aes_iv || !/^[0-9a-fA-F]{64}$/.test(s.aes_key) || !/^[0-9a-fA-F]{32}$/.test(s.aes_iv)) return J({ status: false, reason: 'ENCRYPTION NOT CONFIGURED' }, 500);
