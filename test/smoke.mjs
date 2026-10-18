@@ -389,17 +389,17 @@ console.log('connect + encrypt');
   const seeded = await env.DB.prepare('SELECT COUNT(*) n FROM mod_versions WHERE panel_code=?').bind('YUVI_001').first();
   ok((seeded.n | 0) >= 4, 'default versions seeded on first use (' + (seeded.n | 0) + ')');
   const pvr = await env.DB.prepare("SELECT id FROM mod_versions WHERE panel_code='YUVI_001' AND name='PRIVATE'").first();
+  const row = await env.DB.prepare("SELECT key_value FROM api_keys WHERE panel_code=? AND server_type='PRIVATE' LIMIT 1").bind('YUVI_001').first();
+  const fd = new FormData();
+  fd.set('game', 'PUBG'); fd.set('user_key', row.key_value); fd.set('serial', 'DEV-001');
+  // URL set nahi hai -> connect EMPTY lib_url bhejta hai, koi fixed link nahi
+  const c0 = await call(env, 'POST', '/connect/YUVI_001', { form: fd });
+  const cb0 = await c0.json();
+  ok(c0.status === 200 && cb0.data && cb0.data.lib_url === '' && !/github/i.test(JSON.stringify(cb0.data)), 'no hardcoded lib URL before owner sets one');
   const fsv = new FormData();
   fsv.set('form_type', 'version_save'); fsv.set('id', String(pvr.id)); fsv.set('name', 'PRIVATE'); fsv.set('tag', 'PAID'); fsv.set('url', 'https://cdn.example.com/private.zip');
   const rsv = await call(env, 'POST', '/loader-manager', { cookie: ownerCookie, form: fsv });
   ok(rsv.status === 200, 'version_save via loader page ok');
-
-  const fd = new FormData();
-  fd.set('game', 'PUBG');
-  // fetch key_value of a PRIVATE panel1 key directly
-  const row = await env.DB.prepare("SELECT key_value FROM api_keys WHERE panel_code=? AND server_type='PRIVATE' LIMIT 1").bind('YUVI_001').first();
-  fd.set('user_key', row.key_value);
-  fd.set('serial', 'DEV-001');
   const c = await call(env, 'POST', '/connect/YUVI_001', { form: fd });
   const cb = await c.json();
   ok(c.status === 200 && cb.status === true && cb.data && cb.data.lib_url === 'https://cdn.example.com/private.zip', 'connect lib_url comes from mod_versions');

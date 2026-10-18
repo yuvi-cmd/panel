@@ -12,10 +12,12 @@
 - Set Mod/Loader page redesign: **Mod Config card hata** (Server page pe
   hai), ab do tabs — "Mod URL" (version select + name/tag/URL edit; yahi
   URL connect bhejta hai) aur "Versions" (add/delete + row me inline
-  "Set tag").
-- Pehli baar lazily 4 starter versions seed hote hain (purane
-  `loader_files` URL jeette hain, warna legacy links) + `mod_settings`
-  marker — owner sab delete kare to wapas seed nahi hote.
+  "Set tag"). Tag ab dropdown hai (FREE / PAID + panel ke baaki tags +
+  "＋ Naya tag…" custom add).
+- Pehli baar lazily 4 starter versions seed hote hain (naam + tag; URL
+  sirf tab jab pehle `loader_files` me save tha — koi hardcoded/legacy
+  link nahi) + `mod_settings` marker — owner sab delete kare to wapas
+  seed nahi hote. URL khaali ho to connect `lib_url: ''` bhejta hai.
 - Generate page ke Server Type pills + Keys page ka server dropdown ab
   panel ke versions se dynamic; `/generate` POST, keys edit aur
   `/api/generate` custom version names accept karte hain.

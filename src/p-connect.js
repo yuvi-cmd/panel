@@ -1,19 +1,10 @@
 import { aes256CbcEncrypt } from './crypto.js';
 import { md5hex } from './crypto.js';
 
-// Legacy starter lib URLs — used ONLY to seed editable "versions" rows the
-// first time a panel is touched. After that, Set Mod/Loader (mod_versions)
-// is the single source of truth: connect never hardcodes a URL.
-const LEGACY_LIBS = {
-  PRIVATE: 'https://github.com/yuvicodes-lab/ONLINE-MOD/raw/refs/heads/main/libbgmi.zip',
-  PUBLIC: 'https://github.com/yuvicodes-lab/ONLINE-MOD/raw/refs/heads/main/lib_public.zip',
-  ADMIN: 'https://github.com/yuvicodes-lab/ONLINE-MOD/raw/refs/heads/main/lib_admin.zip',
-  SAFE: 'https://github.com/yuvicodes-lab/ONLINE-MOD/raw/refs/heads/main/lib_safe.zip',
-};
-
-// One-time per panel: seed 4 starter versions (existing loader_files URLs
-// win, else legacy links). A mod_settings marker stops re-seeding after the
-// owner deletes versions on purpose.
+// One-time per panel: seed 4 starter versions with EMPTY URLs (names+tags
+// only). URLs come from loader_files if the panel had already saved some —
+// connect never falls back to a hardcoded link. A mod_settings marker stops
+// re-seeding after the owner deletes versions on purpose.
 export async function ensureModVersions(db, panel) {
   try {
     const marker = await db.prepare("SELECT setting_value FROM mod_settings WHERE panel_code=? AND setting_name='modvers_seeded'").bind(panel).first().catch(() => null);
@@ -26,7 +17,7 @@ export async function ensureModVersions(db, panel) {
       const seed = [['PRIVATE', 'PAID'], ['PUBLIC', 'FREE'], ['ADMIN', 'PAID'], ['SAFE', 'FREE']];
       for (let i = 0; i < seed.length; i++) {
         const nm = seed[i][0], tg = seed[i][1];
-        const u = /^https?:\/\//i.test(libs[nm] || '') ? libs[nm] : LEGACY_LIBS[nm];
+        const u = /^https?:\/\//i.test(libs[nm] || '') ? libs[nm] : '';
         await db.prepare('INSERT INTO mod_versions (panel_code,name,tag,url,sort) VALUES (?,?,?,?,?)').bind(panel, nm, tg, u, i).run().catch(() => {});
       }
     }
