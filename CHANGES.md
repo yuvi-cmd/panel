@@ -1,5 +1,22 @@
 # CHANGES.md
 
+## Pass 2026-10-19 (5) — backend / frontend restructure
+
+- `src/` ab do saaf hisson me: **backend** (router, DB, APIs, crypto) aur
+  **frontend** (sirf HTML render). `src/index.js` ab sirf entry hai jo
+  `backend/router.js` export karta hai.
+- Naye backend modules: `db.js` (schema+migrations), `http.js`
+  (html/redir/cookies/tsMs/deny), `session.js`, `theme.js`,
+  `device.js` (deviceFingerprint — pehle p-auth me tha), `mundo.js`,
+  `bcore.js` (mundo/bcore handlers pehle router me the).
+- Frontend modules: `frontend/ui.js`, `frontend/panel-ui.js`,
+  `frontend/auth.js`, `frontend/panel/{dash,users,system}.js`,
+  `frontend/sdk/{dash,keys,server}.js` (path/naam `p-*`/`pages-*` se
+  clean kiye).
+- `wrangler.toml` `main` same (`src/index.js`) — deploy flow unchanged.
+- `test/smoke.mjs` import paths update; **151/151 passing** (behaviour
+  me koi change nahi — pure restructure).
+
 ## Pass 2026-10-18 (4) — tags owner-managed (built-in defaults hataye)
 
 - Tag options ab koi built-in nahi — FREE/PAID/PUBLIC/SAFE/PRIVATE

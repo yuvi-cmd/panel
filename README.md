@@ -35,16 +35,37 @@ Pehli baar site par `/setup` khol ke admin banao. Purane DB par bhi safe hai —
 - `/blocked` route nahi hai (zip me uska file tha hi nahi).
 - `/sdk/api-test`, `/sdk/encryption`, `/sdk/settings` nahi hain (zip me unke file missing hain).
 
-## Files
+## Files (backend / frontend structure)
 
-- `src/index.js` — router + saare POST actions + 4 API handlers
-- `src/panel-ui.js` — full-panel layout + role nav
-- `src/p-auth.js` — login/register/reset/join pages + device fingerprint
-- `src/p-dash.js` — dashboard + generate + key-list
-- `src/p-users.js` — users/admins/permissions/referral
-- `src/p-system.js` — server/settings/aes/api-test/create-panel/loader
-- `src/p-connect.js` — connect + encrypt API
-- `src/crypto.js`, `src/ui.js`, `src/pages-*.js` — SDK engine (same as pehle)
+```
+src/
+├── index.js                 # entry — sirf router export
+├── backend/                 # saara logic, DB, APIs
+│   ├── router.js            # saare routes + POST actions
+│   ├── db.js                # schema + migrations (ensureDB)
+│   ├── http.js              # html/redir/cookies/formParams/tsMs/deny
+│   ├── session.js           # sdk_session lookup + cookie helpers
+│   ├── theme.js             # ui_theme / accent / panel name
+│   ├── device.js            # device fingerprint (login + /api lock)
+│   ├── crypto.js            # RC4/BCORE/AES/MD5/hashPassword
+│   ├── security.js          # rate-limit + session cookie build
+│   ├── api.js               # /api/* JSON endpoints
+│   ├── connect.js           # /connect + /encrypt (app-facing)
+│   ├── mundo.js             # /sdk/mundo/* validation
+│   └── bcore.js             # /sdk/bcore/* validation
+└── frontend/                # sirf HTML render (koi DB/logic nahi)
+    ├── ui.js                # shared kit: CSS, esc, MODE_*, palette
+    ├── panel-ui.js          # panel chrome + role nav
+    ├── auth.js              # login/register/reset/join pages
+    ├── panel/               # panel (admin) pages
+    │   ├── dash.js          #   dashboard/generate/key-list
+    │   ├── users.js         #   users/admins/permissions/referral
+    │   └── system.js        #   server/settings/aes/api-test/loader
+    └── sdk/                 # SDK user pages
+        ├── dash.js          #   dashboard/generate
+        ├── keys.js          #   key manager
+        └── server.js        #   server + hash vault
+```
 
 D1 binding (`wrangler.toml` me set):
 ```toml

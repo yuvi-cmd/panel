@@ -93,15 +93,5 @@ export function joinPage(o) {
   return shell(o.panelName, 'Join Panel', locked ? 'Default tenant — code locked' : 'Claim empty panel as owner', inner);
 }
 
-// SHA-256 hex via WebCrypto (login fingerprint ke liye, PHP hash() parity)
-export async function sha256HexStr(s) {
-  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
-  return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-export function deviceFingerprint(diJson, ua, lang) {
-  let d = {};
-  try { d = JSON.parse(diJson || '{}'); } catch {}
-  const s = (d.screen || '') + '|' + (d.timezone || '') + '|' + (d.platform || '') + '|' + (d.canvas || '') + '|' + (d.webgl || '') + '|' + (d.audio || '') + '|' + (ua || '') + '|' + (lang || '');
-  return sha256HexStr(s);
-}
+// deviceFingerprint / sha256HexStr ab backend me hain: src/backend/device.js
+// (login + /api device lock dono wahin se use karte hain).

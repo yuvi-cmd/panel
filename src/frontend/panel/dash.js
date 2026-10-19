@@ -1,5 +1,5 @@
-import { esc } from './ui.js';
-import { pageHead, alertBox } from './panel-ui.js';
+import { esc } from '../ui.js';
+import { pageHead, alertBox } from '../panel-ui.js';
 
 export const KEY_PRICING = { '2H': 10, '1D': 80, '3D': 150, '7D': 250, '15D': 350, '30D': 500, '60D': 900 };
 export const KEY_DURATIONS = ['2H', '1D', '3D', '7D', '15D', '30D', '60D'];

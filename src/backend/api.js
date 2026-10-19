@@ -7,7 +7,7 @@
 // All timestamps stored UTC; responses include `_ist` display strings.
 
 import { verifyPassword, aes256CbcDecryptToString } from './crypto.js';
-import { deviceFingerprint } from './p-auth.js';
+import { deviceFingerprint } from './device.js';
 import {
   apiCors,
   assertPanelActive,
@@ -474,7 +474,7 @@ export async function handleApi(request, db, env) {
     const userKey = cleanStr(p.user_key, 50), serial = cleanStr(p.serial, 100);
     const ep = String(p.endpoint || 'encrypt').toLowerCase() === 'connect' ? 'connect' : 'encrypt';
     if (!userKey || !serial) return J({ ok: false, error: 'user_key and serial required.' }, 400);
-    const { handleConnect: hc, handleEncrypt: he } = await import('./p-connect.js');
+    const { handleConnect: hc, handleEncrypt: he } = await import('./connect.js');
     const fd = new FormData();
     fd.set('game', 'PUBG');
     fd.set('user_key', userKey);

@@ -1,5 +1,5 @@
-import { esc } from './ui.js';
-import { pageHead, alertBox } from './panel-ui.js';
+import { esc } from '../ui.js';
+import { pageHead, alertBox } from '../panel-ui.js';
 
 function hero(icon, title, sub, extra) {
   return '<div class="pagehead"><div class="ph-ic"><i class="bi ' + icon + '"></i></div>'

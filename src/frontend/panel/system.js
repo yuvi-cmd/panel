@@ -1,5 +1,5 @@
-import { esc } from './ui.js';
-import { pageHead, alertBox } from './panel-ui.js';
+import { esc } from '../ui.js';
+import { pageHead, alertBox } from '../panel-ui.js';
 
 const MOD_FIELDS = ['modname', 'mod_status', 'credit', 'license_key', 'ESP', 'Item', 'AIM', 'SilentAim', 'BulletTrack', 'Floating', 'Memory', 'Setting'];
 export { MOD_FIELDS };

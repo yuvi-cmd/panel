@@ -1,4 +1,4 @@
-import { esc } from './ui.js';
+import { esc } from '../ui.js';
 
 export function tabHead(title, icon, sub, tabsId, mundoCount, bcoreCount) {
   return '<div class="pagehead"><div class="ph-ic"><i class="bi ' + icon + '"></i></div>'

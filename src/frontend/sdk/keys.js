@@ -1,5 +1,5 @@
-import { esc } from './ui.js';
-import { tabHead } from './pages-dash.js';
+import { esc } from '../ui.js';
+import { tabHead } from './dash.js';
 
 export function keysPage(mundoKeys, bcoreKeys) {
   function card(k, engine) {
