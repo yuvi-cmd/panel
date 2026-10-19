@@ -1,10 +1,11 @@
 import { aes256CbcEncrypt } from './crypto.js';
 import { md5hex } from './crypto.js';
 
-// One-time per panel: seed 4 starter versions with EMPTY URLs (names+tags
-// only). URLs come from loader_files if the panel had already saved some —
-// connect never falls back to a hardcoded link. A mod_settings marker stops
-// re-seeding after the owner deletes versions on purpose.
+// One-time per panel: seed 4 starter versions with EMPTY tags/URLs
+// (names only — tags are fully owner-managed). URLs come from loader_files
+// if the panel had already saved some; connect never falls back to a
+// hardcoded link. A mod_settings marker stops re-seeding after the owner
+// deletes versions on purpose.
 export async function ensureModVersions(db, panel) {
   try {
     const marker = await db.prepare("SELECT setting_value FROM mod_settings WHERE panel_code=? AND setting_name='modvers_seeded'").bind(panel).first().catch(() => null);
@@ -14,11 +15,11 @@ export async function ensureModVersions(db, panel) {
       const r = await db.prepare('SELECT server_type,file_path FROM loader_files WHERE panel_code=?').bind(panel).all().catch(() => ({ results: [] }));
       const libs = {};
       for (const row of r.results || []) libs[String(row.server_type || '').toUpperCase()] = String(row.file_path || '');
-      const seed = [['PRIVATE', 'PAID'], ['PUBLIC', 'FREE'], ['ADMIN', 'PAID'], ['SAFE', 'FREE']];
+      const seed = ['PRIVATE', 'PUBLIC', 'ADMIN', 'SAFE'];
       for (let i = 0; i < seed.length; i++) {
-        const nm = seed[i][0], tg = seed[i][1];
+        const nm = seed[i];
         const u = /^https?:\/\//i.test(libs[nm] || '') ? libs[nm] : '';
-        await db.prepare('INSERT INTO mod_versions (panel_code,name,tag,url,sort) VALUES (?,?,?,?,?)').bind(panel, nm, tg, u, i).run().catch(() => {});
+        await db.prepare('INSERT INTO mod_versions (panel_code,name,tag,url,sort) VALUES (?,?,?,?,?)').bind(panel, nm, '', u, i).run().catch(() => {});
       }
     }
     await db.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES ('modvers_seeded','1',?) ON CONFLICT(setting_name,panel_code) DO NOTHING").bind(panel).run().catch(() => {});

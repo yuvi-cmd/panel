@@ -30,7 +30,7 @@ Pehli baar site par `/setup` khol ke admin banao. Purane DB par bhi safe hai —
 
 ## Note (PHP se farak)
 
-- `loader-manager` (Set Mod/Loader) me **versions** hain — har version ka name + tag (FREE/PAID/SAFE…) + lib URL; `connect` API har key ke server type ka URL **sirf isi panel config se** bhejta hai (koi hardcoded fallback nahi). Pehli baar 4 starter versions seed hote hain (naam+tag seed — URL khud set karna hoga, koi fixed link nahi). Zip upload nahi (Worker me disk nahi hota) — direct `.zip` link do.
+- `loader-manager` (Set Mod/Loader) me **versions** hain — har version ka name + tag (FREE/PAID/SAFE…) + lib URL; `connect` API har key ke server type ka URL **sirf isi panel config se** bhejta hai (koi hardcoded fallback nahi). Pehli baar 4 starter versions seed hote hain (sirf naam — tag aur URL khud set karo; koi fixed link / default tag nahi). Tags Versions tab ke **Tags** card se add/remove hote hain. Zip upload nahi (Worker me disk nahi hota) — direct `.zip` link do.
 - CSRF check nahi hai, Turnstile nahi hai (PHP login me bhi verify nahi tha).
 - `/blocked` route nahi hai (zip me uska file tha hi nahi).
 - `/sdk/api-test`, `/sdk/encryption`, `/sdk/settings` nahi hain (zip me unke file missing hain).

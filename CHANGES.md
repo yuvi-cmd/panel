@@ -1,5 +1,21 @@
 # CHANGES.md
 
+## Pass 2026-10-18 (4) — tags owner-managed (built-in defaults hataye)
+
+- Tag options ab koi built-in nahi — FREE/PAID/PUBLIC/SAFE/PRIVATE
+  defaults hata diye; starter versions bhi ab **tag ke bina** seed hote
+  hain (sirf naam).
+- Naya `mod_tags` table + Versions tab me **Tags card**: tag add karo,
+  chip ke ✕ se remove — remove karne par wo tag sab versions se bhi
+  clear ho jata hai.
+- Version dropdowns (Mod URL / Add version / row "Set tag") ab sirf
+  owner ke add kiye tags dikhate hain; koi option na mile to current
+  value hi dikh jata hai.
+- `connect` `plan`: tag khaali ho to naam se fallback (PUBLIC/SAFE=FREE,
+  baaki=PAID) — behaviour same.
+- `test/smoke.mjs`: +2 tests (tag_add, tag_del + version clear, 20
+  tables) — **151/151 passing**.
+
 ## Pass 2026-10-18 (3) — mod versions: connect DB-driven + Set Mod/Loader 2-tab
 
 - `connect` API ab lib URL **hardcode nahi** karta. Naya `mod_versions`

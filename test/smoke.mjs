@@ -426,6 +426,21 @@ console.log('connect + encrypt');
   const cbv = await cv.json();
   ok(cv.status === 200 && cbv.data && cbv.data.lib_url === 'https://cdn.example.com/vip.zip' && cbv.data.version === 'VIP GOLD' && cbv.data.plan === 'GOLD', 'custom version serves its own URL/label/plan');
 
+  // Tags are owner-managed: add + remove (remove clears it from versions).
+  const fta = new FormData();
+  fta.set('form_type', 'tag_add'); fta.set('name', 'TESTTAG');
+  await call(env, 'POST', '/loader-manager', { cookie: ownerCookie, form: fta });
+  const tga = await env.DB.prepare("SELECT COUNT(*) n FROM mod_tags WHERE panel_code='YUVI_001' AND name='TESTTAG'").first();
+  ok((tga.n | 0) === 1, 'tag_add saves custom tag');
+  const fts = new FormData();
+  fts.set('form_type', 'version_save'); fts.set('id', String(vip.id)); fts.set('name', 'VIP'); fts.set('tag', 'TESTTAG'); fts.set('url', 'https://cdn.example.com/vip.zip');
+  await call(env, 'POST', '/loader-manager', { cookie: ownerCookie, form: fts });
+  const ftd = new FormData();
+  ftd.set('form_type', 'tag_del'); ftd.set('name', 'TESTTAG');
+  await call(env, 'POST', '/loader-manager', { cookie: ownerCookie, form: ftd });
+  const tgd = await env.DB.prepare("SELECT (SELECT COUNT(*) FROM mod_tags WHERE panel_code='YUVI_001' AND name='TESTTAG') a,(SELECT COUNT(*) FROM mod_versions WHERE id=? AND tag='') b").bind(vip.id).first();
+  ok((tgd.a | 0) === 0 && (tgd.b | 0) === 1, 'tag_del removes tag + clears it from versions');
+
   const fdBad = new FormData();
   fdBad.set('game', 'OTHER');
   fdBad.set('user_key', 'x');
@@ -621,8 +636,8 @@ console.log('fresh install');
   const r0 = await app.fetch(new Request('https://panel.test/setup'), env3, {});
   ok(r0.status === 200, 'GET /setup renders on empty DB (got ' + r0.status + ')');
   const tables = (await db3.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all()).results.map((r) => r.name).sort();
-  const want = ['activation_keys', 'api_keys', 'bcore_key_bindings', 'bcore_keys', 'key_devices', 'loader_config', 'loader_files', 'mod_loaders', 'mod_maintenance', 'mod_settings', 'mod_versions', 'mundo_key_bindings', 'mundo_keys', 'panels', 'referrals', 'sdk_hash_vault', 'sdk_server_status', 'sessions', 'users'];
-  ok(JSON.stringify(tables) === JSON.stringify(want), 'all 19 tables auto-created (' + tables.length + '/19)');
+  const want = ['activation_keys', 'api_keys', 'bcore_key_bindings', 'bcore_keys', 'key_devices', 'loader_config', 'loader_files', 'mod_loaders', 'mod_maintenance', 'mod_settings', 'mod_tags', 'mod_versions', 'mundo_key_bindings', 'mundo_keys', 'panels', 'referrals', 'sdk_hash_vault', 'sdk_server_status', 'sessions', 'users'];
+  ok(JSON.stringify(tables) === JSON.stringify(want), 'all 20 tables auto-created (' + tables.length + '/20)');
   const idx = (await db3.prepare("SELECT name FROM sqlite_master WHERE type='index' AND sql IS NOT NULL").all()).results.map((r) => r.name);
   ok(['idx_users_panel', 'idx_api_panel', 'idx_dev_panel', 'idx_sess_user'].every((n) => idx.includes(n)), 'indexes auto-created');
   const fd = new FormData();

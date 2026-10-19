@@ -123,18 +123,20 @@ export function createPanelPage(list, o) {
 export function loaderPage(o) {
   const msg = o.error ? alertBox('err', 'Error', esc(o.error)) : o.ok ? alertBox('ok', 'Saved', esc(o.ok)) : '';
   const versions = o.versions || [];
-  const tags = o.tags || ['FREE', 'PAID', 'PUBLIC', 'PRIVATE', 'SAFE'];
+  const tags = o.tags || [];
   const badge = (t) => {
     const s = String(t || '').toUpperCase();
     if (!s) return '<span class="chip chip-n">NO TAG</span>';
     return '<span class="chip ' + (s === 'FREE' || s === 'PUBLIC' ? 'chip-g' : s === 'PAID' ? 'chip-a' : 'chip-i') + '">' + esc(s) + '</span>';
   };
-  const tagOpts = ['FREE', 'PAID'].concat(tags.filter(t => t !== 'FREE' && t !== 'PAID'));
-  const tagSel = (id, val, extra, withNew) => '<select id="' + id + '" name="tag" ' + extra + ' class="w-full clay-card px-3 py-2.5 text-sm font-bold rounded-xl focus:outline-none">'
-    + '<option value="">— no tag —</option>'
-    + tagOpts.map(t => '<option value="' + esc(t) + '"' + (String(val || '').toUpperCase() === t ? ' selected' : '') + '>' + esc(t) + '</option>').join('')
-    + (withNew ? '<option value="__new">＋ Naya tag…</option>' : '')
-    + '</select>';
+  const tagSel = (id, val, extra) => {
+    const cur = String(val || '').toUpperCase();
+    const opts = (cur && tags.indexOf(cur) < 0) ? [cur].concat(tags) : tags;
+    return '<select id="' + id + '" name="tag" ' + extra + ' class="w-full clay-card px-3 py-2.5 text-sm font-bold rounded-xl focus:outline-none">'
+      + '<option value="">— no tag —</option>'
+      + opts.map(t => '<option value="' + esc(t) + '"' + (cur === t ? ' selected' : '') + '>' + esc(t) + '</option>').join('')
+      + '</select>';
+  };
   const first = versions[0] || null;
   const picker = versions.length
     ? '<label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Version select karo</label><select id="vs-pick" onchange="ldPick(this)" class="w-full clay-card px-3 py-2.5 text-sm font-bold rounded-xl mb-3">' + versions.map((v, i) => '<option value="' + v.id + '"' + (i === 0 ? ' selected' : '') + ' data-name="' + esc(v.name) + '" data-tag="' + esc(v.tag || '') + '" data-url="' + esc(v.url || '') + '">' + esc(v.name) + (v.tag ? ' — ' + esc(String(v.tag).toUpperCase()) : '') + '</option>').join('') + '</select>'
@@ -145,14 +147,17 @@ export function loaderPage(o) {
     + picker
     + '<div class="grid grid-cols-1 md:grid-cols-2 gap-3">'
     + fld('Version name', 'vs-name', 'name', first ? first.name : '', 'placeholder="PRIVATE" maxlength="30" style="text-transform:uppercase"')
-    + '<div><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Tag (FREE / PAID)</label>' + tagSel('vs-tag', first ? first.tag : '', 'onchange="ldNewTag(this)"', true) + '</div>'
+    + '<div><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Tag</label>' + tagSel('vs-tag', first ? first.tag : '', '') + '</div>'
     + '</div>'
     + '<div class="mt-3"><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Lib URL (.zip)</label><input type="text" id="vs-url" name="url" value="' + esc(first ? (first.url || '') : '') + '" placeholder="https://.../lib.zip" class="w-full clay-card px-3 py-2.5 text-xs font-mono rounded-xl focus:outline-none"></div>'
     + (versions.length ? '<button class="btn-premium w-full py-3 rounded-xl text-xs font-extrabold uppercase mt-3">Save</button>' : '')
     + '</form></div>';
-  const addForm = '<form method="POST" class="glass-card p-5 md:p-6 mb-4 relative overflow-hidden"><input type="hidden" name="form_type" value="version_add"><div class="absolute top-0 left-0 right-0 h-1 avatar-premium"></div><h3 class="font-black mb-1"><i class="bi bi-plus-circle mr-1"></i>Add version</h3><p class="text-[11px] text-slate-500 mb-3">Naya name (PRIVATE / ADMIN / FREE…) + tag — URL "Mod URL" tab me set hoga.</p><div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">'
+  const tagCard = '<div class="glass-card p-5 md:p-6 mb-4 relative overflow-hidden"><div class="absolute top-0 left-0 right-0 h-1 avatar-premium"></div><h3 class="font-black mb-1"><i class="bi bi-tags mr-1"></i>Tags</h3><p class="text-[11px] text-slate-500 mb-3">Yahi options version dropdown me aayenge. ✕ se remove — versions se bhi hat jayega.</p>'
+    + '<form method="POST" class="flex flex-wrap gap-2 items-center mb-3"><input type="hidden" name="form_type" value="tag_add"><input type="text" name="name" maxlength="20" placeholder="FREE / PAID / VIP…" class="clay-card px-3 py-2.5 text-sm font-bold rounded-xl focus:outline-none flex-1 min-w-[160px]" style="text-transform:uppercase"><button class="btn-premium px-5 py-2.5 rounded-xl text-xs font-extrabold uppercase">Add tag</button></form>'
+    + '<div class="flex flex-wrap gap-2">' + (tags.length ? tags.map(t => '<form method="POST" class="inline" onsubmit="return confirm(\'Tag remove?\')"><input type="hidden" name="form_type" value="tag_del"><input type="hidden" name="name" value="' + esc(t) + '"><button class="chip chip-i" style="cursor:pointer" title="Remove tag"><i class="bi bi-x-lg" style="font-size:9px"></i>' + esc(t) + '</button></form>').join('') : '<p class="text-xs font-bold text-slate-400">Koi tag nahi — upar se add karo.</p>') + '</div></div>';
+  const addForm = '<form method="POST" class="glass-card p-5 md:p-6 mb-4 relative overflow-hidden"><input type="hidden" name="form_type" value="version_add"><div class="absolute top-0 left-0 right-0 h-1 avatar-premium"></div><h3 class="font-black mb-1"><i class="bi bi-plus-circle mr-1"></i>Add version</h3><p class="text-[11px] text-slate-500 mb-3">Naya name (PRIVATE / ADMIN / VIP…) + tag — URL "Mod URL" tab me set hoga.</p><div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">'
     + fld('Name', 'va-name', 'name', '', 'placeholder="VIP" maxlength="30" style="text-transform:uppercase"')
-    + '<div><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Tag (FREE / PAID)</label>' + tagSel('va-tag', '', 'onchange="ldNewTag(this)"', true) + '</div>'
+    + '<div><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Tag</label>' + tagSel('va-tag', '', '') + '</div>'
     + '<button class="btn-premium py-2.5 rounded-xl text-xs font-extrabold uppercase">Add version</button>'
     + '</div></form>';
   const rows = versions.map(v => '<div class="clay-card p-3.5 rounded-2xl mb-2">'
@@ -163,10 +168,10 @@ export function loaderPage(o) {
     + '<form method="POST" class="inline" onsubmit="return confirm(\'Version delete?\')"><input type="hidden" name="form_type" value="version_del"><input type="hidden" name="id" value="' + v.id + '"><button class="mini-btn danger"><i class="bi bi-trash"></i></button></form>'
     + '</div>'
     + '<form method="POST" class="flex flex-wrap gap-2 items-center mt-2.5"><input type="hidden" name="form_type" value="version_save"><input type="hidden" name="id" value="' + v.id + '"><input type="hidden" name="name" value="' + esc(v.name) + '"><input type="hidden" name="url" value="' + esc(v.url || '') + '">'
-    + tagSel('tg-' + v.id, v.tag, 'style="width:150px"', false)
+    + tagSel('tg-' + v.id, v.tag, 'style="width:150px"')
     + '<button class="mini-btn accent">Set tag</button></form>'
     + '</div>').join('');
-  const tab2 = '<div id="ldt2" style="display:none">' + addForm
+  const tab2 = '<div id="ldt2" style="display:none">' + tagCard + addForm
     + '<div class="glass-card p-4 md:p-5">' + (rows || '<p class="text-xs font-bold text-slate-500 text-center py-4">Abhi koi version nahi.</p>') + '</div></div>';
   return hero('bi-box-seam-fill', 'Set Mod/Loader', 'Versions + tags — connect inhi se lib URL bhejta hai', '') + msg
     + '<form method="POST" class="glass-card p-4 mb-4 flex flex-wrap gap-2 items-center"><input type="hidden" name="form_type" value="loader_config"><b class="text-xs font-extrabold uppercase tracking-wider text-slate-500"><i class="bi bi-tag-fill mr-1"></i>Loader version</b><div class="stepper"><button type="button" onclick="nstep(\'ld-v\',-1,1,99)">−</button><input type="number" step="0.1" min="1" max="99" id="ld-v" name="version" value="' + esc(o.version || '1.0') + '"><button type="button" onclick="nstep(\'ld-v\',1,1,99)">+</button></div><button class="btn-premium px-5 py-2.5 rounded-xl text-xs font-extrabold">Save</button></form>'
@@ -175,7 +180,6 @@ export function loaderPage(o) {
     + '<script>function ldShow(t){var a=document.getElementById(\'ldt1\'),b=document.getElementById(\'ldt2\');a.style.display=t===\'t1\'?\'\':\'none\';b.style.display=t===\'t2\'?\'\':\'none\';var ps=document.querySelectorAll(\'.pill[data-t]\');for(var i=0;i<ps.length;i++)ps[i].classList.toggle(\'on\',ps[i].getAttribute(\'data-t\')===t);}'
     + 'function ldPick(sel){var op=sel.options[sel.selectedIndex];if(!op)return;document.getElementById(\'vs-id\').value=op.value;document.getElementById(\'vs-name\').value=op.getAttribute(\'data-name\')||\'\';ldSetTag(op.getAttribute(\'data-tag\')||\'\');document.getElementById(\'vs-url\').value=op.getAttribute(\'data-url\')||\'\';}'
     + 'function ldSetTag(v){var s=document.getElementById(\'vs-tag\');if(!s)return;v=String(v||\'\').toUpperCase();var f=false;for(var i=0;i<s.options.length;i++){if(s.options[i].value===v){f=true;break;}}if(!f&&v){var o=document.createElement(\'option\');o.value=v;o.text=v;s.add(o,1);}s.value=v;}'
-    + 'function ldNewTag(sel){if(sel.value!==\'__new\'){sel.setAttribute(\'data-prev\',sel.value);return;}var prev=sel.getAttribute(\'data-prev\')||\'\';var t=(prompt(\'Naya tag likho (FREE / PAID / VIP…) — max 20\')||\'\').trim().toUpperCase();if(t&&/^[A-Z0-9 _.-]{1,20}$/.test(t)){var o=document.createElement(\'option\');o.value=t;o.text=t;sel.add(o,1);sel.value=t;sel.setAttribute(\'data-prev\',t);}else{sel.value=prev;}}'
     + 'function ldEdit(id){var s=document.getElementById(\'vs-pick\');if(!s)return;for(var i=0;i<s.options.length;i++){if(s.options[i].value===String(id)){s.selectedIndex=i;break;}}ldPick(s);ldShow(\'t1\');}'
     + 'function nstep(id,d,mn,mx){var e=document.getElementById(id);if(!e)return;var v=Math.round(((parseFloat(e.value||mn)||mn)+d)*10)/10;v=Math.max(mn,Math.min(mx,v));e.value=v;}</script>';
 }

@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS mod_maintenance (panel_code TEXT PRIMARY KEY, is_acti
 CREATE TABLE IF NOT EXISTS loader_config (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL UNIQUE, version REAL NOT NULL DEFAULT 1.0, updated_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS loader_files (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL, file_name TEXT NOT NULL, file_path TEXT NOT NULL, server_type TEXT NOT NULL DEFAULT 'PRIVATE', uploaded_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS mod_versions (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL, name TEXT NOT NULL, tag TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '', sort INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE(panel_code, name));
+CREATE TABLE IF NOT EXISTS mod_tags (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL, name TEXT NOT NULL, sort INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE(panel_code, name));
 CREATE TABLE IF NOT EXISTS referrals (code TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'RESELLER', duration INTEGER NOT NULL DEFAULT 30, balance INTEGER NOT NULL DEFAULT 0, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', created_by INTEGER, used INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS activation_keys (id INTEGER PRIMARY KEY AUTOINCREMENT, activation_key TEXT NOT NULL UNIQUE, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', name TEXT, duration_months INTEGER NOT NULL DEFAULT 1, expires_at TEXT NOT NULL, is_used INTEGER NOT NULL DEFAULT 0, used_by TEXT, used_at TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS mod_loaders (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', app_name TEXT NOT NULL DEFAULT '', package_name TEXT NOT NULL DEFAULT '', sha256 TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '', is_blocked INTEGER NOT NULL DEFAULT 0, expires_at TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), request_count INTEGER NOT NULL DEFAULT 0, last_ping TEXT, is_binded INTEGER NOT NULL DEFAULT 0);
@@ -719,11 +720,28 @@ export default {
           const id = parseInt(p.id, 10) || 0;
           await db.prepare('DELETE FROM mod_versions WHERE id=? AND panel_code=?').bind(id, myPanel).run();
           ok = 'Version deleted.';
+        } else if (p.form_type === 'tag_add') {
+          const nm = String(p.name || '').trim().toUpperCase().slice(0, 20);
+          if (!/^[A-Z0-9][A-Z0-9 _.-]{0,19}$/.test(nm)) error = 'Tag 1-20: letters/numbers/space . _ -';
+          else {
+            const ex = await db.prepare('SELECT id FROM mod_tags WHERE panel_code=? AND UPPER(name)=UPPER(?)').bind(myPanel, nm).first().catch(() => null);
+            if (ex) error = 'Tag "' + nm + '" already exists.';
+            else {
+              const mx = await db.prepare('SELECT COALESCE(MAX(sort),-1) m FROM mod_tags WHERE panel_code=?').bind(myPanel).first().catch(() => ({}));
+              await db.prepare('INSERT INTO mod_tags (panel_code,name,sort) VALUES (?,?,?)').bind(myPanel, nm, (mx?.m | 0) + 1).run();
+              ok = 'Tag ' + nm + ' added.';
+            }
+          }
+        } else if (p.form_type === 'tag_del') {
+          const nm = String(p.name || '').trim().toUpperCase().slice(0, 20);
+          await db.prepare('DELETE FROM mod_tags WHERE panel_code=? AND UPPER(name)=UPPER(?)').bind(myPanel, nm).run();
+          await db.prepare("UPDATE mod_versions SET tag='' WHERE panel_code=? AND UPPER(tag)=UPPER(?)").bind(myPanel, nm).run();
+          ok = 'Tag ' + nm + ' removed (versions se bhi hat gaya).';
         }
       }
       const versions = await db.prepare('SELECT id,name,tag,url FROM mod_versions WHERE panel_code=? ORDER BY sort ASC, id ASC').bind(myPanel).all().then(r => r.results || []).catch(() => []);
       const ver = await db.prepare('SELECT version FROM loader_config WHERE panel_code=?').bind(myPanel).first().catch(() => null);
-      const tags = [...new Set(['FREE', 'PAID', 'PUBLIC', 'PRIVATE', 'SAFE'].concat(versions.map(v => String(v.tag || '').toUpperCase()).filter(Boolean)))];
+      const tags = await db.prepare('SELECT name FROM mod_tags WHERE panel_code=? ORDER BY sort ASC, name ASC').bind(myPanel).all().then(r => (r.results || []).map(x => x.name)).catch(() => []);
       return P('loader-manager', 'Set Mod/Loader', loaderPage({ ok, error, version: ver?.version || '1.0', versions, tags }));
     }
 
