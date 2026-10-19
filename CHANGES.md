@@ -1,5 +1,19 @@
 # CHANGES.md
 
+## Pass 2026-10-19 (6) — Vercel deploy (same UI, DB = D1 REST)
+
+- Naya `api/panel.js` — Vercel serverless entry; worker router ko wahi
+  `fetch(request, env)` contract se chalata hai. UI/routes/APIs **same code**.
+- Naya `src/backend/d1-rest.js` — Cloudflare **D1 REST API** adapter
+  (`prepare/bind/first/all/run/exec`), native binding ke bina.
+- Naya `vercel.json` — saare routes `/api/panel` par rewrite + function
+  config; `vercel/README.md` + `vercel/.env.example` deploy guide.
+- Naya `test/vercel-local.mjs` — fake CF REST (node:sqlite) par 16 tests:
+  adapter shape + full panel (setup/login/dashboard) vercel handler se.
+- `npm test` ab dono suites chalata hai (smoke 151 + vercel 16).
+- README: D1 binding info wrangler.toml se sync (database_name `panel`,
+  id `543f2e0c…`) + Vercel section.
+
 ## Pass 2026-10-19 (5) — backend / frontend restructure
 
 - `src/` ab do saaf hisson me: **backend** (router, DB, APIs, crypto) aur

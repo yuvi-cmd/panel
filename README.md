@@ -71,6 +71,19 @@ D1 binding (`wrangler.toml` me set):
 ```toml
 [[d1_databases]]
 binding = "DB"
-database_name = "sdk"
-database_id = "02ec2c47-2db5-4b52-b914-6b67b93511f4"
+database_name = "panel"
+database_id = "543f2e0c-e536-46f4-92c6-d8e32b8524e1"
 ```
+
+## Vercel deploy (optional) — same panel, DB = Cloudflare D1 (REST)
+
+Worker ke alawa same panel **Vercel** par bhi chal sakta hai — UI/routes/APIs
+sab same code, bas DB native binding ki jagah **D1 REST API** se aata hai.
+D1 wahi rehta hai (data common), toh Worker + Vercel dono ek hi DB dikhate hain.
+
+- Entry: `api/panel.js` (Vercel function) + `vercel.json` (rewrites) +
+  `src/backend/d1-rest.js` (D1 REST adapter).
+- Env vars chahiye: `CF_ACCOUNT_ID`, `CF_D1_DATABASE_ID`,
+  `CF_D1_API_TOKEN` (D1 Edit), `PANEL_CODE`, `PANEL_NAME`,
+  `BCORE_SECRET`, `MUNDO_SALT`, `ARCX_TOKEN_SALT` (Worker wali same values!).
+- Poora guide: `vercel/README.md` · Local test: `node test/vercel-local.mjs`
