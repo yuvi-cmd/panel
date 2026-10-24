@@ -1,6 +1,30 @@
 import { aes256CbcEncrypt } from './crypto.js';
 import { md5hex } from './crypto.js';
 
+// Client downloads `lib_url` verbatim. Reject malformed hosts such as
+// "https://storage/..." here so a successful login never turns into
+// "Unable to resolve host \"storage\"" on the device.
+export function libUrlOk(value, { allowEmpty = true } = {}) {
+  const s = String(value == null ? '' : value).trim();
+  if (s === '') return allowEmpty;
+  if (s.length > 500 || /\s/.test(s)) return false;
+  let u;
+  try { u = new URL(s); } catch { return false; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+  if (u.username || u.password) return false;
+  const host = u.hostname;
+  if (!host || host.length > 253) return false;
+  if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) return false;
+  const labels = host.split('.');
+  if (labels.length < 2) return false;
+  return labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label));
+}
+
+export function safeLibUrl(value) {
+  const s = String(value == null ? '' : value).trim();
+  return libUrlOk(s, { allowEmpty: false }) ? s : '';
+}
+
 // One-time per panel: seed 4 starter versions with EMPTY tags/URLs
 // (names only — tags are fully owner-managed). URLs come from loader_files
 // if the panel had already saved some; connect never falls back to a
@@ -18,7 +42,7 @@ export async function ensureModVersions(db, panel) {
       const seed = ['PRIVATE', 'PUBLIC', 'ADMIN', 'SAFE'];
       for (let i = 0; i < seed.length; i++) {
         const nm = seed[i];
-        const u = /^https?:\/\//i.test(libs[nm] || '') ? libs[nm] : '';
+        const u = safeLibUrl(libs[nm] || '');
         await db.prepare('INSERT INTO mod_versions (panel_code,name,tag,url,sort) VALUES (?,?,?,?,?)').bind(panel, nm, '', u, i).run().catch(() => {});
       }
     }
@@ -69,6 +93,21 @@ async function versionFor(db, panel, st) {
   if (!r) r = await pick("SELECT id,name,tag,url FROM mod_versions WHERE panel_code=? AND UPPER(name)='PRIVATE' LIMIT 1", [panel]);
   if (!r) r = await pick('SELECT id,name,tag,url FROM mod_versions WHERE panel_code=? ORDER BY sort ASC, id ASC LIMIT 1', [panel]);
   return r || null;
+}
+
+// A row may contain a URL saved before strict validation existed. If it is
+// non-empty but malformed, fall back to loader_files (same server type,
+// then PRIVATE) so clients never receive an unreachable host.
+async function libUrlFor(db, panel, st, ver) {
+  const stored = String(ver && ver.url ? ver.url : '').trim();
+  const direct = safeLibUrl(stored);
+  if (direct || stored === '') return direct;
+  const r = await db.prepare('SELECT server_type,file_path FROM loader_files WHERE panel_code=?').bind(panel).all().catch(() => ({ results: [] }));
+  const rows = r.results || [];
+  const pick = rows.find((row) => String(row.server_type || '').toUpperCase() === st)
+    || rows.find((row) => String(row.server_type || '').toUpperCase() === 'PRIVATE')
+    || rows.find((row) => safeLibUrl(row.file_path));
+  return pick ? safeLibUrl(pick.file_path) : '';
 }
 
 async function verifyKey(db, panel, userKey, serial) {
@@ -122,7 +161,7 @@ export async function handleConnect(request, db, panel, env) {
     const st = (String(v.key.server_type || 'PRIVATE').toUpperCase().replace(/[^A-Z0-9 _.-]/g, '').slice(0, 30)) || 'PRIVATE';
     let ver = await versionFor(db, panel, st);
     if (!ver) { await ensureModVersions(db, panel); ver = await versionFor(db, panel, st); }
-    const lib = ver && ver.url ? String(ver.url) : '';
+    const lib = await libUrlFor(db, panel, st, ver);
     const label = ver ? (String(ver.name) + (ver.tag ? ' ' + String(ver.tag) : '')).toUpperCase() : st;
     const plan = ver && ver.tag ? String(ver.tag).toUpperCase() : (st === 'PUBLIC' || st === 'SAFE' ? 'FREE' : 'PAID');
     return J({

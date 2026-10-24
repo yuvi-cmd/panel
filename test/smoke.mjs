@@ -405,6 +405,21 @@ console.log('connect + encrypt');
   ok(c.status === 200 && cb.status === true && cb.data && cb.data.lib_url === 'https://cdn.example.com/private.zip', 'connect lib_url comes from mod_versions');
   ok(cb.data && cb.data.version === 'PRIVATE PAID' && cb.data.plan === 'PAID', 'connect version label + plan from tag');
 
+  // Malformed lib URL (bare host like "storage") must not reach clients.
+  const fsvBad = new FormData();
+  fsvBad.set('form_type', 'version_save'); fsvBad.set('id', String(pvr.id)); fsvBad.set('name', 'PRIVATE'); fsvBad.set('tag', 'PAID'); fsvBad.set('url', 'https://storage/private.zip');
+  await call(env, 'POST', '/loader-manager', { cookie: ownerCookie, form: fsvBad });
+  const storedBad = await env.DB.prepare('SELECT url FROM mod_versions WHERE id=?').bind(pvr.id).first();
+  ok(storedBad.url === 'https://cdn.example.com/private.zip', 'invalid lib URL rejected on save');
+
+  // Legacy bad rows fall back to a valid loader_files URL.
+  await env.DB.prepare("UPDATE mod_versions SET url='https://storage/private.zip' WHERE id=?").bind(pvr.id).run();
+  await env.DB.prepare("INSERT INTO loader_files (panel_code,file_name,file_path,server_type) VALUES ('YUVI_001','private.zip','https://cdn.example.com/private.zip','PRIVATE')").run();
+  const cfb = await call(env, 'POST', '/connect/YUVI_001', { form: fd });
+  const cbb = await cfb.json();
+  ok(cfb.status === 200 && cbb.data && cbb.data.lib_url === 'https://cdn.example.com/private.zip', 'bad stored URL falls back to loader_files');
+  await env.DB.prepare("UPDATE mod_versions SET url='https://cdn.example.com/private.zip' WHERE id=?").bind(pvr.id).run();
+
   // Custom version end-to-end: add VIP (GOLD), generate a VIP key, connect.
   const fa = new FormData();
   fa.set('form_type', 'version_add'); fa.set('name', 'VIP'); fa.set('tag', 'GOLD');

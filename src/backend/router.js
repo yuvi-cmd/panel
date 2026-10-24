@@ -6,7 +6,7 @@
 import { mundoSaltFromEnv, mundoAesKeyHex, hashPassword, verifyPassword, randomHexKey } from './crypto.js';
 import { handleApi } from './api.js';
 import { clientIp, hitRate, isProfessor } from './security.js';
-import { handleConnect, handleEncrypt, ensureModVersions } from './connect.js';
+import { handleConnect, handleEncrypt, ensureModVersions, libUrlOk } from './connect.js';
 import { handleMundo } from './mundo.js';
 import { handleBcore } from './bcore.js';
 import { ensureDB } from './db.js';
@@ -564,7 +564,7 @@ export default {
       let ok = '', error = '';
       const nameOk = (s) => /^[A-Z0-9][A-Z0-9 _.-]{0,29}$/.test(s);
       const tagOk = (s) => s === '' || /^[A-Z0-9 _.-]{1,20}$/.test(s);
-      const urlOk = (s) => s === '' || (/^https?:\/\//i.test(s) && s.length <= 500);
+      const urlOk = (s) => libUrlOk(s, { allowEmpty: true });
       const vTaken = async (nm, exId) => !!(await db.prepare('SELECT id FROM mod_versions WHERE panel_code=? AND UPPER(name)=UPPER(?)' + (exId ? ' AND id<>?' : '')).bind(...(exId ? [myPanel, nm, exId] : [myPanel, nm])).first().catch(() => null));
       await ensureModVersions(db, myPanel);
       if (method === 'POST') {
@@ -592,7 +592,7 @@ export default {
           if (!row) error = 'Version nahi mila.';
           else if (!nameOk(nm)) error = 'Name 1-30: letters/numbers/space . _ -';
           else if (!tagOk(tg)) error = 'Tag max 20: letters/numbers/space . _ -';
-          else if (!urlOk(u)) error = 'URL https:// se start hona chahiye (max 500).';
+          else if (!urlOk(u)) error = 'Valid https:// URL do (public host, jaise https://cdn.example.com/lib.zip).';
           else if (await vTaken(nm, id)) error = 'Version "' + nm + '" already exists.';
           else {
             await db.prepare('UPDATE mod_versions SET name=?,tag=?,url=? WHERE id=? AND panel_code=?').bind(nm, tg, u, id, myPanel).run();
