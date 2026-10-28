@@ -794,6 +794,41 @@ console.log('test-decrypt preview');
   ok(devsAfter === devsBefore, 'preview never binds a device (dry-run)');
 }
 
+
+// ---------- 7iii. sdk nonce + replay protection (anti MITM / HttpCanary replay) ----------
+console.log('sdk nonce + replay');
+{
+  const { bcoreEncrypt, bcoreDecrypt } = await import('../src/backend/crypto.js');
+  await env.DB.prepare("INSERT INTO bcore_keys (panel_code,sdk_key,duration_days,pkg_limit,app_limit,feature1,feature2,created_by) VALUES ('YUVI_001','TESTSDK-SMOKE',30,10,10,1,1,1)").run();
+  const sdkCall = async (obj) => {
+    const raw = JSON.stringify(obj);
+    const enc = bcoreEncrypt(raw);
+    const r = await app.fetch(new Request('https://panel.test/sdk/bcore/YUVI_001', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: enc }), env, {});
+    const dec = bcoreDecrypt(await r.text()).toString('utf8');
+    let j = null; try { j = JSON.parse(dec); } catch { j = { _raw: dec }; }
+    return { status: r.status, json: j };
+  };
+  const now = Date.now();
+
+  const badKey = await sdkCall({ sdk_key: 'NOPE', pkg_name: 'com.arc.cheat', app_name: 'ArcX', device_id: 'd1', nonce: 'n-smoke-1', ts: String(now) });
+  ok(badKey.status === 400 && badKey.json.code === 'INVALID_KEY', 'invalid sdk key rejected');
+
+  const replay = await sdkCall({ sdk_key: 'TESTSDK-SMOKE', pkg_name: 'com.arc.cheat', app_name: 'ArcX', device_id: 'd1', nonce: 'n-smoke-1', ts: String(now) });
+  ok(replay.status === 403 && replay.json.code === 'REPLAY_DETECTED', 'used nonce rejected (replay protection)');
+
+  const missing = await sdkCall({ sdk_key: 'TESTSDK-SMOKE', pkg_name: 'com.arc.cheat', app_name: 'ArcX', device_id: 'd1', ts: String(now) });
+  ok(missing.status === 400 && missing.json.code === 'MISSING_NONCE', 'missing nonce rejected');
+
+  const stale = await sdkCall({ sdk_key: 'TESTSDK-SMOKE', pkg_name: 'com.arc.cheat', app_name: 'ArcX', device_id: 'd1', nonce: 'n-smoke-stale', ts: String(now - 20 * 60 * 1000) });
+  ok(stale.status === 403 && stale.json.code === 'STALE_REQUEST', 'stale timestamp rejected');
+
+  const good = await sdkCall({ sdk_key: 'TESTSDK-SMOKE', pkg_name: 'com.arc.cheat', app_name: 'ArcX', device_id: 'd1', nonce: 'n-smoke-ok', ts: String(now) });
+  ok(good.status === 200 && good.json.status === 'success' && good.json.nonce === 'n-smoke-ok' && typeof good.json.server_nonce === 'string' && typeof good.json.server_ts === 'number', 'valid sdk key accepted with nonce echo');
+
+  const replay2 = await sdkCall({ sdk_key: 'TESTSDK-SMOKE', pkg_name: 'com.arc.cheat', app_name: 'ArcX', device_id: 'd1', nonce: 'n-smoke-ok', ts: String(now) });
+  ok(replay2.status === 403 && replay2.json.code === 'REPLAY_DETECTED', 'success response nonce cannot be replayed');
+}
+
 // ---------- 8. inline-script audit: every rendered page's scripts must parse ----------
 // A single broken <script> kills the whole tag (sidebar toggle, copy buttons,
 // filters). node --check cannot see inside template literals, so audit the

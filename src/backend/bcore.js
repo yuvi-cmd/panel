@@ -2,6 +2,21 @@
 import { bcoreSecretFromEnv, bcoreEncrypt, bcoreDecrypt, fixCesu8 } from './crypto.js';
 import { tsMs } from './http.js';
 
+// SDK replay-protection: every client nonce is single-use (5 min TTL).
+// Purana recorded response (HttpCanary MITM replay) dobara accept nahi hoga.
+const sdkUsedNonces = new Map();
+const sdkNonceTtlMs = 5 * 60 * 1000;
+const sdkRequestWindowMs = 10 * 60 * 1000;
+function sdkCleanupNonces() {
+  const now = Date.now();
+  for (const [n, t] of sdkUsedNonces) if (now - t > sdkNonceTtlMs) sdkUsedNonces.delete(n);
+}
+function sdkRandomHex(n) {
+  const buf = (globalThis.crypto || {}).getRandomValues ? globalThis.crypto.getRandomValues(new Uint8Array(n)) : null;
+  if (!buf) return '';
+  return Array.from(buf).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 export async function handleBcore(request, db, panelCode, env) {
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
   const secret = bcoreSecretFromEnv(env);
@@ -23,6 +38,13 @@ export async function handleBcore(request, db, panelCode, env) {
     const pkg = String(input.pkg_name || input.package_name || '').trim();
     const app = String(input.app_name || '').trim();
     const dev = String(input.device_id || '').trim();
+    const nonce = String(input.nonce || '').trim();
+    const clientTs = Number(input.ts || '');
+    if (!nonce) return send({ status: 'error', code: 'MISSING_NONCE', message: 'nonce required' }, 400);
+    if (!Number.isFinite(clientTs) || Math.abs(Date.now() - clientTs) > sdkRequestWindowMs) return send({ status: 'error', code: 'STALE_REQUEST', message: 'Request timestamp stale' }, 403);
+    if (sdkUsedNonces.has(nonce)) return send({ status: 'error', code: 'REPLAY_DETECTED', message: 'Nonce already used' }, 403);
+    sdkUsedNonces.set(nonce, Date.now());
+    sdkCleanupNonces();
     const mst = await db.prepare('SELECT maintenance_mode,maintenance_message FROM sdk_server_status WHERE panel_code=? AND engine=?').bind(panelCode, 'BCORE').first().catch(() => null);
     if (mst && (mst.maintenance_mode | 0) === 1) return send({ status: 'error', code: 'SERVER_MAINTENANCE', message: mst.maintenance_message || 'Server is under maintenance' }, 503);
     if (!sdkKey || !pkg || !app) return send({ status: 'error', code: 'MISSING_PARAMETER', message: 'Required parameter is missing' }, 400);
@@ -42,6 +64,8 @@ export async function handleBcore(request, db, panelCode, env) {
     }
     if ((match.is_blocked | 0) === 1) return send({ status: 'error', code: 'INVALID_KEY', message: 'This app binding is blocked' }, 403);
     const f1 = (key.feature1 | 0) === 1, f2 = (key.feature2 | 0) === 1;
-    return send({ status: 'success', code: 'VALID', message: 'SDK key validated successfully', feature1: f1 ? 1 : 0, feature2: f2 ? 1 : 0, data: { sdk_key: 'valid', pkg_name: pkg, app_name: app, device_id: dev || 'registered', features1: f1, features2: f2 } });
+    const serverNonce = sdkRandomHex(8);
+    const now = Date.now();
+    return send({ status: 'success', code: 'VALID', message: 'SDK key validated successfully', feature1: f1 ? 1 : 0, feature2: f2 ? 1 : 0, nonce, server_nonce: serverNonce, server_ts: now, data: { sdk_key: 'valid', pkg_name: pkg, app_name: app, device_id: dev || 'registered', features1: f1, features2: f2 } });
   } catch (e) { return send({ status: 'error', code: 'DB_ERROR', message: 'Database query failed' }, 500); }
 }
