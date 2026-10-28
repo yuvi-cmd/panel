@@ -491,6 +491,16 @@ console.log('connect + encrypt');
   const e2j = e2.decrypted ? JSON.parse(e2.decrypted) : null;
   ok(e2.status === 200 && e2j && e2j.status === true && e2j.D === 1 && String(e2j.R1 || '').includes(row.key_value), 'encrypt returns double-AES payload after activation');
   ok(e2j && e2j.URL === 'https://cdn.example.com/private.zip', 'encrypt response carries panel-configured URL');
+  ok(e2j && typeof e2j.SDK === 'string' && e2j.SDK.length >= 8, 'encrypt response carries a panel SDK key');
+  const sdkRow = await env.DB.prepare('SELECT sdk_key,feature1,feature2 FROM bcore_keys WHERE panel_code=? AND sdk_key=?').bind('YUVI_001', e2j.SDK).first();
+  ok(!!sdkRow && (sdkRow.feature1 | 0) === 1 && (sdkRow.feature2 | 0) === 1, 'panel auto-provisions a working BCORE key');
+  const { bcoreEncrypt: sdkEnc, bcoreDecrypt: sdkDec } = await import('../src/backend/crypto.js');
+  const sdkReqBody = sdkEnc(JSON.stringify({ sdk_key: e2j.SDK, pkg_name: 'com.arc.cheat', app_name: 'ArcX', device_id: 'DEV-001' }));
+  const sdkRes = await app.fetch(new Request('https://panel.test/sdk/bcore/YUVI_001', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: sdkReqBody }), env, {});
+  const sdkOut = JSON.parse(sdkDec(await sdkRes.text()).toString('utf8'));
+  ok(sdkRes.status === 200 && sdkOut.status === 'success' && sdkOut.feature1 === 1 && sdkOut.feature2 === 1, 'APK SDK key validates via /sdk/bcore');
+  const sdkAgain = await env.DB.prepare("SELECT setting_value FROM mod_settings WHERE panel_code='YUVI_001' AND setting_name='bcore_sdk_key'").first();
+  ok(sdkAgain && sdkAgain.setting_value === e2j.SDK, 'SDK key is cached per panel (stable across logins)');
 
   // panels created with a duration honour panels.expires_at without voucher
   const k2row = await env.DB.prepare('SELECT key_value FROM api_keys WHERE panel_code=? LIMIT 1').bind('PANEL_TWO').first();
@@ -500,6 +510,7 @@ console.log('connect + encrypt');
   const e3j = e3.decrypted ? JSON.parse(e3.decrypted) : null;
   ok(e3.status === 200 && e3j && e3j.status === true, 'encrypt honours panels.expires_at (no voucher needed)');
   ok(e3j && e3j.URL === 'https://cdn.example.com/panel2.zip', 'encrypt response URL is panel-isolated');
+  ok(e3j && typeof e3j.SDK === 'string' && e3j.SDK && e3j.SDK !== e2j.SDK, 'SDK key is panel-isolated');
   // ...but an expired panel duration still blocks
   await env.DB.prepare("UPDATE panels SET expires_at='2000-01-01 00:00:00' WHERE panel_code='PANEL_TWO'").bind().run();
   const e4 = await encCall(k2row.key_value, 'DEV-002', 'PANEL_TWO');

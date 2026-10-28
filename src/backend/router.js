@@ -42,7 +42,7 @@ export default {
     if (path.startsWith('/connect/')) return handleConnect(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
     if (path === '/connect') return handleConnect(request, db, url.searchParams.get('panel_code') || mainPanel, env);
     if (path === '/health') {
-      return new Response(JSON.stringify({ ok: true, build: '2026-10-28-encrypt-url-isolation', panel: mainPanel }), { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
+      return new Response(JSON.stringify({ ok: true, build: '2026-10-28-sdk-autoprovision', panel: mainPanel }), { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
     }
     if (path.startsWith('/encrypt/')) return handleEncrypt(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
     if (path.startsWith('/sdk/mundo/') || path === '/sdk/mundo') return handleMundo(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel), env);
@@ -686,7 +686,7 @@ export default {
     if (path === '/sdk') {
       const g = sdkGate(); if (g) return g;
       const q = async (sql, ...b) => (await db.prepare(sql).bind(...b).first().catch(() => ({})));
-      const mP = mainPanel;
+      const mP = myPanel;
       const d = {
         mTotal: (await q('SELECT COUNT(*) c FROM mundo_keys WHERE panel_code=?', mP)).c || 0,
         mActive: (await q('SELECT COUNT(*) c FROM mundo_keys WHERE panel_code=? AND is_blocked=0', mP)).c || 0,
@@ -718,7 +718,7 @@ export default {
           if (!ck) ck = randomHexKey();
           if (await db.prepare('SELECT id FROM ' + table + ' WHERE sdk_key=?').bind(ck).first().catch(() => null)) error = 'This SDK key already exists in ' + engine + '.';
           else {
-            try { await db.prepare('INSERT INTO ' + table + ' (panel_code,sdk_key,duration_days,pkg_limit,app_limit,feature1,feature2,created_by) VALUES (?,?,?,?,?,?,?,?)').bind(mainPanel, ck, dur, pkg, app, f1, f2, myId).run(); return redir('/sdk/generate?ok=1&e=' + encodeURIComponent(engine) + '&k=' + encodeURIComponent(ck)); }
+            try { await db.prepare('INSERT INTO ' + table + ' (panel_code,sdk_key,duration_days,pkg_limit,app_limit,feature1,feature2,created_by) VALUES (?,?,?,?,?,?,?,?)').bind(myPanel, ck, dur, pkg, app, f1, f2, myId).run(); return redir('/sdk/generate?ok=1&e=' + encodeURIComponent(engine) + '&k=' + encodeURIComponent(ck)); }
             catch (e) { error = 'Database error.'; }
           }
         }
@@ -732,7 +732,7 @@ export default {
         const engine = p.engine === 'BCORE' ? 'BCORE' : 'MUNDO';
         const kt = engine === 'BCORE' ? 'bcore_keys' : 'mundo_keys', bt = engine === 'BCORE' ? 'bcore_key_bindings' : 'mundo_key_bindings';
         const kid = parseInt(p.key_id, 10) || 0, bid = parseInt(p.bind_id, 10) || 0;
-        const own = kid ? await db.prepare('SELECT id,pkg_limit,app_limit FROM ' + kt + ' WHERE id=? AND panel_code=?').bind(kid, mainPanel).first().catch(() => null) : null;
+        const own = kid ? await db.prepare('SELECT id,pkg_limit,app_limit FROM ' + kt + ' WHERE id=? AND panel_code=?').bind(kid, myPanel).first().catch(() => null) : null;
         if (own) {
           const a = p.action;
           if (a === 'block_key') await db.prepare('UPDATE ' + kt + ' SET is_blocked=1 WHERE id=?').bind(kid).run();
@@ -755,7 +755,7 @@ export default {
         return redir('/sdk/keys');
       }
       const fk = async (kt, bt) => {
-        const r = await db.prepare('SELECT * FROM ' + kt + ' WHERE panel_code=? ORDER BY id DESC').bind(mainPanel).all().catch(() => ({ results: [] }));
+        const r = await db.prepare('SELECT * FROM ' + kt + ' WHERE panel_code=? ORDER BY id DESC').bind(myPanel).all().catch(() => ({ results: [] }));
         const ks = r.results || [];
         for (const k of ks) k.bindings = (await db.prepare('SELECT * FROM ' + bt + ' WHERE sdk_key_id=? ORDER BY id DESC').bind(k.id).all().catch(() => ({ results: [] }))).results || [];
         return ks;
@@ -768,14 +768,14 @@ export default {
         const p = await formParams(request);
         if (p.toggle_maintenance) {
           const e = p.engine === 'BCORE' ? 'BCORE' : 'MUNDO';
-          await db.prepare('INSERT INTO sdk_server_status (panel_code,engine,maintenance_mode,maintenance_message) VALUES (?,?,?,?) ON CONFLICT(panel_code,engine) DO UPDATE SET maintenance_mode=excluded.maintenance_mode,maintenance_message=excluded.maintenance_message').bind(mainPanel, e, String(p.maintenance_mode) === '1' ? 1 : 0, String(p.maintenance_message || '').slice(0, 255)).run();
+          await db.prepare('INSERT INTO sdk_server_status (panel_code,engine,maintenance_mode,maintenance_message) VALUES (?,?,?,?) ON CONFLICT(panel_code,engine) DO UPDATE SET maintenance_mode=excluded.maintenance_mode,maintenance_message=excluded.maintenance_message').bind(myPanel, e, String(p.maintenance_mode) === '1' ? 1 : 0, String(p.maintenance_message || '').slice(0, 255)).run();
           return redir('/sdk/server?toggled=' + e.toLowerCase());
         }
       }
-      const rows = (await db.prepare('SELECT engine,maintenance_mode,maintenance_message FROM sdk_server_status WHERE panel_code=?').bind(mainPanel).all().catch(() => ({ results: [] }))).results || [];
+      const rows = (await db.prepare('SELECT engine,maintenance_mode,maintenance_message FROM sdk_server_status WHERE panel_code=?').bind(myPanel).all().catch(() => ({ results: [] }))).results || [];
       let mM = 0, mS = '', bM = 0, bS = '';
       for (const r of rows) { if (r.engine === 'MUNDO') { mM = r.maintenance_mode | 0; mS = r.maintenance_message || ''; } if (r.engine === 'BCORE') { bM = r.maintenance_mode | 0; bS = r.maintenance_message || ''; } }
-      return S('sdk/server', 'SDK Server', sdkServerPage({ mMaint: mM, mMsg: mS, bMaint: bM, bMsg: bS, host: url.host, panel: mainPanel, toggled: url.searchParams.get('toggled') || '' }));
+      return S('sdk/server', 'SDK Server', sdkServerPage({ mMaint: mM, mMsg: mS, bMaint: bM, bMsg: bS, host: url.host, panel: myPanel, toggled: url.searchParams.get('toggled') || '' }));
     }
     if (path === '/sdk/hash') {
       const g = sdkGate(); if (g) return g;
@@ -784,13 +784,13 @@ export default {
         const e = p.engine === 'BCORE' ? 'BCORE' : 'MUNDO';
         if (p.action === 'add_hash') {
           const lb = String(p.hash_label || '').trim().slice(0, 100), vl = String(p.hash_value || '').trim().toLowerCase();
-          if (lb && /^[a-f0-9]{64}$/.test(vl)) await db.prepare('INSERT INTO sdk_hash_vault (panel_code,engine,hash_type,hash_label,hash_value) VALUES (?,?,?,?,?)').bind(mainPanel, e, 'lib_signature', lb, vl).run();
-        } else if (p.action === 'delete_hash') await db.prepare('DELETE FROM sdk_hash_vault WHERE id=? AND panel_code=?').bind(parseInt(p.hash_id, 10) || 0, mainPanel).run();
-        else if (p.action === 'toggle_hash') await db.prepare('UPDATE sdk_hash_vault SET is_active=1-is_active WHERE id=? AND panel_code=?').bind(parseInt(p.hash_id, 10) || 0, mainPanel).run();
+          if (lb && /^[a-f0-9]{64}$/.test(vl)) await db.prepare('INSERT INTO sdk_hash_vault (panel_code,engine,hash_type,hash_label,hash_value) VALUES (?,?,?,?,?)').bind(myPanel, e, 'lib_signature', lb, vl).run();
+        } else if (p.action === 'delete_hash') await db.prepare('DELETE FROM sdk_hash_vault WHERE id=? AND panel_code=?').bind(parseInt(p.hash_id, 10) || 0, myPanel).run();
+        else if (p.action === 'toggle_hash') await db.prepare('UPDATE sdk_hash_vault SET is_active=1-is_active WHERE id=? AND panel_code=?').bind(parseInt(p.hash_id, 10) || 0, myPanel).run();
         return redir('/sdk/hash');
       }
-      const mH = (await db.prepare('SELECT * FROM sdk_hash_vault WHERE panel_code=? AND engine=? ORDER BY id DESC').bind(mainPanel, 'MUNDO').all().catch(() => ({ results: [] }))).results || [];
-      const bH = (await db.prepare('SELECT * FROM sdk_hash_vault WHERE panel_code=? AND engine=? ORDER BY id DESC').bind(mainPanel, 'BCORE').all().catch(() => ({ results: [] }))).results || [];
+      const mH = (await db.prepare('SELECT * FROM sdk_hash_vault WHERE panel_code=? AND engine=? ORDER BY id DESC').bind(myPanel, 'MUNDO').all().catch(() => ({ results: [] }))).results || [];
+      const bH = (await db.prepare('SELECT * FROM sdk_hash_vault WHERE panel_code=? AND engine=? ORDER BY id DESC').bind(myPanel, 'BCORE').all().catch(() => ({ results: [] }))).results || [];
       return S('sdk/hash', 'SDK Hash', sdkHashPage({ mHashes: mH, bHashes: bH, mActive: mH.find(h => h.is_active) || null, bActive: bH.find(h => h.is_active) || null, salt: mundoSaltFromEnv(env), aesHex: mundoAesKeyHex(mundoSaltFromEnv(env)) }));
     }
 

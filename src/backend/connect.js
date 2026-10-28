@@ -213,6 +213,28 @@ async function libUrlFor(db, panel, st, ver) {
   return pick ? safeLibUrl(pick.file_path) : '';
 }
 
+// Stable per-panel BCORE SDK key used by the APK. Generated once on first
+// login and cached in mod_settings, so blocking/deleting the bcore key on the
+// website stays effective (no silent re-provisioning on every request).
+async function appSdkKeyFor(db, panel) {
+  const cached = await db.prepare("SELECT setting_value FROM mod_settings WHERE panel_code=? AND setting_name='bcore_sdk_key'").bind(panel).first().catch(() => null);
+  const existing = String(cached && cached.setting_value ? cached.setting_value : '').trim();
+  if (existing) return existing;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const rb = new Uint8Array(16);
+    crypto.getRandomValues(rb);
+    const key = 'ARCX-' + [...rb].map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+    const dup = await db.prepare('SELECT id FROM bcore_keys WHERE sdk_key=?').bind(key).first().catch(() => null);
+    if (dup) continue;
+    await db.prepare('INSERT INTO bcore_keys (panel_code,sdk_key,duration_days,pkg_limit,app_limit,feature1,feature2) VALUES (?,?,?,?,?,?,?)').bind(panel, key, 3650, 10, 10, 1, 1).run().catch(() => {});
+    const row = await db.prepare('SELECT id FROM bcore_keys WHERE sdk_key=? AND panel_code=?').bind(key, panel).first().catch(() => null);
+    if (!row) continue;
+    await db.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES ('bcore_sdk_key',?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value").bind(key, panel).run().catch(() => {});
+    return key;
+  }
+  return '';
+}
+
 async function verifyKey(db, panel, userKey, serial, dryRun = false) {
   const key = await db.prepare('SELECT * FROM api_keys WHERE key_value=? AND panel_code=? AND is_active=1 LIMIT 1').bind(userKey, panel).first().catch(() => null);
   if (!key) return { err: 'USER OR GAME NOT REGISTERED', code: 403 };
@@ -340,6 +362,7 @@ export async function handleEncrypt(request, db, panel, env, opts = {}) {
     let ver = await versionFor(db, panel, st);
     if (!ver) { await ensureModVersions(db, panel); ver = await versionFor(db, panel, st); }
     const lib = await libUrlFor(db, panel, st, ver);
+    const sdkKey = await appSdkKeyFor(db, panel);
 
     const inner = {
       status: true,
@@ -349,6 +372,7 @@ export async function handleEncrypt(request, db, panel, env, opts = {}) {
       rng: Math.floor(Date.now() / 1000),
       device: String(v.key.device_limit | 0),
       URL: lib,
+      SDK: sdkKey,
     };
 
     const encryptedResponse = await apkDoubleEncrypt(db, panel, JSON.stringify(inner));
