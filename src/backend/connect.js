@@ -168,7 +168,7 @@ function parsePostBody(text) {
 }
 
 // Simple djb2 hash (matches C++ simpleHash in native main.cpp)
-function simpleHash(s) {
+export function simpleHash(s) {
   let hash = 5381;
   for (let i = 0; i < s.length; i++) {
     hash = ((hash << 5) + hash) + s.charCodeAt(i);
