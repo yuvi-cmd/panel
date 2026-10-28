@@ -464,38 +464,40 @@ export async function handleApi(request, db, env) {
       sdk_scope: canSeeSdk ? hashScope : null,
     });
   }
-  // ---- decrypt preview: tester runs the REAL endpoint, server decrypts --------
-  // Same /connect + /encrypt handlers, same fresh D1 AES read. AES key/IV
-  // NEVER leave the server; only the already-client-visible payload content
-  // is returned, and only to OA roles testing their own panel.
+  // ---- decrypt preview: tester runs the REAL double-AES encrypt/decrypt --------
+  // Uses same APK-compatible double AES-256-CBC as /encrypt endpoint.
+  // AES keys (aes_key_l1/aes_key_l2) NEVER leave the server.
   if (path === '/api/test-decrypt' && method === 'POST') {
     if (!isOA) return J({ ok: false, error: 'Forbidden.' }, 403);
     const p = await readBody(request);
     const userKey = cleanStr(p.user_key, 50), serial = cleanStr(p.serial, 100);
-    const ep = String(p.endpoint || 'encrypt').toLowerCase() === 'connect' ? 'connect' : 'encrypt';
     if (!userKey || !serial) return J({ ok: false, error: 'user_key and serial required.' }, 400);
-    const { handleConnect: hc, handleEncrypt: he } = await import('./connect.js');
-    const fd = new FormData();
-    fd.set('game', 'PUBG');
-    fd.set('user_key', userKey);
-    fd.set('serial', serial);
-    const sub = new Request('https://internal/' + ep + '/' + myPanel, { method: 'POST', body: fd });
-    const res = ep === 'connect' ? await hc(sub, db, myPanel, env) : await he(sub, db, myPanel, env);
-    const http = res.status;
-    const text = await res.text();
-    let parsed = null;
-    try { parsed = JSON.parse(text); } catch {}
-    let decrypted = null;
-    if (ep === 'encrypt' && parsed && parsed.status === true && typeof parsed.payload === 'string') {
-      const s2 = await db.prepare("SELECT setting_name,setting_value FROM mod_settings WHERE panel_code=? AND setting_name IN ('aes_key','aes_iv')").bind(myPanel).all()
-        .then((r) => Object.fromEntries((r.results || []).map((x) => [x.setting_name, x.setting_value]))).catch(() => ({}));
-      try {
-        decrypted = JSON.parse(await aes256CbcDecryptToString(parsed.payload, s2.aes_key, s2.aes_iv));
-      } catch {
-        decrypted = { error: 'decrypt failed (keys rotated mid-test?)' };
-      }
+
+    const { apkDoubleEncrypt, apkDoubleDecrypt, simpleHash } = await import('./connect.js');
+
+    // Build same plaintext post body as APK sends
+    const ukHash = simpleHash(userKey);
+    const hwHash = simpleHash(serial);
+    const H1 = (2 * ukHash + 10 * hwHash) >>> 0;
+    const H2 = (hwHash * hwHash + 12 * H1) >>> 0;
+    const H3 = (25 * (H1 + H2)) >>> 0;
+    const plaintext = `H1=${H1}&H2=${H2}&H3=${H3}&user_key=${encodeURIComponent(userKey)}&hwid=${encodeURIComponent(serial)}`;
+
+    let encrypted = '', decrypted = '', encryptErr = '', decryptErr = '';
+    try { encrypted = await apkDoubleEncrypt(db, myPanel, plaintext); } catch (e) { encryptErr = String(e); }
+    if (encrypted) {
+      try { decrypted = await apkDoubleDecrypt(db, myPanel, encrypted); } catch (e) { decryptErr = String(e); }
     }
-    return J({ ok: true, http, raw: parsed || text, decrypted });
+
+    // Verify hash match
+    const calcH1 = (2 * ukHash + 10 * hwHash) >>> 0;
+    const calcH2 = (hwHash * hwHash + 12 * calcH1) >>> 0;
+    const calcH3 = (25 * (calcH1 + calcH2)) >>> 0;
+    const hashOk = (String(H1) === String(calcH1) && String(H2) === String(calcH2) && String(H3) === String(calcH3));
+
+    return J({ ok: true, http: 200, plaintext, encrypted, decrypted, hashOk,
+      keysUsed: { l1: !!(await db.prepare('SELECT setting_value FROM mod_settings WHERE panel_code=? AND setting_name=?').bind(myPanel, 'aes_key_l1').first().catch(() => null))?.setting_value, l2: !!(await db.prepare('SELECT setting_value FROM mod_settings WHERE panel_code=? AND setting_name=?').bind(myPanel, 'aes_key_l2').first().catch(() => null))?.setting_value },
+      encryptErr, decryptErr });
   }
 
   // ---- panels (tenant mgmt; super-admin / professor only) -----------------------------------
