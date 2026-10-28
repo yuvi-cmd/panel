@@ -459,17 +459,7 @@ export default {
       let ok = '', error = '';
       if (method === 'POST') {
         const p = await formParams(request);
-        if (p.action === 'generate_aes') {
-          if (myId !== 1 && !isProfessor(sess)) error = 'Only main owner.';
-          else {
-            const rk = new Uint8Array(32); crypto.getRandomValues(rk);
-            const riv = new Uint8Array(16); crypto.getRandomValues(riv);
-            const hx = (a) => [...a].map(b => b.toString(16).padStart(2, '0')).join('');
-            await db.prepare('INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES (?,?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value').bind('aes_key', hx(rk), myPanel).run();
-            await db.prepare('INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES (?,?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value').bind('aes_iv', hx(riv), myPanel).run();
-            ok = 'AES rotated (256-bit key + 128-bit IV).';
-          }
-        } else if (p.action === 'generate_apk_keys') {
+        if (p.action === 'generate_apk_keys') {
           if (myId !== 1 && !isProfessor(sess)) error = 'Only main owner.';
           else {
             const makeKey = (len) => {
@@ -507,11 +497,11 @@ export default {
           }
         }
       }
-      const s = await db.prepare('SELECT setting_name,setting_value FROM mod_settings WHERE panel_code=? AND setting_name IN (?,?,?,?)').bind(myPanel, 'aes_key', 'aes_iv', 'aes_key_l1', 'aes_key_l2').all().then(r => Object.fromEntries((r.results || []).map(x => [x.setting_name, x.setting_value]))).catch(() => ({}));
+      const s = await db.prepare('SELECT setting_name,setting_value FROM mod_settings WHERE panel_code=? AND setting_name IN (?,?)').bind(myPanel, 'aes_key_l1', 'aes_key_l2').all().then(r => Object.fromEntries((r.results || []).map(x => [x.setting_name, x.setting_value]))).catch(() => ({}));
       const me = await db.prepare('SELECT panel_expiry FROM users WHERE id=?').bind(myId).first().catch(() => ({}));
       const canSeeActivations = myId === 1 || isProfessor(sess);
       const recent = canSeeActivations ? (await db.prepare('SELECT * FROM activation_keys ORDER BY id DESC LIMIT 10').all().catch(() => ({ results: [] }))).results || [] : [];
-      return P('aes', 'API Encryption', aesPage({ ok, error, aesKey: s.aes_key, aesIv: s.aes_iv, aesKeyL1: s.aes_key_l1, aesKeyL2: s.aes_key_l2, expiry: me?.panel_expiry, recent }, canSeeActivations));
+      return P('aes', 'API Encryption', aesPage({ ok, error, aesKeyL1: s.aes_key_l1, aesKeyL2: s.aes_key_l2, expiry: me?.panel_expiry, recent }, canSeeActivations));
     }
 
     // ---------- API TEST ----------
