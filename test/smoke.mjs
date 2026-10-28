@@ -771,17 +771,25 @@ console.log('test-decrypt preview');
   ok(typeof good.body.encrypted === 'string' && good.body.encrypted.length > 40, 'preview shows raw encrypted payload');
   ok(typeof good.body.decrypted === 'string' && good.body.decrypted.includes(krow.key_value) && good.body.decrypted.includes('hwid=DEV-001'), 'preview round-trips plaintext');
   ok(good.body.hashOk === true, 'hash triple matches');
+  ok(good.body.serverHttp === 200 && good.body.serverResponse && good.body.serverResponse.status === true, 'end-to-end /encrypt response decrypts to status:true');
+  ok(good.body.serverResponse.R1 === krow.key_value + '+DEV-001=true' && good.body.serverResponse.D === 1, 'response R1/D match the request key+hwid');
+  ok(typeof good.body.serverResponseEncrypted === 'string' && good.body.serverResponseEncrypted.length > 40, 'raw encrypted response is exposed for inspection');
   ok(!JSON.stringify(good.body).match(/aes_key_l1|aes_key_l2|ROTATE[0-9]-LAYER/), 'no AES key material leaks into preview');
+  const badKey = await pv({ user_key: 'NOPE-NOT-A-KEY', serial: 'DEV-001' }, ownerCookie);
+  ok(badKey.status === 200 && badKey.body.serverHttp === 403 && badKey.body.serverResponse && badKey.body.serverResponse.reason === 'USER OR GAME NOT REGISTERED', 'end-to-end preview surfaces real rejection reason');
   const missing = await pv({ user_key: '', serial: '' }, ownerCookie);
   ok(missing.status === 400, 'missing fields rejected');
   const anon = await pv({ user_key: krow.key_value, serial: 'DEV-001' });
   ok(anon.status === 401, 'preview requires login');
-  // preview must never mutate user keys (crypto-only round-trip)
+  // preview must never mutate user keys or bind devices (dry-run)
   const before = await env.DB.prepare('SELECT uses,expires_at FROM api_keys WHERE key_value=?').bind(krow.key_value).first();
-  await pv({ user_key: krow.key_value, serial: 'DEV-001' }, ownerCookie);
+  const devsBefore = (await env.DB.prepare('SELECT COUNT(*) c FROM key_devices WHERE key_id=?').bind(krow.id).first()).c | 0;
+  await pv({ user_key: krow.key_value, serial: 'DEV-NEVER-BOUND' }, ownerCookie);
   await pv({ user_key: krow.key_value, serial: 'DEV-001' }, ownerCookie);
   const after = await env.DB.prepare('SELECT uses,expires_at FROM api_keys WHERE key_value=?').bind(krow.key_value).first();
+  const devsAfter = (await env.DB.prepare('SELECT COUNT(*) c FROM key_devices WHERE key_id=?').bind(krow.id).first()).c | 0;
   ok(after.uses === before.uses && after.expires_at === before.expires_at, 'preview never mutates user keys');
+  ok(devsAfter === devsBefore, 'preview never binds a device (dry-run)');
 }
 
 // ---------- 8. inline-script audit: every rendered page's scripts must parse ----------

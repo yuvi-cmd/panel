@@ -213,7 +213,7 @@ async function libUrlFor(db, panel, st, ver) {
   return pick ? safeLibUrl(pick.file_path) : '';
 }
 
-async function verifyKey(db, panel, userKey, serial) {
+async function verifyKey(db, panel, userKey, serial, dryRun = false) {
   const key = await db.prepare('SELECT * FROM api_keys WHERE key_value=? AND panel_code=? AND is_active=1 LIMIT 1').bind(userKey, panel).first().catch(() => null);
   if (!key) return { err: 'USER OR GAME NOT REGISTERED', code: 403 };
   if ((key.is_blocked | 0) === 1) return { err: 'USER BLOCKED', code: 403 };
@@ -221,8 +221,8 @@ async function verifyKey(db, panel, userKey, serial) {
   const devs = (await db.prepare('SELECT device_uuid FROM key_devices WHERE key_id=?').bind(key.id).all().catch(() => ({ results: [] }))).results.map(d => d.device_uuid);
   if (!devs.includes(serial)) {
     if (devs.length >= Math.max(0, key.device_limit | 0)) return { err: 'MAX DEVICE REACHED', code: 403 };
-    await db.prepare('INSERT INTO key_devices (key_id,device_uuid,panel_code) VALUES (?,?,?)').bind(key.id, serial, panel).run();
-  } else {
+    if (!dryRun) await db.prepare('INSERT INTO key_devices (key_id,device_uuid,panel_code) VALUES (?,?,?)').bind(key.id, serial, panel).run();
+  } else if (!dryRun) {
     await db.prepare("UPDATE key_devices SET last_seen=datetime('now') WHERE key_id=? AND device_uuid=?").bind(key.id, serial).run();
   }
   let expiry = key.expires_at;
@@ -232,8 +232,8 @@ async function verifyKey(db, panel, userKey, serial) {
     if (!m) return { err: 'INVALID KEY DURATION', code: 500 };
     const ms = m[2] === 'D' ? (+m[1]) * 864e5 : (+m[1]) * 36e5;
     expiry = new Date(Date.now() + ms).toISOString().slice(0, 19).replace('T', ' ');
-    await db.prepare('UPDATE api_keys SET expires_at=?,uses=uses+1 WHERE id=?').bind(expiry, key.id).run();
-  } else {
+    if (!dryRun) await db.prepare('UPDATE api_keys SET expires_at=?,uses=uses+1 WHERE id=?').bind(expiry, key.id).run();
+  } else if (!dryRun) {
     await db.prepare('UPDATE api_keys SET uses=uses+1 WHERE id=?').bind(key.id).run();
   }
   return { key, expiry };
@@ -280,7 +280,7 @@ export async function handleConnect(request, db, panel, env) {
   } catch (e) { return J({ status: false, reason: 'SERVER ERROR' + await errDetail(db, request, e, env) }, 500); }
 }
 
-export async function handleEncrypt(request, db, panel, env) {
+export async function handleEncrypt(request, db, panel, env, opts = {}) {
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
   const J = (obj, code = 200) => new Response(JSON.stringify(obj), { status: code, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...cors } });
   if (request.method.toUpperCase() !== 'POST') return J({ status: false, reason: 'METHOD NOT ALLOWED' }, 405);
@@ -327,7 +327,7 @@ export async function handleEncrypt(request, db, panel, env) {
     const mnt = await db.prepare('SELECT is_active,reason FROM mod_maintenance WHERE panel_code=?').bind(panel).first().catch(() => null);
     if (mnt && (mnt.is_active | 0) === 1) return J({ status: false, reason: clean(mnt.reason, 255) || 'SERVER UNDER MAINTENANCE' }, 503);
 
-    const v = await verifyKey(db, panel, userKey, hwid);
+    const v = await verifyKey(db, panel, userKey, hwid, opts.dryRun === true);
     if (v.err) return J({ status: false, reason: v.err }, v.code);
 
     // Build encrypted response: R1 = user_key+hwid=true, D = 1 (device limit)

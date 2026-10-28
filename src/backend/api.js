@@ -473,7 +473,7 @@ export async function handleApi(request, db, env) {
     const userKey = cleanStr(p.user_key, 50), serial = cleanStr(p.serial, 100);
     if (!userKey || !serial) return J({ ok: false, error: 'user_key and serial required.' }, 400);
 
-    const { apkDoubleEncrypt, apkDoubleDecrypt, hashTriple } = await import('./connect.js');
+    const { apkDoubleEncrypt, apkDoubleDecrypt, hashTriple, handleEncrypt } = await import('./connect.js');
 
     // Build same plaintext post body as the APK sends (64-bit djb2 values)
     const { H1, H2, H3 } = hashTriple(userKey, serial);
@@ -484,11 +484,29 @@ export async function handleApi(request, db, env) {
     if (encrypted) {
       try { decrypted = await apkDoubleDecrypt(db, myPanel, encrypted); } catch (e) { decryptErr = String(e); }
     }
-
     const hashOk = decrypted === plaintext;
+
+    // End-to-end dry-run: feed the encrypted body through the real /encrypt
+    // handler (no key/device mutation), then decrypt the response exactly like
+    // the APK does. This is what proves the response is not garbage.
+    let serverHttp = 0, serverResponseEncrypted = '', serverResponse = null;
+    if (encrypted) {
+      try {
+        const req = new Request('https://panel.local/encrypt/' + myPanel, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: encrypted });
+        const res = await handleEncrypt(req, db, myPanel, env, { dryRun: true });
+        serverHttp = res.status;
+        const txt = await res.text();
+        try { serverResponse = JSON.parse(txt); } catch {
+          serverResponseEncrypted = txt;
+          try { serverResponse = JSON.parse(await apkDoubleDecrypt(db, myPanel, txt)); } catch { serverResponse = null; }
+        }
+      } catch (e) { serverResponse = { error: String(e) }; }
+    }
+
     const keySet = async (name) => !!(await db.prepare('SELECT setting_value FROM mod_settings WHERE panel_code=? AND setting_name=?').bind(myPanel, name).first().catch(() => null))?.setting_value;
 
-    return J({ ok: true, http: 200, plaintext, encrypted, decrypted, hashOk,
+    return J({ ok: true, http: serverHttp || 200, plaintext, encrypted, decrypted, hashOk,
+      serverHttp, serverResponse, serverResponseEncrypted,
       keysUsed: { l1: await keySet('aes_key_l1'), l2: await keySet('aes_key_l2') },
       encryptErr, decryptErr });
   }
