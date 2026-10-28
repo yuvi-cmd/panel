@@ -490,13 +490,16 @@ console.log('connect + encrypt');
   const e2 = await encCall(row.key_value, 'DEV-001');
   const e2j = e2.decrypted ? JSON.parse(e2.decrypted) : null;
   ok(e2.status === 200 && e2j && e2j.status === true && e2j.D === 1 && String(e2j.R1 || '').includes(row.key_value), 'encrypt returns double-AES payload after activation');
+  ok(e2j && e2j.URL === 'https://cdn.example.com/private.zip', 'encrypt response carries panel-configured URL');
 
   // panels created with a duration honour panels.expires_at without voucher
   const k2row = await env.DB.prepare('SELECT key_value FROM api_keys WHERE panel_code=? LIMIT 1').bind('PANEL_TWO').first();
   await env.DB.prepare("UPDATE panels SET expires_at='2099-01-01 00:00:00' WHERE panel_code='PANEL_TWO'").bind().run();
+  await env.DB.prepare("INSERT OR IGNORE INTO mod_versions (panel_code,name,tag,url,sort) VALUES ('PANEL_TWO','PRIVATE','','https://cdn.example.com/panel2.zip',1)").run();
   const e3 = await encCall(k2row.key_value, 'DEV-002', 'PANEL_TWO');
   const e3j = e3.decrypted ? JSON.parse(e3.decrypted) : null;
   ok(e3.status === 200 && e3j && e3j.status === true, 'encrypt honours panels.expires_at (no voucher needed)');
+  ok(e3j && e3j.URL === 'https://cdn.example.com/panel2.zip', 'encrypt response URL is panel-isolated');
   // ...but an expired panel duration still blocks
   await env.DB.prepare("UPDATE panels SET expires_at='2000-01-01 00:00:00' WHERE panel_code='PANEL_TWO'").bind().run();
   const e4 = await encCall(k2row.key_value, 'DEV-002', 'PANEL_TWO');

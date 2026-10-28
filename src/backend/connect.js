@@ -334,6 +334,13 @@ export async function handleEncrypt(request, db, panel, env, opts = {}) {
     const R1 = userKey + '+' + hwid + '=true';
     const D = 1;
 
+    // Download URL comes from THIS panel's mod_versions (panel_code scoped),
+    // selected by the key's server_type, then loader_files fallback.
+    const st = (String(v.key.server_type || 'PRIVATE').toUpperCase().replace(/[^A-Z0-9 _.-]/g, '').slice(0, 30)) || 'PRIVATE';
+    let ver = await versionFor(db, panel, st);
+    if (!ver) { await ensureModVersions(db, panel); ver = await versionFor(db, panel, st); }
+    const lib = await libUrlFor(db, panel, st, ver);
+
     const inner = {
       status: true,
       R1: R1,
@@ -341,6 +348,7 @@ export async function handleEncrypt(request, db, panel, env, opts = {}) {
       EXP: v.expiry,
       rng: Math.floor(Date.now() / 1000),
       device: String(v.key.device_limit | 0),
+      URL: lib,
     };
 
     const encryptedResponse = await apkDoubleEncrypt(db, panel, JSON.stringify(inner));
