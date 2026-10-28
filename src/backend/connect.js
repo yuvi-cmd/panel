@@ -342,8 +342,7 @@ export async function handleEncrypt(request, db, panel, env, opts = {}) {
 
     const clientNonce = String(params.nonce || '');
     const clientTs = Number(params.ts || '');
-    if (opts.dryRun !== true) {
-      if (!clientNonce) return J({ status: false, reason: 'MISSING NONCE' }, 400);
+    if (opts.dryRun !== true && clientNonce) {
       if (!Number.isFinite(clientTs) || Math.abs(Date.now() - clientTs) > encryptRequestWindowMs) {
         return J({ status: false, reason: 'STALE REQUEST' }, 403);
       }
