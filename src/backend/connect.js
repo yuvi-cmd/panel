@@ -193,6 +193,19 @@ async function loadSettings(db, panel) {
   return m;
 }
 
+// Nonce replay protection for /encrypt (anti MITM / HttpCanary replay — same response repeat nahi ho sakta)
+const encryptUsedNonces = new Map();
+const encryptNonceTtlMs = 5 * 60 * 1000;
+const encryptRequestWindowMs = 10 * 60 * 1000;
+function encryptCleanupNonces() {
+  const now = Date.now();
+  for (const [n, t] of encryptUsedNonces) if (now - t > encryptNonceTtlMs) encryptUsedNonces.delete(n);
+}
+function encryptRandomHex(n) {
+  const buf = crypto.getRandomValues(new Uint8Array(n));
+  return Array.from(buf).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function versionFor(db, panel, st) {
   const pick = (sql, binds) => db.prepare(sql).bind(...binds).first().catch(() => null);
   let r = await pick('SELECT id,name,tag,url FROM mod_versions WHERE panel_code=? AND UPPER(name)=? LIMIT 1', [panel, st]);
@@ -327,6 +340,18 @@ export async function handleEncrypt(request, db, panel, env, opts = {}) {
     const mnt = await db.prepare('SELECT is_active,reason FROM mod_maintenance WHERE panel_code=?').bind(panel).first().catch(() => null);
     if (mnt && (mnt.is_active | 0) === 1) return J({ status: false, reason: clean(mnt.reason, 255) || 'SERVER UNDER MAINTENANCE' }, 503);
 
+    const clientNonce = String(params.nonce || '');
+    const clientTs = Number(params.ts || '');
+    if (opts.dryRun !== true) {
+      if (!clientNonce) return J({ status: false, reason: 'MISSING NONCE' }, 400);
+      if (!Number.isFinite(clientTs) || Math.abs(Date.now() - clientTs) > encryptRequestWindowMs) {
+        return J({ status: false, reason: 'STALE REQUEST' }, 403);
+      }
+      if (encryptUsedNonces.has(clientNonce)) return J({ status: false, reason: 'REPLAY DETECTED' }, 403);
+      encryptUsedNonces.set(clientNonce, Date.now());
+      encryptCleanupNonces();
+    }
+
     const v = await verifyKey(db, panel, userKey, hwid, opts.dryRun === true);
     if (v.err) return J({ status: false, reason: v.err }, v.code);
 
@@ -341,14 +366,20 @@ export async function handleEncrypt(request, db, panel, env, opts = {}) {
     if (!ver) { await ensureModVersions(db, panel); ver = await versionFor(db, panel, st); }
     const lib = await libUrlFor(db, panel, st, ver);
 
+    const serverNonce = encryptRandomHex(8);
+    const nowTs = Math.floor(Date.now() / 1000);
+
     const inner = {
       status: true,
       R1: R1,
       D: D,
       EXP: v.expiry,
-      rng: Math.floor(Date.now() / 1000),
+      rng: nowTs,
       device: String(v.key.device_limit | 0),
       URL: lib,
+      nonce: clientNonce || '',
+      server_nonce: serverNonce,
+      server_ts: nowTs,
     };
 
     const encryptedResponse = await apkDoubleEncrypt(db, panel, JSON.stringify(inner));

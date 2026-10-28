@@ -467,17 +467,19 @@ console.log('connect + encrypt');
   const { apkDoubleEncrypt, apkDoubleDecrypt, hashTriple } = await import('../src/backend/connect.js');
   const mkApkPayload = async (db, panel, userKey, serial) => {
     const { H1, H2, H3 } = hashTriple(userKey, serial);
-    const pt = `H1=${H1}&H2=${H2}&H3=${H3}&user_key=${encodeURIComponent(userKey)}&hwid=${encodeURIComponent(serial)}`;
-    return apkDoubleEncrypt(db, panel, pt);
+    const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16))).map((b) => b.toString(16).padStart(2, '0')).join('');
+    const ts = String(Date.now());
+    const pt = `H1=${H1}&H2=${H2}&H3=${H3}&user_key=${encodeURIComponent(userKey)}&hwid=${encodeURIComponent(serial)}&nonce=${nonce}&ts=${ts}`;
+    return { payload: await apkDoubleEncrypt(db, panel, pt), nonce, ts };
   };
   const encCall = async (userKey, serial, panel = 'YUVI_001', db = env.DB) => {
-    const payload = await mkApkPayload(db, panel, userKey, serial);
+    const { payload, nonce, ts } = await mkApkPayload(db, panel, userKey, serial);
     const r = await app.fetch(new Request('https://panel.test/encrypt/' + panel, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: payload }), { ...env, DB: db }, {});
     const text = await r.text();
     let body = null; try { body = JSON.parse(text); } catch { /* encrypted text */ }
     let decrypted = null;
     if (!body) { try { decrypted = await apkDoubleDecrypt(db, panel, text); } catch { decrypted = null; } }
-    return { status: r.status, text, body, decrypted };
+    return { status: r.status, text, body, decrypted, nonce, ts };
   };
 
   const e = await encCall(row.key_value, 'DEV-001');
@@ -487,18 +489,22 @@ console.log('connect + encrypt');
   env.DB.prepare("INSERT INTO activation_keys (activation_key,panel_code,name,duration_months,expires_at) VALUES ('VOUCHER-1','YUVI_001','t',1,'2099-01-01 00:00:00')").bind().run();
   const a = await call(env, 'POST', '/api/activate', { cookie: ownerCookie, json: { activation_key: 'voucher-1' } });
   ok(a.status === 200, 'activation redeem (case-insensitive)');
-  const e2 = await encCall(row.key_value, 'DEV-001');
-  const e2j = e2.decrypted ? JSON.parse(e2.decrypted) : null;
-  ok(e2.status === 200 && e2j && e2j.status === true && e2j.D === 1 && String(e2j.R1 || '').includes(row.key_value), 'encrypt returns double-AES payload after activation');
+  const e2r = await encCall(row.key_value, 'DEV-001');
+  const e2nonce = e2r.nonce;
+  const e2j = e2r.decrypted ? JSON.parse(e2r.decrypted) : null;
+  ok(e2r.status === 200 && e2j && e2j.status === true && e2j.D === 1 && String(e2j.R1 || '').includes(row.key_value), 'encrypt returns double-AES payload after activation');
   ok(e2j && e2j.URL === 'https://cdn.example.com/private.zip', 'encrypt response carries panel-configured URL');
+  ok(e2j && e2j.nonce === e2nonce && typeof e2j.server_nonce === 'string' && e2j.server_nonce.length >= 8 && typeof e2j.server_ts === 'number', 'encrypt response echoes nonce + server_nonce + server_ts');
   // panels created with a duration honour panels.expires_at without voucher
   const k2row = await env.DB.prepare('SELECT key_value FROM api_keys WHERE panel_code=? LIMIT 1').bind('PANEL_TWO').first();
   await env.DB.prepare("UPDATE panels SET expires_at='2099-01-01 00:00:00' WHERE panel_code='PANEL_TWO'").bind().run();
   await env.DB.prepare("INSERT OR IGNORE INTO mod_versions (panel_code,name,tag,url,sort) VALUES ('PANEL_TWO','PRIVATE','','https://cdn.example.com/panel2.zip',1)").run();
-  const e3 = await encCall(k2row.key_value, 'DEV-002', 'PANEL_TWO');
-  const e3j = e3.decrypted ? JSON.parse(e3.decrypted) : null;
-  ok(e3.status === 200 && e3j && e3j.status === true, 'encrypt honours panels.expires_at (no voucher needed)');
+  const e3r = await encCall(k2row.key_value, 'DEV-002', 'PANEL_TWO');
+  const e3nonce = e3r.nonce;
+  const e3j = e3r.decrypted ? JSON.parse(e3r.decrypted) : null;
+  ok(e3r.status === 200 && e3j && e3j.status === true, 'encrypt honours panels.expires_at (no voucher needed)');
   ok(e3j && e3j.URL === 'https://cdn.example.com/panel2.zip', 'encrypt response URL is panel-isolated');
+  ok(e3j && e3j.nonce === e3nonce && typeof e3j.server_nonce === 'string' && typeof e3j.server_ts === 'number', 'panel2 encrypt response echoes nonce + server_ts');
   // ...but an expired panel duration still blocks
   await env.DB.prepare("UPDATE panels SET expires_at='2000-01-01 00:00:00' WHERE panel_code='PANEL_TWO'").bind().run();
   const e4 = await encCall(k2row.key_value, 'DEV-002', 'PANEL_TWO');
@@ -637,7 +643,9 @@ console.log('legacy db heal');
   await db2.prepare("UPDATE panels SET expires_at='2099-01-01 00:00:00' WHERE panel_code='YUVI_001'").bind().run();
   const { apkDoubleEncrypt: ade2, apkDoubleDecrypt: add2, hashTriple: ht2 } = await import('../src/backend/connect.js');
   const { H1, H2, H3 } = ht2('30D-LEGACYKEY01', 'OLDDEV');
-  const payload2 = await ade2(db2, 'YUVI_001', `H1=${H1}&H2=${H2}&H3=${H3}&user_key=30D-LEGACYKEY01&hwid=OLDDEV`);
+  const ln2 = Array.from(crypto.getRandomValues(new Uint8Array(16))).map((b) => b.toString(16).padStart(2, '0')).join('');
+  const ts2 = String(Date.now());
+  const payload2 = await ade2(db2, 'YUVI_001', `H1=${H1}&H2=${H2}&H3=${H3}&user_key=30D-LEGACYKEY01&hwid=OLDDEV&nonce=${ln2}&ts=${ts2}`);
   const e = await app.fetch(new Request('https://panel.test/encrypt/YUVI_001', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: payload2 }), env2, {});
   const etxt = await e.text();
   let eb = null;
@@ -741,7 +749,9 @@ console.log('aes rotation');
   const encCall = async () => {
     const { hashTriple } = await import('../src/backend/connect.js');
     const { H1, H2, H3 } = hashTriple(krow.key_value, 'DEV-001');
-    const payload = await ade(env.DB, 'YUVI_001', `H1=${H1}&H2=${H2}&H3=${H3}&user_key=${encodeURIComponent(krow.key_value)}&hwid=DEV-001`);
+    const ln = Array.from(crypto.getRandomValues(new Uint8Array(16))).map((b) => b.toString(16).padStart(2, '0')).join('');
+    const ts = String(Date.now());
+    const payload = await ade(env.DB, 'YUVI_001', `H1=${H1}&H2=${H2}&H3=${H3}&user_key=${encodeURIComponent(krow.key_value)}&hwid=DEV-001&nonce=${ln}&ts=${ts}`);
     const r = await app.fetch(new Request('https://panel.test/encrypt/YUVI_001', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: payload }), env, {});
     return { status: r.status, text: await r.text() };
   };
