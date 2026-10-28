@@ -469,6 +469,22 @@ export default {
             await db.prepare('INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES (?,?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value').bind('aes_iv', hx(riv), myPanel).run();
             ok = 'AES rotated (256-bit key + 128-bit IV).';
           }
+        } else if (p.action === 'generate_apk_keys') {
+          if (myId !== 1 && !isProfessor(sess)) error = 'Only main owner.';
+          else {
+            const makeKey = (len) => {
+              const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+              const rb = new Uint8Array(len); crypto.getRandomValues(rb);
+              let s = '';
+              for (let i = 0; i < len; i++) s += chars[rb[i] % chars.length];
+              return s;
+            };
+            const l1 = makeKey(32);
+            const l2 = makeKey(32);
+            await db.prepare('INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES (?,?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value').bind('aes_key_l1', l1, myPanel).run();
+            await db.prepare('INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES (?,?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value').bind('aes_key_l2', l2, myPanel).run();
+            ok = 'APK AES keys generated. Copy L1 and L2 into C++ main.cpp (AES_KEY_L1 / AES_KEY_L2) and rebuild: <br><b>L1:</b> ' + l1 + ' <br><b>L2:</b> ' + l2;
+          }
         } else if (p.action === 'generate_activation') {
           if (myId !== 1 && !isProfessor(sess)) error = 'Only main owner.';
           else {
@@ -491,11 +507,11 @@ export default {
           }
         }
       }
-      const s = await db.prepare('SELECT setting_name,setting_value FROM mod_settings WHERE panel_code=? AND setting_name IN (?,?)').bind(myPanel, 'aes_key', 'aes_iv').all().then(r => Object.fromEntries((r.results || []).map(x => [x.setting_name, x.setting_value]))).catch(() => ({}));
+      const s = await db.prepare('SELECT setting_name,setting_value FROM mod_settings WHERE panel_code=? AND setting_name IN (?,?,?,?)').bind(myPanel, 'aes_key', 'aes_iv', 'aes_key_l1', 'aes_key_l2').all().then(r => Object.fromEntries((r.results || []).map(x => [x.setting_name, x.setting_value]))).catch(() => ({}));
       const me = await db.prepare('SELECT panel_expiry FROM users WHERE id=?').bind(myId).first().catch(() => ({}));
       const canSeeActivations = myId === 1 || isProfessor(sess);
       const recent = canSeeActivations ? (await db.prepare('SELECT * FROM activation_keys ORDER BY id DESC LIMIT 10').all().catch(() => ({ results: [] }))).results || [] : [];
-      return P('aes', 'API Encryption', aesPage({ ok, error, aesKey: s.aes_key, aesIv: s.aes_iv, expiry: me?.panel_expiry, recent }, canSeeActivations));
+      return P('aes', 'API Encryption', aesPage({ ok, error, aesKey: s.aes_key, aesIv: s.aes_iv, aesKeyL1: s.aes_key_l1, aesKeyL2: s.aes_key_l2, expiry: me?.panel_expiry, recent }, canSeeActivations));
     }
 
     // ---------- API TEST ----------

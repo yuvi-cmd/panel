@@ -73,10 +73,12 @@ export function aes256CbcEnc(json, keyHex, ivHex) {
 
 // ============================================================
 // APK-compatible double AES-256-CBC (matches native main.cpp)
-// Keys: SHA-256 of the obfuscated key strings embedded in the APK
+// Keys come from panel DB settings (aes_key_l1, aes_key_l2) —
+// generate from /aes page, copy to C++ APK, rebuild.
+// Fallback defaults below match the C++ strings in main.cpp.
 // ============================================================
-const APK_AES_KEY_L1_STR = 'ARCX2026LAYERONEKEY32BYTESKEY001';
-const APK_AES_KEY_L2_STR = 'ARCX2026LAYERTWOKEY32BYTESKEY002';
+const DEFAULT_AES_KEY_L1 = 'ARCX2026LAYERONEKEY32BYTESKEY001';
+const DEFAULT_AES_KEY_L2 = 'ARCX2026LAYERTWOKEY32BYTESKEY002';
 
 async function deriveAesKey(keyStr) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(keyStr));
@@ -96,13 +98,23 @@ function bytesToB64(bytes) {
   return btoa(bin);
 }
 
+// Read both AES key strings from panel DB settings.
+async function getAesKeyStrings(db, panel) {
+  const s = await loadSettings(db, panel);
+  return {
+    l1: String(s.aes_key_l1 || DEFAULT_AES_KEY_L1).trim(),
+    l2: String(s.aes_key_l2 || DEFAULT_AES_KEY_L2).trim(),
+  };
+}
+
 // Decrypt: base64 -> AES-CBC L2 -> AES-CBC L1 -> plaintext string
-async function apkDoubleDecrypt(b64Data) {
+async function apkDoubleDecrypt(db, panel, b64Data) {
   const raw = b64ToBytes(b64Data);
   if (raw.length < 32) return '';
 
-  const keyL2 = await deriveAesKey(APK_AES_KEY_L2_STR);
-  const keyL1 = await deriveAesKey(APK_AES_KEY_L1_STR);
+  const { l1, l2 } = await getAesKeyStrings(db, panel);
+  const keyL2 = await deriveAesKey(l2);
+  const keyL1 = await deriveAesKey(l1);
 
   const iv2 = raw.subarray(0, 16);
   const ct2 = raw.subarray(16);
@@ -119,9 +131,10 @@ async function apkDoubleDecrypt(b64Data) {
 }
 
 // Encrypt: plaintext -> AES-CBC L1 -> AES-CBC L2 -> base64
-async function apkDoubleEncrypt(plaintext) {
-  const keyL1 = await deriveAesKey(APK_AES_KEY_L1_STR);
-  const keyL2 = await deriveAesKey(APK_AES_KEY_L2_STR);
+async function apkDoubleEncrypt(db, panel, plaintext) {
+  const { l1, l2 } = await getAesKeyStrings(db, panel);
+  const keyL1 = await deriveAesKey(l1);
+  const keyL2 = await deriveAesKey(l2);
   const enc = new TextEncoder().encode(plaintext);
 
   const iv1 = crypto.getRandomValues(new Uint8Array(16));
@@ -273,7 +286,7 @@ export async function handleEncrypt(request, db, panel, env) {
 
   // Double-decrypt: base64 -> AES-CBC L2 -> AES-CBC L1 -> plaintext
   let decrypted;
-  try { decrypted = await apkDoubleDecrypt(encryptedPayload); } catch { return J({ status: false, reason: 'DECRYPTION FAILED' }, 403); }
+  try { decrypted = await apkDoubleDecrypt(db, panel, encryptedPayload); } catch { return J({ status: false, reason: 'DECRYPTION FAILED' }, 403); }
   if (!decrypted) return J({ status: false, reason: 'DECRYPTION FAILED' }, 403);
 
   const params = parsePostBody(decrypted);
@@ -324,7 +337,7 @@ export async function handleEncrypt(request, db, panel, env) {
       device: String(v.key.device_limit | 0),
     };
 
-    const encryptedResponse = await apkDoubleEncrypt(JSON.stringify(inner));
+    const encryptedResponse = await apkDoubleEncrypt(db, panel, JSON.stringify(inner));
     return new Response(encryptedResponse, {
       status: 200,
       headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store', ...cors },
