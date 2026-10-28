@@ -108,7 +108,7 @@ async function getAesKeyStrings(db, panel) {
 }
 
 // Decrypt: base64 -> AES-CBC L2 -> AES-CBC L1 -> plaintext string
-async function apkDoubleDecrypt(db, panel, b64Data) {
+export async function apkDoubleDecrypt(db, panel, b64Data) {
   const raw = b64ToBytes(b64Data);
   if (raw.length < 32) return '';
 
@@ -131,7 +131,7 @@ async function apkDoubleDecrypt(db, panel, b64Data) {
 }
 
 // Encrypt: plaintext -> AES-CBC L1 -> AES-CBC L2 -> base64
-async function apkDoubleEncrypt(db, panel, plaintext) {
+export async function apkDoubleEncrypt(db, panel, plaintext) {
   const { l1, l2 } = await getAesKeyStrings(db, panel);
   const keyL1 = await deriveAesKey(l1);
   const keyL2 = await deriveAesKey(l2);
@@ -167,14 +167,23 @@ function parsePostBody(text) {
   return out;
 }
 
-// Simple djb2 hash (matches C++ simpleHash in native main.cpp)
+// Simple djb2 hash — must match C++ simpleHash in native main.cpp.
+// C++ uses `unsigned long`, which is 64-bit on arm64 (LP64), so all
+// arithmetic wraps modulo 2^64. BigInt keeps the exact same values.
+const U64 = 0xFFFFFFFFFFFFFFFFn;
 export function simpleHash(s) {
-  let hash = 5381;
-  for (let i = 0; i < s.length; i++) {
-    hash = ((hash << 5) + hash) + s.charCodeAt(i);
-    hash = hash >>> 0;
-  }
+  const bytes = new TextEncoder().encode(String(s));
+  let hash = 5381n;
+  for (let i = 0; i < bytes.length; i++) hash = (hash * 33n + BigInt(bytes[i])) & U64;
   return hash;
+}
+// H1/H2/H3 in C++: unsigned long arithmetic, wrapping mod 2^64.
+export function hashTriple(userKey, hwid) {
+  const uk = simpleHash(userKey), hw = simpleHash(hwid);
+  const h1 = (2n * uk + 10n * hw) & U64;
+  const h2 = (hw * hw + 12n * h1) & U64;
+  const h3 = (25n * (h1 + h2)) & U64;
+  return { H1: h1, H2: h2, H3: h3 };
 }
 
 async function loadSettings(db, panel) {
@@ -278,52 +287,32 @@ export async function handleEncrypt(request, db, panel, env) {
   panel = clean(panel, 20);
   if (!panel) return J({ status: false, reason: 'PANEL CODE MISSING' }, 400);
 
-  const contentType = request.headers.get('content-type') || '';
-  const isFormData = contentType.includes('multipart/form-data');
+  // APK flow only: read raw encrypted body (base64 double-AES encrypted post body).
+  // No FormData fallback — plaintext requests must never bypass the H1/H2/H3 gate.
+  let bodyText;
+  try { bodyText = await request.text(); } catch { return J({ status: false, reason: 'INVALID PARAMETER' }, 400); }
+  const encryptedPayload = bodyText.trim();
+  if (!encryptedPayload) return J({ status: false, reason: 'EMPTY PAYLOAD' }, 400);
 
-  let userKey, hwid;
+  // Double-decrypt: base64 -> AES-CBC L2 -> AES-CBC L1 -> plaintext
+  let decrypted;
+  try { decrypted = await apkDoubleDecrypt(db, panel, encryptedPayload); } catch { return J({ status: false, reason: 'DECRYPTION FAILED' }, 403); }
+  if (!decrypted) return J({ status: false, reason: 'DECRYPTION FAILED' }, 403);
 
-  if (isFormData) {
-    // FormData flow — for API tester / browser clients
-    let fd;
-    try { fd = await request.formData(); } catch { return J({ status: false, reason: 'INVALID PARAMETER' }, 400); }
-    const game = clean(fd.get('game'), 50);
-    userKey = clean(fd.get('user_key'), 50);
-    hwid = clean(fd.get('serial'), 100);
-    if (!game || !userKey || !hwid || game !== 'PUBG') {
-      return J({ status: false, reason: game !== 'PUBG' && game ? 'USER OR GAME NOT REGISTERED' : 'INVALID PARAMETER' }, game && game !== 'PUBG' ? 403 : 400);
-    }
-  } else {
-    // APK flow: read raw encrypted body (base64 double-AES encrypted post body)
-    let bodyText;
-    try { bodyText = await request.text(); } catch { return J({ status: false, reason: 'INVALID PARAMETER' }, 400); }
-    const encryptedPayload = bodyText.trim();
-    if (!encryptedPayload) return J({ status: false, reason: 'EMPTY PAYLOAD' }, 400);
+  const params = parsePostBody(decrypted);
+  const H1 = params.H1, H2 = params.H2, H3 = params.H3;
+  const userKey = params.user_key;
+  const hwid = params.hwid;
 
-    // Double-decrypt: base64 -> AES-CBC L2 -> AES-CBC L1 -> plaintext
-    let decrypted;
-    try { decrypted = await apkDoubleDecrypt(db, panel, encryptedPayload); } catch { return J({ status: false, reason: 'DECRYPTION FAILED' }, 403); }
-    if (!decrypted) return J({ status: false, reason: 'DECRYPTION FAILED' }, 403);
+  if (!H1 || !H2 || !H3 || !userKey || !hwid) {
+    return J({ status: false, reason: 'MISSING PARAMETERS' }, 400);
+  }
 
-    const params = parsePostBody(decrypted);
-    const H1 = params.H1, H2 = params.H2, H3 = params.H3;
-    userKey = params.user_key;
-    hwid = params.hwid;
+  // Verify H1/H2/H3 against the same 64-bit djb2 arithmetic as C++.
+  const { H1: calcH1, H2: calcH2, H3: calcH3 } = hashTriple(userKey, hwid);
 
-    if (!H1 || !H2 || !H3 || !userKey || !hwid) {
-      return J({ status: false, reason: 'MISSING PARAMETERS' }, 400);
-    }
-
-    // Verify H1 = 2*hash(user_key) + 10*hash(hwid)
-    const ukHash = simpleHash(userKey);
-    const hwHash = simpleHash(hwid);
-    const calcH1 = 2 * ukHash + 10 * hwHash;
-    const calcH2 = hwHash * hwHash + 12 * calcH1;
-    const calcH3 = 25 * (calcH1 + calcH2);
-
-    if (String(H1) !== String(calcH1 >>> 0) || String(H2) !== String(calcH2 >>> 0) || String(H3) !== String(calcH3 >>> 0)) {
-      return J({ status: false, reason: 'HASH MISMATCH' }, 403);
-    }
+  if (String(H1) !== String(calcH1) || String(H2) !== String(calcH2) || String(H3) !== String(calcH3)) {
+    return J({ status: false, reason: 'HASH MISMATCH' }, 403);
   }
 
   // Validate panel active (common for both flows)

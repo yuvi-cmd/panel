@@ -473,14 +473,10 @@ export async function handleApi(request, db, env) {
     const userKey = cleanStr(p.user_key, 50), serial = cleanStr(p.serial, 100);
     if (!userKey || !serial) return J({ ok: false, error: 'user_key and serial required.' }, 400);
 
-    const { apkDoubleEncrypt, apkDoubleDecrypt, simpleHash } = await import('./connect.js');
+    const { apkDoubleEncrypt, apkDoubleDecrypt, hashTriple } = await import('./connect.js');
 
-    // Build same plaintext post body as APK sends
-    const ukHash = simpleHash(userKey);
-    const hwHash = simpleHash(serial);
-    const H1 = (2 * ukHash + 10 * hwHash) >>> 0;
-    const H2 = (hwHash * hwHash + 12 * H1) >>> 0;
-    const H3 = (25 * (H1 + H2)) >>> 0;
+    // Build same plaintext post body as the APK sends (64-bit djb2 values)
+    const { H1, H2, H3 } = hashTriple(userKey, serial);
     const plaintext = `H1=${H1}&H2=${H2}&H3=${H3}&user_key=${encodeURIComponent(userKey)}&hwid=${encodeURIComponent(serial)}`;
 
     let encrypted = '', decrypted = '', encryptErr = '', decryptErr = '';
@@ -489,14 +485,11 @@ export async function handleApi(request, db, env) {
       try { decrypted = await apkDoubleDecrypt(db, myPanel, encrypted); } catch (e) { decryptErr = String(e); }
     }
 
-    // Verify hash match
-    const calcH1 = (2 * ukHash + 10 * hwHash) >>> 0;
-    const calcH2 = (hwHash * hwHash + 12 * calcH1) >>> 0;
-    const calcH3 = (25 * (calcH1 + calcH2)) >>> 0;
-    const hashOk = (String(H1) === String(calcH1) && String(H2) === String(calcH2) && String(H3) === String(calcH3));
+    const hashOk = decrypted === plaintext;
+    const keySet = async (name) => !!(await db.prepare('SELECT setting_value FROM mod_settings WHERE panel_code=? AND setting_name=?').bind(myPanel, name).first().catch(() => null))?.setting_value;
 
     return J({ ok: true, http: 200, plaintext, encrypted, decrypted, hashOk,
-      keysUsed: { l1: !!(await db.prepare('SELECT setting_value FROM mod_settings WHERE panel_code=? AND setting_name=?').bind(myPanel, 'aes_key_l1').first().catch(() => null))?.setting_value, l2: !!(await db.prepare('SELECT setting_value FROM mod_settings WHERE panel_code=? AND setting_name=?').bind(myPanel, 'aes_key_l2').first().catch(() => null))?.setting_value },
+      keysUsed: { l1: await keySet('aes_key_l1'), l2: await keySet('aes_key_l2') },
       encryptErr, decryptErr });
   }
 

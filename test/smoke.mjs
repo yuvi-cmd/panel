@@ -463,34 +463,44 @@ console.log('connect + encrypt');
   const cbad = await call(env, 'POST', '/connect/YUVI_001', { form: fdBad });
   ok(cbad.status === 403, 'non-PUBG game rejected');
 
-  const e = await call(env, 'POST', '/encrypt/YUVI_001', { form: fd });
+  // --- APK encrypted-body contract (double AES-256-CBC + H1/H2/H3 gate) ---
+  const { apkDoubleEncrypt, apkDoubleDecrypt, hashTriple } = await import('../src/backend/connect.js');
+  const mkApkPayload = async (db, panel, userKey, serial) => {
+    const { H1, H2, H3 } = hashTriple(userKey, serial);
+    const pt = `H1=${H1}&H2=${H2}&H3=${H3}&user_key=${encodeURIComponent(userKey)}&hwid=${encodeURIComponent(serial)}`;
+    return apkDoubleEncrypt(db, panel, pt);
+  };
+  const encCall = async (userKey, serial, panel = 'YUVI_001', db = env.DB) => {
+    const payload = await mkApkPayload(db, panel, userKey, serial);
+    const r = await app.fetch(new Request('https://panel.test/encrypt/' + panel, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: payload }), { ...env, DB: db }, {});
+    const text = await r.text();
+    let body = null; try { body = JSON.parse(text); } catch { /* encrypted text */ }
+    let decrypted = null;
+    if (!body) { try { decrypted = await apkDoubleDecrypt(db, panel, text); } catch { decrypted = null; } }
+    return { status: r.status, text, body, decrypted };
+  };
+
+  const e = await encCall(row.key_value, 'DEV-001');
   ok(e.status === 403, 'encrypt blocked before panel activation');
 
-  // activate panel2? no — activate YUVI_001 via voucher + AES config
+  // activate panel1 via voucher
   env.DB.prepare("INSERT INTO activation_keys (activation_key,panel_code,name,duration_months,expires_at) VALUES ('VOUCHER-1','YUVI_001','t',1,'2099-01-01 00:00:00')").bind().run();
   const a = await call(env, 'POST', '/api/activate', { cookie: ownerCookie, json: { activation_key: 'voucher-1' } });
   ok(a.status === 200, 'activation redeem (case-insensitive)');
-  env.DB.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES ('aes_key',?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value").bind('a'.repeat(64), 'YUVI_001').run();
-  env.DB.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES ('aes_iv',?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value").bind('b'.repeat(32), 'YUVI_001').run();
-  const e2 = await call(env, 'POST', '/encrypt/YUVI_001', { form: fd });
-  const e2b = await e2.json();
-  ok(e2.status === 200 && e2b.status === true && typeof e2b.payload === 'string', 'encrypt returns payload after activation+aes');
+  const e2 = await encCall(row.key_value, 'DEV-001');
+  const e2j = e2.decrypted ? JSON.parse(e2.decrypted) : null;
+  ok(e2.status === 200 && e2j && e2j.status === true && e2j.D === 1 && String(e2j.R1 || '').includes(row.key_value), 'encrypt returns double-AES payload after activation');
 
   // panels created with a duration honour panels.expires_at without voucher
-  env.DB.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES ('aes_key',?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value").bind('c'.repeat(64), 'PANEL_TWO').run();
-  env.DB.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES ('aes_iv',?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value").bind('d'.repeat(32), 'PANEL_TWO').run();
   const k2row = await env.DB.prepare('SELECT key_value FROM api_keys WHERE panel_code=? LIMIT 1').bind('PANEL_TWO').first();
-  const fd2 = new FormData();
-  fd2.set('game', 'PUBG');
-  fd2.set('user_key', k2row.key_value);
-  fd2.set('serial', 'DEV-002');
-  const e3 = await call(env, 'POST', '/encrypt/PANEL_TWO', { form: fd2 });
-  const e3b = await e3.json();
-  ok(e3.status === 200 && e3b.status === true && typeof e3b.payload === 'string', 'encrypt honours panels.expires_at (no voucher needed)');
+  await env.DB.prepare("UPDATE panels SET expires_at='2099-01-01 00:00:00' WHERE panel_code='PANEL_TWO'").bind().run();
+  const e3 = await encCall(k2row.key_value, 'DEV-002', 'PANEL_TWO');
+  const e3j = e3.decrypted ? JSON.parse(e3.decrypted) : null;
+  ok(e3.status === 200 && e3j && e3j.status === true, 'encrypt honours panels.expires_at (no voucher needed)');
   // ...but an expired panel duration still blocks
   await env.DB.prepare("UPDATE panels SET expires_at='2000-01-01 00:00:00' WHERE panel_code='PANEL_TWO'").bind().run();
-  const e4 = await call(env, 'POST', '/encrypt/PANEL_TWO', { form: fd2 });
-  ok(e4.status === 403 && (await e4.json()).reason === 'PANEL NOT ACTIVATED', 'expired panel duration blocks encrypt');
+  const e4 = await encCall(k2row.key_value, 'DEV-002', 'PANEL_TWO');
+  ok(e4.status === 403 && e4.body.reason === 'PANEL NOT ACTIVATED', 'expired panel duration blocks encrypt');
 }
 
 // ---------- 7. bcore tenant-squatting fix + crypto helpers ----------
@@ -623,11 +633,14 @@ console.log('legacy db heal');
   const cb = await c.json().catch(() => ({}));
   ok(c.status === 200 && cb.status === true, 'legacy DB: connect binds device without 500 (got ' + c.status + ')');
   await db2.prepare("UPDATE panels SET expires_at='2099-01-01 00:00:00' WHERE panel_code='YUVI_001'").bind().run();
-  await db2.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES ('aes_key',?,?)").bind('e'.repeat(64), 'YUVI_001').run();
-  await db2.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES ('aes_iv',?,?)").bind('f'.repeat(32), 'YUVI_001').run();
-  const e = await call2('POST', '/encrypt/YUVI_001', { form: fd });
-  const eb = await e.json().catch(() => ({}));
-  ok(e.status === 200 && eb.status === true && typeof eb.payload === 'string', 'legacy DB: encrypt returns payload after heal');
+  const { apkDoubleEncrypt: ade2, apkDoubleDecrypt: add2, hashTriple: ht2 } = await import('../src/backend/connect.js');
+  const { H1, H2, H3 } = ht2('30D-LEGACYKEY01', 'OLDDEV');
+  const payload2 = await ade2(db2, 'YUVI_001', `H1=${H1}&H2=${H2}&H3=${H3}&user_key=30D-LEGACYKEY01&hwid=OLDDEV`);
+  const e = await app.fetch(new Request('https://panel.test/encrypt/YUVI_001', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: payload2 }), env2, {});
+  const etxt = await e.text();
+  let eb = null;
+  try { eb = JSON.parse(await add2(db2, 'YUVI_001', etxt)); } catch { eb = null; }
+  ok(e.status === 200 && eb && eb.status === true, 'legacy DB: encrypt returns decryptable payload after heal');
   globalThis.__arcDbReady = '';
 }
 
@@ -703,42 +716,45 @@ console.log('pending extend');
   ok(c.status === 200 && (await c.json()).status === true, 'extended pending key works on first use');
 }
 
-// ---------- 7h. AES rotation takes effect immediately, every time ----------
-// Proves /encrypt always uses the CURRENT keys (fresh D1 read per request,
-// zero caching): rotate 3x, each payload must decrypt ONLY with its own keys.
+// ---------- 7h. APK AES key rotation takes effect immediately ----------
+// Proves /encrypt always uses the CURRENT aes_key_l1/l2 (fresh D1 read per
+// request, zero caching): rotate 3x, each payload must decrypt ONLY with its
+// own keys. Keys are SHA-256(keyStr) 32 bytes, AES-256-CBC, IV prefixed.
 console.log('aes rotation');
 {
-  const { createDecipheriv } = await import('node:crypto');
-  const dec = (payload, keyHex, ivHex) => {
-    const d = createDecipheriv('aes-256-cbc', Buffer.from(keyHex, 'hex'), Buffer.from(ivHex, 'hex'));
-    return Buffer.concat([d.update(payload, 'base64'), d.final()]).toString('utf8');
+  const { createDecipheriv, createHash } = await import('node:crypto');
+  const { apkDoubleEncrypt: ade } = await import('../src/backend/connect.js');
+  const decLayer = (buf, keyStr) => {
+    const iv = buf.subarray(0, 16), ct = buf.subarray(16);
+    const d = createDecipheriv('aes-256-cbc', createHash('sha256').update(keyStr).digest(), iv);
+    return Buffer.concat([d.update(ct), d.final()]);
   };
-  const setAES = async (k, v) => {
-    await env.DB.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES (?,?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value").bind('aes_key', k, 'YUVI_001').run();
-    await env.DB.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES (?,?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value").bind('aes_iv', v, 'YUVI_001').run();
+  const dec = (b64, l1, l2) => decLayer(decLayer(Buffer.from(b64, 'base64'), l2), l1).toString('utf8');
+  const setAES = async (l1, l2) => {
+    for (const [n, v] of [['aes_key_l1', l1], ['aes_key_l2', l2]]) {
+      await env.DB.prepare("INSERT INTO mod_settings (setting_name,setting_value,panel_code) VALUES (?,?,?) ON CONFLICT(setting_name,panel_code) DO UPDATE SET setting_value=excluded.setting_value").bind(n, v, 'YUVI_001').run();
+    }
   };
   const krow = await env.DB.prepare('SELECT key_value FROM api_keys WHERE panel_code=? LIMIT 1').bind('YUVI_001').first();
   const encCall = async () => {
-    const f = new FormData();
-    f.set('game', 'PUBG');
-    f.set('user_key', krow.key_value);
-    f.set('serial', 'DEV-001'); // already bound in §6: reuse avoids device-limit noise
-    const r = await call(env, 'POST', '/encrypt/YUVI_001', { form: f });
-    return { status: r.status, body: await r.json() };
+    const { hashTriple } = await import('../src/backend/connect.js');
+    const { H1, H2, H3 } = hashTriple(krow.key_value, 'DEV-001');
+    const payload = await ade(env.DB, 'YUVI_001', `H1=${H1}&H2=${H2}&H3=${H3}&user_key=${encodeURIComponent(krow.key_value)}&hwid=DEV-001`);
+    const r = await app.fetch(new Request('https://panel.test/encrypt/YUVI_001', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: payload }), env, {});
+    return { status: r.status, text: await r.text() };
   };
-  const K = ['1'.repeat(64), '3'.repeat(64), '5'.repeat(64)];
-  const V = ['2'.repeat(32), '4'.repeat(32), '6'.repeat(32)];
+  const K = [['ROTATE1-LAYER-ONE-2026-KEY-AAAA', 'ROTATE1-LAYER-TWO-2026-KEY-BBBB'], ['ROTATE2-LAYER-ONE-2026-KEY-CCCC', 'ROTATE2-LAYER-TWO-2026-KEY-DDDD'], ['ROTATE3-LAYER-ONE-2026-KEY-EEEE', 'ROTATE3-LAYER-TWO-2026-KEY-FFFF']];
   const payloads = [];
   for (let i = 0; i < 3; i++) {
-    await setAES(K[i], V[i]); // rotate (1st set + 2 rotations)
+    await setAES(K[i][0], K[i][1]);
     const r = await encCall();
-    ok(r.status === 200 && typeof r.body.payload === 'string', 'encrypt ok with AES set #' + (i + 1));
-    payloads.push(r.body.payload);
-    ok(JSON.parse(dec(r.body.payload, K[i], V[i])).status === true, 'payload #' + (i + 1) + ' decrypts with current keys');
+    ok(r.status === 200 && r.text.length > 40, 'encrypt ok with AES set #' + (i + 1) + ' [' + r.status + ': ' + r.text.slice(0, 110) + ']');
+    payloads.push(r.text);
+    if (r.status === 200) ok(JSON.parse(dec(r.text, K[i][0], K[i][1])).status === true, 'payload #' + (i + 1) + ' decrypts with current keys');
   }
   ok(new Set(payloads).size === 3, 'every rotation changes the ciphertext');
   let staleOk = true;
-  try { JSON.parse(dec(payloads[2], K[0], V[0])); } catch { staleOk = false; }
+  try { JSON.parse(dec(payloads[2], K[0][0], K[0][1])); } catch { staleOk = false; }
   ok(!staleOk, 'latest payload NOT readable with rotated-out keys');
 }
 
@@ -750,25 +766,22 @@ console.log('test-decrypt preview');
     const r = await call(env, 'POST', '/api/test-decrypt', { cookie, json: body });
     return { status: r.status, body: await r.json() };
   };
-  const good = await pv({ user_key: krow.key_value, serial: 'DEV-001', endpoint: 'encrypt' }, ownerCookie);
+  const good = await pv({ user_key: krow.key_value, serial: 'DEV-001' }, ownerCookie);
   ok(good.status === 200 && good.body.ok === true && good.body.http === 200, 'preview endpoint ok');
-  ok(typeof good.body.raw.payload === 'string', 'preview shows raw encrypted payload');
-  ok(good.body.decrypted && good.body.decrypted.status === true && String(good.body.decrypted.data.real || '').includes(krow.key_value), 'preview decrypts with fresh D1 keys');
-  ok(!JSON.stringify(good.body).match(/5{64}|6{32}/), 'no AES key/iv material leaks into preview');
-  const conn = await pv({ user_key: krow.key_value, serial: 'DEV-001', endpoint: 'connect' }, ownerCookie);
-  ok(conn.body.ok === true && conn.body.raw.status === true && conn.body.decrypted === null, 'connect preview passes raw through');
-  const badKey = await pv({ user_key: 'NOPE', serial: 'X', endpoint: 'encrypt' }, ownerCookie);
-  ok(badKey.body.ok === true && badKey.body.http === 403, 'backend errors pass through with status');
+  ok(typeof good.body.encrypted === 'string' && good.body.encrypted.length > 40, 'preview shows raw encrypted payload');
+  ok(typeof good.body.decrypted === 'string' && good.body.decrypted.includes(krow.key_value) && good.body.decrypted.includes('hwid=DEV-001'), 'preview round-trips plaintext');
+  ok(good.body.hashOk === true, 'hash triple matches');
+  ok(!JSON.stringify(good.body).match(/aes_key_l1|aes_key_l2|ROTATE[0-9]-LAYER/), 'no AES key material leaks into preview');
   const missing = await pv({ user_key: '', serial: '' }, ownerCookie);
   ok(missing.status === 400, 'missing fields rejected');
   const anon = await pv({ user_key: krow.key_value, serial: 'DEV-001' });
   ok(anon.status === 401, 'preview requires login');
-  // rotate must not touch user keys: same row keeps working, uses just count up
+  // preview must never mutate user keys (crypto-only round-trip)
   const before = await env.DB.prepare('SELECT uses,expires_at FROM api_keys WHERE key_value=?').bind(krow.key_value).first();
-  await pv({ user_key: krow.key_value, serial: 'DEV-001', endpoint: 'encrypt' }, ownerCookie);
-  await pv({ user_key: krow.key_value, serial: 'DEV-001', endpoint: 'encrypt' }, ownerCookie);
+  await pv({ user_key: krow.key_value, serial: 'DEV-001' }, ownerCookie);
+  await pv({ user_key: krow.key_value, serial: 'DEV-001' }, ownerCookie);
   const after = await env.DB.prepare('SELECT uses,expires_at FROM api_keys WHERE key_value=?').bind(krow.key_value).first();
-  ok(after.uses === before.uses + 2 && after.expires_at === before.expires_at, 'rotations/tests never mutate user keys (uses +2, expiry same)');
+  ok(after.uses === before.uses && after.expires_at === before.expires_at, 'preview never mutates user keys');
 }
 
 // ---------- 8. inline-script audit: every rendered page's scripts must parse ----------
