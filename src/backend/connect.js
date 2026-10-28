@@ -278,65 +278,7 @@ export async function handleEncrypt(request, db, panel, env) {
   panel = clean(panel, 20);
   if (!panel) return J({ status: false, reason: 'PANEL CODE MISSING' }, 400);
 
-  let userKey, hwid, isFormData = false;
-
-  // Try FormData first (for API tester / browser clients)
-  try {
-    const fd = await request.formData();
-    const game = clean(fd.get('game'), 50);
-    userKey = clean(fd.get('user_key'), 50);
-    hwid = clean(fd.get('serial'), 100);
-    if (game && userKey && hwid && game === 'PUBG') {
-      isFormData = true;
-    }
-  } catch {}
-
-  if (isFormData) {
-    // Plain form data — verify hashes directly, no decryption needed
-    const ukHash = simpleHash(userKey);
-    const hwHash = simpleHash(hwid);
-    const calcH1 = 2 * ukHash + 10 * hwHash;
-    const calcH2 = hwHash * hwHash + 12 * calcH1;
-    const calcH3 = 25 * (calcH1 + calcH2);
-    const H1 = String(calcH1 >>> 0);
-    const H2 = String(calcH2 >>> 0);
-    const H3 = String(calcH3 >>> 0);
-
-    // Validate panel active
-    try {
-      const prow = await db.prepare('SELECT is_active,expires_at FROM panels WHERE panel_code=?').bind(panel).first().catch(() => null);
-      if (!prow || (prow.is_active | 0) !== 1) return J({ status: false, reason: 'USER OR GAME NOT REGISTERED' }, 403);
-
-      const notPast = (s) => { const ms = Date.parse(String(s || '').replace(' ', 'T') + 'Z'); return !isNaN(ms) && ms > Date.now(); };
-      const owner = await db.prepare("SELECT panel_expiry FROM users WHERE panel_code=? AND role IN ('OWNER','PROFESSOR') ORDER BY id ASC LIMIT 1").bind(panel).first().catch(() => null);
-      if (!notPast(owner?.panel_expiry) && !notPast(prow.expires_at)) return J({ status: false, reason: 'PANEL NOT ACTIVATED' }, 403);
-
-      const mnt = await db.prepare('SELECT is_active,reason FROM mod_maintenance WHERE panel_code=?').bind(panel).first().catch(() => null);
-      if (mnt && (mnt.is_active | 0) === 1) return J({ status: false, reason: clean(mnt.reason, 255) || 'SERVER UNDER MAINTENANCE' }, 503);
-
-      const v = await verifyKey(db, panel, userKey, hwid);
-      if (v.err) return J({ status: false, reason: v.err }, v.code);
-
-      // Build encrypted response
-      const R1 = userKey + '+' + hwid + '=true';
-      const D = 1;
-      const inner = {
-        status: true,
-        R1: R1,
-        D: D,
-        EXP: v.expiry,
-        rng: Math.floor(Date.now() / 1000),
-        device: String(v.key.device_limit | 0),
-      };
-      const encryptedResponse = await apkDoubleEncrypt(db, panel, JSON.stringify(inner));
-      return new Response(encryptedResponse, {
-        status: 200,
-        headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store', ...cors },
-      });
-    } catch (e) { return J({ status: false, reason: 'SERVER ERROR' + await errDetail(db, request, e, env) }, 500); }
-  }
-
-  // APK flow: read raw encrypted body
+  // APK flow: read raw encrypted body (base64 double-AES encrypted post body)
   let bodyText;
   try { bodyText = await request.text(); } catch { return J({ status: false, reason: 'INVALID PARAMETER' }, 400); }
   const encryptedPayload = bodyText.trim();
@@ -349,8 +291,8 @@ export async function handleEncrypt(request, db, panel, env) {
 
   const params = parsePostBody(decrypted);
   const H1 = params.H1, H2 = params.H2, H3 = params.H3;
-  userKey = params.user_key;
-  hwid = params.hwid;
+  const userKey = params.user_key;
+  const hwid = params.hwid;
 
   if (!H1 || !H2 || !H3 || !userKey || !hwid) {
     return J({ status: false, reason: 'MISSING PARAMETERS' }, 400);
