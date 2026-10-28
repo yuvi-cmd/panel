@@ -26,10 +26,6 @@ export function safeLibUrl(value) {
 }
 
 // One-time per panel: seed 4 starter versions with EMPTY tags/URLs
-// (names only — tags are fully owner-managed). URLs come from loader_files
-// if the panel had already saved some; connect never falls back to a
-// hardcoded link. A mod_settings marker stops re-seeding after the owner
-// deletes versions on purpose.
 export async function ensureModVersions(db, panel) {
   try {
     const marker = await db.prepare("SELECT setting_value FROM mod_settings WHERE panel_code=? AND setting_name='modvers_seeded'").bind(panel).first().catch(() => null);
@@ -54,8 +50,6 @@ const md5 = s => md5hex(s);
 const clean = (v, max = 255) => (typeof v === 'string' && v.trim() !== '' && v.trim().length <= max) ? v.trim() : '';
 
 // FIX (info-leak): never echo DB exception text to clients. Log server-side.
-// Exception: explicit operator opt-in via DEBUG_ERRORS=1 (wrangler vars) to
-// diagnose a live 500. MUST stay off in production.
 async function errDetail(db, request, e, env) {
   try { console.error('connect/encrypt error:', (e && e.stack) || e); } catch {}
   try {
@@ -68,7 +62,6 @@ async function errDetail(db, request, e, env) {
 }
 
 // Token salt: legacy-compat fallback. Override via `ARCX_TOKEN_SALT` secret.
-// WARNING: rotating this invalidates all previously issued client tokens.
 export function arcxSaltFromEnv(env) {
   const v = env && typeof env.ARCX_TOKEN_SALT === 'string' ? env.ARCX_TOKEN_SALT : '';
   return v || 'Vm8Lk7Uj2JmsjCPVPVjrLa7zgfx3uz9E';
@@ -78,6 +71,99 @@ export function aes256CbcEnc(json, keyHex, ivHex) {
   return aes256CbcEncrypt(json, keyHex, ivHex);
 }
 
+// ============================================================
+// APK-compatible double AES-256-CBC (matches native main.cpp)
+// Keys: SHA-256 of the obfuscated key strings embedded in the APK
+// ============================================================
+const APK_AES_KEY_L1_STR = 'ARCX2026LAYERONEKEY32BYTESKEY001';
+const APK_AES_KEY_L2_STR = 'ARCX2026LAYERTWOKEY32BYTESKEY002';
+
+async function deriveAesKey(keyStr) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(keyStr));
+  return new Uint8Array(buf);
+}
+
+function b64ToBytes(b64) {
+  const bin = atob(String(b64 || '').trim());
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function bytesToB64(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+// Decrypt: base64 -> AES-CBC L2 -> AES-CBC L1 -> plaintext string
+async function apkDoubleDecrypt(b64Data) {
+  const raw = b64ToBytes(b64Data);
+  if (raw.length < 32) return '';
+
+  const keyL2 = await deriveAesKey(APK_AES_KEY_L2_STR);
+  const keyL1 = await deriveAesKey(APK_AES_KEY_L1_STR);
+
+  const iv2 = raw.subarray(0, 16);
+  const ct2 = raw.subarray(16);
+  const k2 = await crypto.subtle.importKey('raw', keyL2, { name: 'AES-CBC' }, false, ['decrypt']);
+  const pt2 = await crypto.subtle.decrypt({ name: 'AES-CBC', iv: iv2 }, k2, ct2);
+
+  const d2 = new Uint8Array(pt2);
+  const iv1 = d2.subarray(0, 16);
+  const ct1 = d2.subarray(16);
+  const k1 = await crypto.subtle.importKey('raw', keyL1, { name: 'AES-CBC' }, false, ['decrypt']);
+  const pt1 = await crypto.subtle.decrypt({ name: 'AES-CBC', iv: iv1 }, k1, ct1);
+
+  return new TextDecoder().decode(pt1);
+}
+
+// Encrypt: plaintext -> AES-CBC L1 -> AES-CBC L2 -> base64
+async function apkDoubleEncrypt(plaintext) {
+  const keyL1 = await deriveAesKey(APK_AES_KEY_L1_STR);
+  const keyL2 = await deriveAesKey(APK_AES_KEY_L2_STR);
+  const enc = new TextEncoder().encode(plaintext);
+
+  const iv1 = crypto.getRandomValues(new Uint8Array(16));
+  const k1 = await crypto.subtle.importKey('raw', keyL1, { name: 'AES-CBC' }, false, ['encrypt']);
+  const ct1 = await crypto.subtle.encrypt({ name: 'AES-CBC', iv: iv1 }, k1, enc);
+
+  const d1 = new Uint8Array(iv1.length + ct1.byteLength);
+  d1.set(iv1, 0);
+  d1.set(new Uint8Array(ct1), iv1.length);
+
+  const iv2 = crypto.getRandomValues(new Uint8Array(16));
+  const k2 = await crypto.subtle.importKey('raw', keyL2, { name: 'AES-CBC' }, false, ['encrypt']);
+  const ct2 = await crypto.subtle.encrypt({ name: 'AES-CBC', iv: iv2 }, k2, d1);
+
+  const d2 = new Uint8Array(iv2.length + ct2.byteLength);
+  d2.set(iv2, 0);
+  d2.set(new Uint8Array(ct2), iv2.length);
+
+  return bytesToB64(d2);
+}
+
+// Parse "H1=...&H2=...&H3=...&user_key=...&hwid=..." into an object
+function parsePostBody(text) {
+  const out = {};
+  for (const part of String(text || '').split('&')) {
+    const eq = part.indexOf('=');
+    if (eq === -1) continue;
+    out[part.slice(0, eq)] = decodeURIComponent(part.slice(eq + 1));
+  }
+  return out;
+}
+
+// Simple djb2 hash (matches C++ simpleHash in native main.cpp)
+function simpleHash(s) {
+  let hash = 5381;
+  for (let i = 0; i < s.length; i++) {
+    hash = ((hash << 5) + hash) + s.charCodeAt(i);
+    hash = hash >>> 0;
+  }
+  return hash;
+}
+
 async function loadSettings(db, panel) {
   const r = await db.prepare('SELECT setting_name,setting_value FROM mod_settings WHERE panel_code=?').bind(panel).all().catch(() => ({ results: [] }));
   const m = {};
@@ -85,8 +171,6 @@ async function loadSettings(db, panel) {
   return m;
 }
 
-// Pick the panel's version row for a key's server type: exact name match,
-// then PRIVATE, then the first version by sort order.
 async function versionFor(db, panel, st) {
   const pick = (sql, binds) => db.prepare(sql).bind(...binds).first().catch(() => null);
   let r = await pick('SELECT id,name,tag,url FROM mod_versions WHERE panel_code=? AND UPPER(name)=? LIMIT 1', [panel, st]);
@@ -95,9 +179,6 @@ async function versionFor(db, panel, st) {
   return r || null;
 }
 
-// A row may contain a URL saved before strict validation existed. If it is
-// non-empty but malformed, fall back to loader_files (same server type,
-// then PRIVATE) so clients never receive an unreachable host.
 async function libUrlFor(db, panel, st, ver) {
   const stored = String(ver && ver.url ? ver.url : '').trim();
   const direct = safeLibUrl(stored);
@@ -115,7 +196,6 @@ async function verifyKey(db, panel, userKey, serial) {
   if (!key) return { err: 'USER OR GAME NOT REGISTERED', code: 403 };
   if ((key.is_blocked | 0) === 1) return { err: 'USER BLOCKED', code: 403 };
   if (key.expires_at && Date.parse(String(key.expires_at).replace(' ', 'T') + 'Z') < Date.now()) return { err: 'EXPIRED KEY', code: 403 };
-  // device gate
   const devs = (await db.prepare('SELECT device_uuid FROM key_devices WHERE key_id=?').bind(key.id).all().catch(() => ({ results: [] }))).results.map(d => d.device_uuid);
   if (!devs.includes(serial)) {
     if (devs.length >= Math.max(0, key.device_limit | 0)) return { err: 'MAX DEVICE REACHED', code: 403 };
@@ -184,35 +264,70 @@ export async function handleEncrypt(request, db, panel, env) {
   if (request.method.toUpperCase() !== 'POST') return J({ status: false, reason: 'METHOD NOT ALLOWED' }, 405);
   panel = clean(panel, 20);
   if (!panel) return J({ status: false, reason: 'PANEL CODE MISSING' }, 400);
-  let fd;
-  try { fd = await request.formData(); } catch { return J({ status: false, reason: 'INVALID PARAMETER' }, 400); }
-  const game = clean(fd.get('game'), 50), userKey = clean(fd.get('user_key'), 50), serial = clean(fd.get('serial'), 100);
-  if (!game || !userKey || !serial || game !== 'PUBG') return J({ status: false, reason: 'INVALID PARAMETER' }, 400);
+
+  // Read raw body (base64-encoded double-AES encrypted payload from APK)
+  let bodyText;
+  try { bodyText = await request.text(); } catch { return J({ status: false, reason: 'INVALID PARAMETER' }, 400); }
+  const encryptedPayload = bodyText.trim();
+  if (!encryptedPayload) return J({ status: false, reason: 'EMPTY PAYLOAD' }, 400);
+
+  // Double-decrypt: base64 -> AES-CBC L2 -> AES-CBC L1 -> plaintext
+  let decrypted;
+  try { decrypted = await apkDoubleDecrypt(encryptedPayload); } catch { return J({ status: false, reason: 'DECRYPTION FAILED' }, 403); }
+  if (!decrypted) return J({ status: false, reason: 'DECRYPTION FAILED' }, 403);
+
+  const params = parsePostBody(decrypted);
+  const H1 = params.H1, H2 = params.H2, H3 = params.H3;
+  const userKey = params.user_key;
+  const hwid = params.hwid;
+
+  if (!H1 || !H2 || !H3 || !userKey || !hwid) {
+    return J({ status: false, reason: 'MISSING PARAMETERS' }, 400);
+  }
+
+  // Verify H1 = 2*hash(user_key) + 10*hash(hwid)
+  const ukHash = simpleHash(userKey);
+  const hwHash = simpleHash(hwid);
+  const calcH1 = 2 * ukHash + 10 * hwHash;
+  const calcH2 = hwHash * hwHash + 12 * calcH1;
+  const calcH3 = 25 * (calcH1 + calcH2);
+
+  if (String(H1) !== String(calcH1 >>> 0) || String(H2) !== String(calcH2 >>> 0) || String(H3) !== String(calcH3 >>> 0)) {
+    return J({ status: false, reason: 'HASH MISMATCH' }, 403);
+  }
+
+  // Validate panel active
   try {
     const prow = await db.prepare('SELECT is_active,expires_at FROM panels WHERE panel_code=?').bind(panel).first().catch(() => null);
     if (!prow || (prow.is_active | 0) !== 1) return J({ status: false, reason: 'USER OR GAME NOT REGISTERED' }, 403);
-    // Panel activation: voucher redeem sets users.panel_expiry, but panels
-    // created with a duration already carry panels.expires_at (previously
-    // written but never honoured — /encrypt stayed blocked). Either counts.
+
     const notPast = (s) => { const ms = Date.parse(String(s || '').replace(' ', 'T') + 'Z'); return !isNaN(ms) && ms > Date.now(); };
     const owner = await db.prepare("SELECT panel_expiry FROM users WHERE panel_code=? AND role IN ('OWNER','PROFESSOR') ORDER BY id ASC LIMIT 1").bind(panel).first().catch(() => null);
     if (!notPast(owner?.panel_expiry) && !notPast(prow.expires_at)) return J({ status: false, reason: 'PANEL NOT ACTIVATED' }, 403);
-    const s = await loadSettings(db, panel);
-    if (!s.aes_key || !s.aes_iv || !/^[0-9a-fA-F]{64}$/.test(s.aes_key) || !/^[0-9a-fA-F]{32}$/.test(s.aes_iv)) return J({ status: false, reason: 'ENCRYPTION NOT CONFIGURED' }, 500);
+
     const mnt = await db.prepare('SELECT is_active,reason FROM mod_maintenance WHERE panel_code=?').bind(panel).first().catch(() => null);
     if (mnt && (mnt.is_active | 0) === 1) return J({ status: false, reason: clean(mnt.reason, 255) || 'SERVER UNDER MAINTENANCE' }, 503);
-    const v = await verifyKey(db, panel, userKey, serial);
+
+    const v = await verifyKey(db, panel, userKey, hwid);
     if (v.err) return J({ status: false, reason: v.err }, v.code);
-    const get = (k, d) => (k in s && s[k] != null ? String(s[k]) : d);
-    const real = 'PUBG-' + userKey + '-' + serial + '-' + arcxSaltFromEnv(env);
+
+    // Build encrypted response: R1 = user_key+hwid=true, D = 1 (device limit)
+    const R1 = userKey + '+' + hwid + '=true';
+    const D = 1;
+
     const inner = {
-      status: true, data: {
-        real, token: md5(real), Enc: md5(md5(real) + 'VIPENC'), EXP: v.expiry, rng: Math.floor(Date.now() / 1000),
-        server_type: String(v.key.server_type || 'PRIVATE').toUpperCase(), modname: get('modname', 'YUVI MOD'), mod_status: get('mod_status', 'Online'), credit: get('credit', 'Yuvi Panel'),
-        ESP: get('ESP', 'on'), Item: get('Item', 'on'), AIM: get('AIM', 'on'), SilentAim: get('SilentAim', 'on'), BulletTrack: get('BulletTrack', 'on'),
-        Floating: get('Floating', 'on'), Memory: get('Memory', 'on'), Setting: get('Setting', 'on'), exdate: v.expiry, device: String(v.key.device_limit | 0),
-      }
+      status: true,
+      R1: R1,
+      D: D,
+      EXP: v.expiry,
+      rng: Math.floor(Date.now() / 1000),
+      device: String(v.key.device_limit | 0),
     };
-    return J({ status: true, payload: await aes256CbcEnc(JSON.stringify(inner), s.aes_key, s.aes_iv) });
+
+    const encryptedResponse = await apkDoubleEncrypt(JSON.stringify(inner));
+    return new Response(encryptedResponse, {
+      status: 200,
+      headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store', ...cors },
+    });
   } catch (e) { return J({ status: false, reason: 'SERVER ERROR' + await errDetail(db, request, e, env) }, 500); }
 }
