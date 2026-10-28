@@ -278,38 +278,55 @@ export async function handleEncrypt(request, db, panel, env) {
   panel = clean(panel, 20);
   if (!panel) return J({ status: false, reason: 'PANEL CODE MISSING' }, 400);
 
-  // APK flow: read raw encrypted body (base64 double-AES encrypted post body)
-  let bodyText;
-  try { bodyText = await request.text(); } catch { return J({ status: false, reason: 'INVALID PARAMETER' }, 400); }
-  const encryptedPayload = bodyText.trim();
-  if (!encryptedPayload) return J({ status: false, reason: 'EMPTY PAYLOAD' }, 400);
+  const contentType = request.headers.get('content-type') || '';
+  const isFormData = contentType.includes('multipart/form-data');
 
-  // Double-decrypt: base64 -> AES-CBC L2 -> AES-CBC L1 -> plaintext
-  let decrypted;
-  try { decrypted = await apkDoubleDecrypt(db, panel, encryptedPayload); } catch { return J({ status: false, reason: 'DECRYPTION FAILED' }, 403); }
-  if (!decrypted) return J({ status: false, reason: 'DECRYPTION FAILED' }, 403);
+  let userKey, hwid;
 
-  const params = parsePostBody(decrypted);
-  const H1 = params.H1, H2 = params.H2, H3 = params.H3;
-  const userKey = params.user_key;
-  const hwid = params.hwid;
+  if (isFormData) {
+    // FormData flow — for API tester / browser clients
+    let fd;
+    try { fd = await request.formData(); } catch { return J({ status: false, reason: 'INVALID PARAMETER' }, 400); }
+    const game = clean(fd.get('game'), 50);
+    userKey = clean(fd.get('user_key'), 50);
+    hwid = clean(fd.get('serial'), 100);
+    if (!game || !userKey || !hwid || game !== 'PUBG') {
+      return J({ status: false, reason: game !== 'PUBG' && game ? 'USER OR GAME NOT REGISTERED' : 'INVALID PARAMETER' }, game && game !== 'PUBG' ? 403 : 400);
+    }
+  } else {
+    // APK flow: read raw encrypted body (base64 double-AES encrypted post body)
+    let bodyText;
+    try { bodyText = await request.text(); } catch { return J({ status: false, reason: 'INVALID PARAMETER' }, 400); }
+    const encryptedPayload = bodyText.trim();
+    if (!encryptedPayload) return J({ status: false, reason: 'EMPTY PAYLOAD' }, 400);
 
-  if (!H1 || !H2 || !H3 || !userKey || !hwid) {
-    return J({ status: false, reason: 'MISSING PARAMETERS' }, 400);
+    // Double-decrypt: base64 -> AES-CBC L2 -> AES-CBC L1 -> plaintext
+    let decrypted;
+    try { decrypted = await apkDoubleDecrypt(db, panel, encryptedPayload); } catch { return J({ status: false, reason: 'DECRYPTION FAILED' }, 403); }
+    if (!decrypted) return J({ status: false, reason: 'DECRYPTION FAILED' }, 403);
+
+    const params = parsePostBody(decrypted);
+    const H1 = params.H1, H2 = params.H2, H3 = params.H3;
+    userKey = params.user_key;
+    hwid = params.hwid;
+
+    if (!H1 || !H2 || !H3 || !userKey || !hwid) {
+      return J({ status: false, reason: 'MISSING PARAMETERS' }, 400);
+    }
+
+    // Verify H1 = 2*hash(user_key) + 10*hash(hwid)
+    const ukHash = simpleHash(userKey);
+    const hwHash = simpleHash(hwid);
+    const calcH1 = 2 * ukHash + 10 * hwHash;
+    const calcH2 = hwHash * hwHash + 12 * calcH1;
+    const calcH3 = 25 * (calcH1 + calcH2);
+
+    if (String(H1) !== String(calcH1 >>> 0) || String(H2) !== String(calcH2 >>> 0) || String(H3) !== String(calcH3 >>> 0)) {
+      return J({ status: false, reason: 'HASH MISMATCH' }, 403);
+    }
   }
 
-  // Verify H1 = 2*hash(user_key) + 10*hash(hwid)
-  const ukHash = simpleHash(userKey);
-  const hwHash = simpleHash(hwid);
-  const calcH1 = 2 * ukHash + 10 * hwHash;
-  const calcH2 = hwHash * hwHash + 12 * calcH1;
-  const calcH3 = 25 * (calcH1 + calcH2);
-
-  if (String(H1) !== String(calcH1 >>> 0) || String(H2) !== String(calcH2 >>> 0) || String(H3) !== String(calcH3 >>> 0)) {
-    return J({ status: false, reason: 'HASH MISMATCH' }, 403);
-  }
-
-  // Validate panel active
+  // Validate panel active (common for both flows)
   try {
     const prow = await db.prepare('SELECT is_active,expires_at FROM panels WHERE panel_code=?').bind(panel).first().catch(() => null);
     if (!prow || (prow.is_active | 0) !== 1) return J({ status: false, reason: 'USER OR GAME NOT REGISTERED' }, 403);
