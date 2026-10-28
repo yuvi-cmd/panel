@@ -521,6 +521,44 @@ export default {
       return P('api-test', 'Live API Tester', apiTestPage({ connect: base + '/connect/' + myPanel, encrypt: base + '/encrypt/' + myPanel }));
     }
 
+    // ---------- API TEST DECRYPT (server-side preview for /encrypt) ----------
+    if (path === '/api/test-decrypt') {
+      if (needOA()) return deny();
+      if (request.method.toUpperCase() !== 'POST') return J({ status: false, reason: 'METHOD NOT ALLOWED' }, 405);
+      let body;
+      try { body = await request.json(); } catch { return J({ status: false, reason: 'INVALID JSON' }, 400); }
+      const userKey = clean(String(body.user_key || ''), 50);
+      const serial = clean(String(body.serial || ''), 100);
+      if (!userKey || !serial) return J({ status: false, reason: 'MISSING PARAMS' }, 400);
+
+      // Simulate what the APK sends: build plaintext post body, double-encrypt, then decrypt back
+      const hk = simpleHash(userKey);
+      const hw = simpleHash(serial);
+      const H1 = 2 * hk + 10 * hw;
+      const H2 = hw * hw + 12 * H1;
+      const H3 = 25 * (H1 + H2);
+      const plaintext = `H1=${H1 >>> 0}&H2=${H2 >>> 0}&H3=${H3 >>> 0}&user_key=${encodeURIComponent(userKey)}&hwid=${encodeURIComponent(serial)}`;
+
+      const encrypted = await apkDoubleEncrypt(db, myPanel, plaintext);
+      let decrypted = '';
+      try { decrypted = await apkDoubleDecrypt(db, myPanel, encrypted); } catch { decrypted = 'DECRYPT FAILED'; }
+
+      // Verify hash match
+      const calcH1 = 2 * hk + 10 * hw;
+      const calcH2 = hw * hw + 12 * calcH1;
+      const calcH3 = 25 * (calcH1 + calcH2);
+      const hashOk = (String(H1) === String(calcH1 >>> 0) && String(H2) === String(calcH2 >>> 0) && String(H3) === String(calcH3 >>> 0));
+
+      return J({
+        status: true,
+        plaintext,
+        encrypted: encrypted,
+        decrypted: decrypted,
+        hashOk: hashOk,
+        keysUsed: { l1Set: !!await (await db.prepare('SELECT setting_value FROM mod_settings WHERE panel_code=? AND setting_name=?').bind(myPanel, 'aes_key_l1').first().catch(() => null))?.setting_value, l2Set: !!await (await db.prepare('SELECT setting_value FROM mod_settings WHERE panel_code=? AND setting_name=?').bind(myPanel, 'aes_key_l2').first().catch(() => null))?.setting_value },
+      });
+    }
+
     // ---------- SERVER ----------
     if (path === '/server') {
       if (needOA()) return deny();
