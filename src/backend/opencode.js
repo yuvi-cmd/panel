@@ -60,13 +60,26 @@ CREATE INDEX IF NOT EXISTS idx_opencode_events ON opencode_events(created_at);
 
 export async function ensureOpenCodeDB(db) {
   if (globalThis.__opencodeDbReady === true) return;
-  await db.exec(OPENCODE_SCHEMA);
+  // D1 exec() on some deployments rejects multi-statement DDL batches. Run
+  // every statement separately so one index can never take the whole route
+  // down with an uncaught Worker exception (HTTP 1101).
+  const statements = OPENCODE_SCHEMA.split(';').map((sql) => sql.trim()).filter(Boolean);
+  for (const sql of statements) {
+    try {
+      await db.prepare(sql).run();
+    } catch (e) {
+      if (/^CREATE\s+TABLE/i.test(sql)) throw e;
+      console.error('opencode schema statement failed:', String(e?.message || e));
+    }
+  }
   try {
     await db.prepare("INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('global_enabled','1')").run();
     await db.prepare("INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('maintenance_message','')").run();
     await db.prepare("INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('support_url','')").run();
     await db.prepare("INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('min_version_code','1')").run();
-  } catch {}
+  } catch (e) {
+    console.error('opencode settings seed failed:', String(e?.message || e));
+  }
   globalThis.__opencodeDbReady = true;
 }
 
@@ -237,7 +250,6 @@ function clientError(error, code) {
 // public app API
 // ---------------------------------------------------------------------------
 export async function handleOpenCodeApi(request, db, env) {
-  await ensureOpenCodeDB(db);
   const url = new URL(request.url);
   const action = url.pathname.split('/').filter(Boolean).pop() || '';
   const origin = request.headers.get('Origin') || '*';
@@ -248,6 +260,12 @@ export async function handleOpenCodeApi(request, db, env) {
     'Cache-Control': 'no-store',
   };
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+  try {
+    await ensureOpenCodeDB(db);
+  } catch (e) {
+    console.error('opencode db bootstrap failed:', String(e?.message || e));
+    return json({ ok: false, error: 'OpenCode database is not ready', code: 'db_error', detail: String(e?.message || e).slice(0, 300) }, 503, cors);
+  }
   if (request.method !== 'POST') {
     return json(clientError('POST required', 'method'), 405, cors);
   }
@@ -405,10 +423,10 @@ export async function getOpenCodeAdminData(db, query = '') {
 }
 
 export async function applyOpenCodeAdminAction(db, p) {
-  await ensureOpenCodeDB(db);
   const action = String(p.action || '');
   const id = parseInt(p.user_id, 10) || 0;
   try {
+    await ensureOpenCodeDB(db);
     if (action === 'save_settings') {
       const values = {
         global_enabled: String(p.global_enabled || '0') === '1' ? '1' : '0',

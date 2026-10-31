@@ -44,7 +44,7 @@ export default {
     if (path.startsWith('/connect/')) return handleConnect(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
     if (path === '/connect') return handleConnect(request, db, url.searchParams.get('panel_code') || mainPanel, env);
     if (path === '/health') {
-      return new Response(JSON.stringify({ ok: true, build: '2026-10-28-nonce-lenient', panel: mainPanel }), { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
+      return new Response(JSON.stringify({ ok: true, build: '2026-10-31-opencode-fix1', panel: mainPanel }), { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
     }
     if (path.startsWith('/encrypt/')) return handleEncrypt(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
     if (path.startsWith('/sdk/mundo/') || path === '/sdk/mundo') return handleMundo(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel), env);
@@ -805,7 +805,18 @@ export default {
         const result = await applyOpenCodeAdminAction(db, p);
         return redir('/opencode?' + (result.ok ? 'ok=' : 'error=') + encodeURIComponent(result.ok || result.error || ''));
       }
-      const data = await getOpenCodeAdminData(db, url.searchParams.get('q') || '');
+      let data;
+      try {
+        data = await getOpenCodeAdminData(db, url.searchParams.get('q') || '');
+      } catch (e) {
+        console.error('opencode admin data failed:', String(e?.message || e));
+        data = { settings: {}, notices: [], users: [], stats: {} };
+        return P('opencode', 'OpenCode App', opencodePage(data, {
+          ok: '',
+          error: 'OpenCode database is not ready: ' + String(e?.message || e).slice(0, 200),
+          q: url.searchParams.get('q') || '',
+        }));
+      }
       return P('opencode', 'OpenCode App', opencodePage(data, {
         ok: url.searchParams.get('ok') || '',
         error: url.searchParams.get('error') || '',
