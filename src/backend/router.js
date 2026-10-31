@@ -14,6 +14,7 @@ import { html, redir, parseCookies, formParams, tsMs, deny } from './http.js';
 import { getSession, sessCookie, clearCookie } from './session.js';
 import { THEMES, HEX6, getTheme, getAccent, panelName } from './theme.js';
 import { deviceFingerprint } from './device.js';
+import { handleOpenCodeApi, getOpenCodeAdminData, applyOpenCodeAdminAction } from './opencode.js';
 
 // ---- frontend ----
 import { layout, authPage } from '../frontend/ui.js';
@@ -25,6 +26,7 @@ import { serverPage as sdkServerPage, hashPage as sdkHashPage } from '../fronten
 import { panelDashboard, panelGenerate, panelKeyList, KEY_PRICING, KEY_DURATIONS, arcxRand } from '../frontend/panel/dash.js';
 import { usersPage, adminsPage, permissionsPage, referralPage } from '../frontend/panel/users.js';
 import { serverPage, settingsPage, aesPage, apiTestPage, createPanelPage, loaderPage, MOD_FIELDS } from '../frontend/panel/system.js';
+import { opencodePage } from '../frontend/panel/opencode.js';
 
 
 export default {
@@ -47,6 +49,7 @@ export default {
     if (path.startsWith('/encrypt/')) return handleEncrypt(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
     if (path.startsWith('/sdk/mundo/') || path === '/sdk/mundo') return handleMundo(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel), env);
     if (path.startsWith('/sdk/bcore/') || path === '/sdk/bcore') return handleBcore(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel), env);
+    if (path.startsWith('/api/opencode/')) return handleOpenCodeApi(request, db, env);
     if (path.startsWith('/api/')) {
       const r = await handleApi(request, db, env);
       if (r) return r;
@@ -792,6 +795,22 @@ export default {
       const mH = (await db.prepare('SELECT * FROM sdk_hash_vault WHERE panel_code=? AND engine=? ORDER BY id DESC').bind(myPanel, 'MUNDO').all().catch(() => ({ results: [] }))).results || [];
       const bH = (await db.prepare('SELECT * FROM sdk_hash_vault WHERE panel_code=? AND engine=? ORDER BY id DESC').bind(myPanel, 'BCORE').all().catch(() => ({ results: [] }))).results || [];
       return S('sdk/hash', 'SDK Hash', sdkHashPage({ mHashes: mH, bHashes: bH, mActive: mH.find(h => h.is_active) || null, bActive: bH.find(h => h.is_active) || null, salt: mundoSaltFromEnv(env), aesHex: mundoAesKeyHex(mundoSaltFromEnv(env)) }));
+    }
+
+    // ---------- OPENCODE APP (main owner id === 1 only) ----------
+    if (path === '/opencode') {
+      if (myId !== 1) return deny();
+      if (method === 'POST') {
+        const p = await formParams(request);
+        const result = await applyOpenCodeAdminAction(db, p);
+        return redir('/opencode?' + (result.ok ? 'ok=' : 'error=') + encodeURIComponent(result.ok || result.error || ''));
+      }
+      const data = await getOpenCodeAdminData(db, url.searchParams.get('q') || '');
+      return P('opencode', 'OpenCode App', opencodePage(data, {
+        ok: url.searchParams.get('ok') || '',
+        error: url.searchParams.get('error') || '',
+        q: url.searchParams.get('q') || '',
+      }));
     }
 
     return new Response('404 - Page Not Found', { status: 404 });

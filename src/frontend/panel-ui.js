@@ -25,6 +25,9 @@ export function panelLayout(o) {
   const SDK = canSeeSdk
     ? '<div class="side-divider"></div><a href="/sdk" class="' + navClass('sdk', route) + '"><i class="bi bi-boxes text-lg w-6 text-center"></i><span>SDK Panel</span><i class="bi bi-arrow-right-short text-xl ml-auto"></i></a>'
     : '';
+  const OPENCODE = sess.id === 1
+    ? '<a href="/opencode" class="' + navClass('opencode', route) + '"><i class="bi bi-phone-fill text-lg w-6 text-center"></i><span>OpenCode App</span></a>'
+    : '';
   const TENANT = (sess.id === 1 || isProf)
     ? '<div class="side-divider"></div><a href="/create-panel" class="' + navClass('create-panel', route) + '"><i class="bi bi-server text-lg w-6 text-center"></i><span>New Tenant</span></a>'
     : '';
@@ -32,6 +35,7 @@ export function panelLayout(o) {
     .concat(isOA ? [['Users', '/users', 'bi-people-fill'], ['Referrals', '/referral', 'bi-diagram-3-fill'], ['Server & mod', '/server', 'bi-hdd-fill'], ['API tester', '/api-test', 'bi-broadcast'], ['Mod / loader', '/loader-manager', 'bi-box-seam-fill']] : [])
     .concat(isOwner ? [['Encryption', '/enc-api', 'bi-shield-check']] : [])
     .concat(canSeeSdk ? [['SDK panel', '/sdk', 'bi-boxes']] : [])
+    .concat(sess.id === 1 ? [['OpenCode app', '/opencode', 'bi-phone']] : [])
     .concat((sess.id === 1 || isProf) ? [['Tenants', '/tenant', 'bi-server']] : []);
   return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
     + '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
@@ -54,7 +58,7 @@ export function panelLayout(o) {
     + '<a href="/dashboard" class="' + navClass('dashboard', route) + '"><i class="bi bi-grid-1x2-fill text-lg w-6 text-center"></i><span>Dashboard</span></a>'
     + '<a href="/generate" class="' + navClass('generate', route) + '"><i class="bi bi-key-fill text-lg w-6 text-center"></i><span>Generate Keys</span></a>'
     + '<a href="/keys" class="' + navClass('keys', route) + '"><i class="bi bi-view-list text-lg w-6 text-center"></i><span>Key Manager</span></a>'
-    + MGMT + SDK + TENANT
+    + MGMT + SDK + TENANT + OPENCODE
     + '<div class="side-divider"></div><a href="/settings" class="' + navClass('settings', route) + '"><i class="bi bi-gear-fill text-lg w-6 text-center"></i><span>Settings</span></a>'
     + '</nav><div class="p-3"><div class="clay-card rounded-xl p-3 flex items-center gap-2.5"><span class="status-dot"></span><div class="min-w-0"><p class="text-xs font-bold" style="color:var(--ink)">Systems live</p><p class="text-[11px] truncate" style="color:var(--muted)">' + esc(sess.panel_code || '') + ' tenant</p></div></div></div></aside>'
     + '<div class="flex-1 flex flex-col h-screen overflow-y-auto relative w-full z-10">'

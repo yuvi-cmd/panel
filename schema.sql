@@ -229,3 +229,56 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sess_user ON sessions(user_id);
+
+-- ===== OpenCode Android app (login / activation / remote switch) =====
+CREATE TABLE IF NOT EXISTS opencode_users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  display_name TEXT NOT NULL DEFAULT '',
+  device_id TEXT NOT NULL DEFAULT '',
+  device_name TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  expires_at TEXT,
+  last_login TEXT,
+  last_seen TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_opencode_status ON opencode_users(status);
+CREATE INDEX IF NOT EXISTS idx_opencode_seen ON opencode_users(last_seen);
+
+CREATE TABLE IF NOT EXISTS opencode_sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  device_id TEXT NOT NULL DEFAULT '',
+  expires_at INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_opencode_sess_user ON opencode_sessions(user_id);
+
+CREATE TABLE IF NOT EXISTS opencode_notices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL DEFAULT '',
+  message TEXT NOT NULL DEFAULT '',
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS opencode_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS opencode_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER,
+  kind TEXT NOT NULL DEFAULT '',
+  detail TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_opencode_events ON opencode_events(created_at);
+
+INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('global_enabled','1');
+INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('maintenance_message','');
+INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('support_url','');
+INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('min_version_code','1');

@@ -16,6 +16,7 @@ FRONTEND_ORIGIN = ""
 #   wrangler secret put BCORE_SECRET
 #   wrangler secret put MUNDO_SALT
 #   wrangler secret put ARCX_TOKEN_SALT
+#   wrangler secret put OPENCODE_ENC_KEY   # 64 hex chars, from OpenCodeAndroid/.panel-secret
 # Legacy fallbacks in src/crypto.js / src/p-connect.js keep old clients
 # working until a documented rotation. See SECURITY.md.
 
