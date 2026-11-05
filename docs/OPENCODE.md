@@ -4,6 +4,18 @@ This is the server side of the OpenCode Android activation system. It lives in
 the existing Worker/D1 panel, but uses its own tables and is visible only to
 panel user `id === 1` (the owner). It does not reuse the SDK/MUNDO/BCORE tables.
 
+## Live deployment
+
+- Panel: <https://panel.imranfarhat255.workers.dev>
+- Owner page: <https://panel.imranfarhat255.workers.dev/opencode> (log in as
+  panel user id `1` first)
+- Health: <https://panel.imranfarhat255.workers.dev/health>
+
+The Worker is deployed with build `2026-10-31-opencode-fix1`. If
+`/api/opencode/*` returns `code: "server_key_missing"`, set the
+`OPENCODE_ENC_KEY` secret (see **Deploy** below) and redeploy. The app uses the
+same 64-hex key from `OpenCodeAndroid/.panel-secret`.
+
 ## What it does
 
 - Registers app accounts with an `@gmail.com` address only.
