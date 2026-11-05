@@ -773,7 +773,7 @@ console.log('aes rotation');
 // ---------- 7i. tester decrypt preview (real path, server-side only) ----------
 console.log('test-decrypt preview');
 {
-  const krow = await env.DB.prepare('SELECT key_value,uses,expires_at FROM api_keys WHERE panel_code=? LIMIT 1').bind('YUVI_001').first();
+  const krow = await env.DB.prepare('SELECT id,key_value,uses,expires_at FROM api_keys WHERE panel_code=? LIMIT 1').bind('YUVI_001').first();
   const pv = async (body, cookie) => {
     const r = await call(env, 'POST', '/api/test-decrypt', { cookie, json: body });
     return { status: r.status, body: await r.json() };
@@ -839,13 +839,76 @@ console.log('sdk nonce + replay');
   ok(replay2.status === 403 && replay2.json.code === 'REPLAY_DETECTED', 'success response nonce cannot be replayed');
 }
 
+// ---------- 7j. OpenCode standalone control plane ----------
+console.log('opencode standalone panel');
+{
+  const ocCookieFrom = (res) => {
+    const h = res.headers.get('Set-Cookie') || '';
+    const m = h.match(/oc_admin=([^;]+)/);
+    return m ? `oc_admin=${m[1]}` : '';
+  };
+  const anon = await call(env, 'GET', '/opencode');
+  ok(anon.status === 302 && /\/opencode\/login/.test(anon.headers.get('Location') || ''), 'anonymous /opencode redirects to standalone login');
+  const loginPage = await call(env, 'GET', '/opencode/login');
+  const lh = await loginPage.text();
+  ok(loginPage.status === 200 && lh.includes('OpenCode Control') && lh.includes('Admin password not configured'), 'standalone login renders setup hint without secret');
+
+  const ownerPanel = await call(env, 'GET', '/opencode', { cookie: ownerCookie });
+  const oh = await ownerPanel.text();
+  ok(ownerPanel.status === 200 && oh.includes('Standalone control') && oh.includes('OpenCode access is live'), 'SDK owner id 1 bypasses standalone login');
+  ok(oh.includes('Remote settings'), 'overview exposes remote settings');
+
+  env.OPENCODE_ADMIN_PASSWORD = 'adminpass123';
+  const badFd = new FormData(); badFd.set('password', 'wrong-pass');
+  const bad = await call(env, 'POST', '/opencode/login', { form: badFd });
+  ok(bad.status === 200 && (await bad.text()).includes('Invalid admin password'), 'wrong admin password rejected');
+  const goodFd = new FormData(); goodFd.set('password', 'adminpass123');
+  const good = await call(env, 'POST', '/opencode/login', { form: goodFd });
+  const adminCookie = ocCookieFrom(good);
+  const setCookie = good.headers.get('Set-Cookie') || '';
+  ok(good.status === 302 && good.headers.get('Location') === '/opencode' && !!adminCookie, 'correct admin password creates oc_admin session');
+  ok(/HttpOnly/.test(setCookie) && /SameSite=Lax/.test(setCookie), 'admin cookie is HttpOnly + SameSite=Lax');
+
+  const dash = await call(env, 'GET', '/opencode', { cookie: adminCookie });
+  ok(dash.status === 200 && (await dash.text()).includes('OpenCode access is live'), 'admin session renders overview');
+  const usersPage = await call(env, 'GET', '/opencode/users', { cookie: adminCookie });
+  ok(usersPage.status === 200 && (await usersPage.text()).includes('App accounts'), 'users page renders');
+  const noticesPage = await call(env, 'GET', '/opencode/notices', { cookie: adminCookie });
+  ok(noticesPage.status === 200 && (await noticesPage.text()).includes('Publish notice'), 'notices page renders');
+  const settingsPage = await call(env, 'GET', '/opencode/settings', { cookie: adminCookie });
+  ok(settingsPage.status === 200 && (await settingsPage.text()).includes('OPENCODE_ADMIN_PASSWORD'), 'settings page renders secret names (not values)');
+
+  const toggleFd = new FormData(); toggleFd.set('action', 'toggle_global');
+  const toggle = await call(env, 'POST', '/opencode', { cookie: adminCookie, form: toggleFd });
+  ok(toggle.status === 302, 'toggle_global redirects');
+  const globalRow = await env.DB.prepare("SELECT value FROM opencode_settings WHERE key='global_enabled'").bind().first();
+  ok(globalRow && globalRow.value === '0', 'toggle_global flips global switch to 0');
+  const toggleBackFd = new FormData(); toggleBackFd.set('action', 'toggle_global');
+  await call(env, 'POST', '/opencode', { cookie: adminCookie, form: toggleBackFd });
+  const globalRow2 = await env.DB.prepare("SELECT value FROM opencode_settings WHERE key='global_enabled'").bind().first();
+  ok(globalRow2 && globalRow2.value === '1', 'toggle_global flips back to 1');
+
+  const noticeFd = new FormData(); noticeFd.set('action', 'add_notice'); noticeFd.set('title', 'Smoke notice'); noticeFd.set('message', 'Standalone panel works');
+  const noticeRes = await call(env, 'POST', '/opencode/notices', { cookie: adminCookie, form: noticeFd });
+  ok(noticeRes.status === 302, 'notice publish redirects');
+  const noticeRow = await env.DB.prepare("SELECT id FROM opencode_notices WHERE title='Smoke notice'").bind().first();
+  ok(!!noticeRow, 'notice stored in D1');
+
+  const logout = await call(env, 'GET', '/opencode/logout', { cookie: adminCookie });
+  ok(logout.status === 302 && /\/opencode\/login/.test(logout.headers.get('Location') || ''), 'logout redirects to login');
+  ok(/oc_admin=;/.test(logout.headers.get('Set-Cookie') || ''), 'logout clears oc_admin cookie');
+  const afterLogout = await call(env, 'GET', '/opencode', { cookie: adminCookie });
+  ok(afterLogout.status === 302, 'revoked admin cookie cannot access panel');
+  delete env.OPENCODE_ADMIN_PASSWORD;
+}
+
 // ---------- 8. inline-script audit: every rendered page's scripts must parse ----------
 // A single broken <script> kills the whole tag (sidebar toggle, copy buttons,
 // filters). node --check cannot see inside template literals, so audit the
 // actual rendered HTML.
 console.log('inline script audit');
 {
-  const htmlPaths = ['/login', '/register', '/reset-device', '/join-panel', '/dashboard', '/generate', '/keys', '/users', '/admins', '/permissions', '/referral', '/aes', '/api-test', '/server', '/settings', '/loader-manager', '/create-panel', '/sdk', '/sdk/generate', '/sdk/keys', '/sdk/server', '/sdk/hash'];
+  const htmlPaths = ['/login', '/register', '/reset-device', '/join-panel', '/dashboard', '/generate', '/keys', '/users', '/admins', '/permissions', '/referral', '/aes', '/api-test', '/server', '/settings', '/loader-manager', '/create-panel', '/sdk', '/sdk/generate', '/sdk/keys', '/sdk/server', '/sdk/hash', '/opencode', '/opencode/users', '/opencode/notices', '/opencode/settings', '/opencode/login'];
   let checked = 0;
   for (const p of htmlPaths) {
     const r = await call(env, 'GET', p, { cookie: ownerCookie });

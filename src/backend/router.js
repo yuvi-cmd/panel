@@ -15,6 +15,18 @@ import { getSession, sessCookie, clearCookie } from './session.js';
 import { THEMES, HEX6, getTheme, getAccent, panelName } from './theme.js';
 import { deviceFingerprint } from './device.js';
 import { handleOpenCodeApi, getOpenCodeAdminData, applyOpenCodeAdminAction } from './opencode.js';
+import {
+  adminCookie,
+  adminLoginRate,
+  adminPasswordConfigured,
+  adminPasswordSource,
+  clearAdminCookie,
+  createOpenCodeAdminSession,
+  destroyOpenCodeAdminSession,
+  getOpenCodeAdminSession,
+  opencodeEncryptionConfigured,
+  verifyAdminPassword,
+} from './opencode-admin.js';
 
 // ---- frontend ----
 import { layout, authPage } from '../frontend/ui.js';
@@ -26,7 +38,7 @@ import { serverPage as sdkServerPage, hashPage as sdkHashPage } from '../fronten
 import { panelDashboard, panelGenerate, panelKeyList, KEY_PRICING, KEY_DURATIONS, arcxRand } from '../frontend/panel/dash.js';
 import { usersPage, adminsPage, permissionsPage, referralPage } from '../frontend/panel/users.js';
 import { serverPage, settingsPage, aesPage, apiTestPage, createPanelPage, loaderPage, MOD_FIELDS } from '../frontend/panel/system.js';
-import { opencodePage } from '../frontend/panel/opencode.js';
+import { opencodeLoginPage, opencodeAdminLayout, opencodeOverview, opencodeUsersPage, opencodeNoticesPage, opencodeSettingsPage } from '../frontend/opencode-admin.js';
 
 
 export default {
@@ -44,7 +56,7 @@ export default {
     if (path.startsWith('/connect/')) return handleConnect(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
     if (path === '/connect') return handleConnect(request, db, url.searchParams.get('panel_code') || mainPanel, env);
     if (path === '/health') {
-      return new Response(JSON.stringify({ ok: true, build: '2026-10-31-opencode-fix1', panel: mainPanel }), { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
+      return new Response(JSON.stringify({ ok: true, build: '2026-11-06-opencode-standalone', panel: mainPanel }), { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
     }
     if (path.startsWith('/encrypt/')) return handleEncrypt(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
     if (path.startsWith('/sdk/mundo/') || path === '/sdk/mundo') return handleMundo(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel), env);
@@ -53,6 +65,101 @@ export default {
     if (path.startsWith('/api/')) {
       const r = await handleApi(request, db, env);
       if (r) return r;
+    }
+
+    // ---------- OPENCODE STANDALONE CONTROL PANEL ----------
+    // Separate from the SDK login. Admin password -> oc_admin cookie; panel
+    // user id 1 can also enter directly from the main panel.
+    if (path === '/opencode/login') {
+      if (method === 'POST') {
+        const rl = adminLoginRate(request);
+        if (!rl.allowed) {
+          return html(opencodeLoginPage({
+            error: 'Too many attempts. Try again in a minute.',
+            configured: adminPasswordConfigured(env),
+          }), 429);
+        }
+        const p = await formParams(request);
+        const check = await verifyAdminPassword(env, String(p.password || ''));
+        if (!check.configured) {
+          return html(opencodeLoginPage({
+            error: 'Admin password is not configured. Set OPENCODE_ADMIN_PASSWORD on the Worker, or login to the main panel as owner.',
+            configured: false,
+          }));
+        }
+        if (!check.ok) {
+          return html(opencodeLoginPage({
+            error: 'Invalid admin password.',
+            configured: true,
+          }));
+        }
+        const token = await createOpenCodeAdminSession(db, request);
+        return redir('/opencode', adminCookie(token, request));
+      }
+      if (await getOpenCodeAdminSession(db, request)) return redir('/opencode');
+      return html(opencodeLoginPage({
+        configured: adminPasswordConfigured(env),
+        msg: url.searchParams.get('msg') || '',
+      }));
+    }
+    if (path === '/opencode/logout') {
+      await destroyOpenCodeAdminSession(db, request);
+      return redir('/opencode/login?msg=' + encodeURIComponent('Signed out of the OpenCode control plane.'), clearAdminCookie(request));
+    }
+    const OC_PAGES = {
+      '/opencode': { route: 'overview', title: 'Overview' },
+      '/opencode/users': { route: 'users', title: 'App accounts' },
+      '/opencode/notices': { route: 'notices', title: 'Notices' },
+      '/opencode/settings': { route: 'settings', title: 'Settings' },
+    };
+    if (OC_PAGES[path]) {
+      let actor = 'admin';
+      const adminSession = await getOpenCodeAdminSession(db, request);
+      if (!adminSession) {
+        const sdkSession = await getSession(db, request);
+        if (sdkSession && sdkSession.id === 1 && (sdkSession.is_blocked | 0) !== 1) actor = 'owner';
+        else return redir('/opencode/login');
+      }
+      const page = OC_PAGES[path];
+      if (method === 'POST') {
+        const p = await formParams(request);
+        const result = await applyOpenCodeAdminAction(db, p);
+        const qs = new URLSearchParams();
+        if (result.ok) qs.set('ok', result.ok);
+        else qs.set('error', result.error || 'Action failed');
+        if (page.route === 'users' && p.q) qs.set('q', String(p.q).slice(0, 80));
+        return redir(path + '?' + qs.toString());
+      }
+      let data;
+      let adminError = '';
+      try {
+        data = await getOpenCodeAdminData(db, url.searchParams.get('q') || '');
+      } catch (e) {
+        console.error('opencode admin data failed:', String(e?.message || e));
+        data = { settings: {}, notices: [], users: [], stats: {} };
+        adminError = 'OpenCode database is not ready: ' + String(e?.message || e).slice(0, 200);
+      }
+      const common = {
+        ok: url.searchParams.get('ok') || '',
+        error: adminError || url.searchParams.get('error') || '',
+        q: url.searchParams.get('q') || '',
+        actor,
+        encOk: opencodeEncryptionConfigured(env),
+        adminSource: adminPasswordSource(env),
+      };
+      const content = page.route === 'users' ? opencodeUsersPage(data, common)
+        : page.route === 'notices' ? opencodeNoticesPage(data, common)
+          : page.route === 'settings' ? opencodeSettingsPage(data, common)
+            : opencodeOverview(data, common);
+      return html(opencodeAdminLayout({
+        title: page.title,
+        route: page.route,
+        content,
+        ok: common.ok,
+        error: common.error,
+        actor,
+        encOk: common.encOk,
+      }));
     }
 
     const uc = await db.prepare('SELECT COUNT(*) c FROM users').first().catch(() => ({ c: 1 }));
@@ -797,32 +904,9 @@ export default {
       return S('sdk/hash', 'SDK Hash', sdkHashPage({ mHashes: mH, bHashes: bH, mActive: mH.find(h => h.is_active) || null, bActive: bH.find(h => h.is_active) || null, salt: mundoSaltFromEnv(env), aesHex: mundoAesKeyHex(mundoSaltFromEnv(env)) }));
     }
 
-    // ---------- OPENCODE APP (main owner id === 1 only) ----------
-    if (path === '/opencode') {
-      if (myId !== 1) return deny();
-      if (method === 'POST') {
-        const p = await formParams(request);
-        const result = await applyOpenCodeAdminAction(db, p);
-        return redir('/opencode?' + (result.ok ? 'ok=' : 'error=') + encodeURIComponent(result.ok || result.error || ''));
-      }
-      let data;
-      try {
-        data = await getOpenCodeAdminData(db, url.searchParams.get('q') || '');
-      } catch (e) {
-        console.error('opencode admin data failed:', String(e?.message || e));
-        data = { settings: {}, notices: [], users: [], stats: {} };
-        return P('opencode', 'OpenCode App', opencodePage(data, {
-          ok: '',
-          error: 'OpenCode database is not ready: ' + String(e?.message || e).slice(0, 200),
-          q: url.searchParams.get('q') || '',
-        }));
-      }
-      return P('opencode', 'OpenCode App', opencodePage(data, {
-        ok: url.searchParams.get('ok') || '',
-        error: url.searchParams.get('error') || '',
-        q: url.searchParams.get('q') || '',
-      }));
-    }
+    // ---------- OPENCODE APP ----------
+    // The standalone control plane is handled before the SDK session gate
+    // above (/opencode, /opencode/users, /opencode/notices, /opencode/settings).
 
     return new Response('404 - Page Not Found', { status: 404 });
   }

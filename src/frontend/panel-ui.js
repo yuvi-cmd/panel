@@ -26,7 +26,7 @@ export function panelLayout(o) {
     ? '<div class="side-divider"></div><a href="/sdk" class="' + navClass('sdk', route) + '"><i class="bi bi-boxes text-lg w-6 text-center"></i><span>SDK Panel</span><i class="bi bi-arrow-right-short text-xl ml-auto"></i></a>'
     : '';
   const OPENCODE = sess.id === 1
-    ? '<a href="/opencode" class="' + navClass('opencode', route) + '"><i class="bi bi-phone-fill text-lg w-6 text-center"></i><span>OpenCode App</span></a>'
+    ? '<a href="/opencode" class="' + navClass('opencode', route) + '"><i class="bi bi-terminal-fill text-lg w-6 text-center"></i><span>OpenCode Control</span></a>'
     : '';
   const TENANT = (sess.id === 1 || isProf)
     ? '<div class="side-divider"></div><a href="/create-panel" class="' + navClass('create-panel', route) + '"><i class="bi bi-server text-lg w-6 text-center"></i><span>New Tenant</span></a>'

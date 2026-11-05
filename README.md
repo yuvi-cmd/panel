@@ -9,6 +9,10 @@
 - `/users`, `/admins`, `/permissions`, `/referral` (OWNER/ADMIN rules PHP jaise)
 - `/server` (maintenance + mod config), `/settings` (password + branding + API URLs), `/aes` (AES rotate + activation keys), `/api-test`, `/loader-manager`, `/create-panel` (id==1)
 - `/sdk/*` — MUNDO + BCORE dashboard/generate/keys/server/hash (sirf main OWNER id==1)
+- `/opencode` — standalone OpenCode Android control plane with its **own login**
+  (`/opencode/login`), global APK ON/OFF, Gmail accounts, device lock, notices and
+  encrypted `/api/opencode/*` app transport. SDK owner id==1 can also enter directly.
+  See [docs/OPENCODE.md](docs/OPENCODE.md).
 
 ## API (bina login)
 
@@ -52,11 +56,14 @@ src/
 │   ├── api.js               # /api/* JSON endpoints
 │   ├── connect.js           # /connect + /encrypt (app-facing)
 │   ├── mundo.js             # /sdk/mundo/* validation
-│   └── bcore.js             # /sdk/bcore/* validation
+│   ├── bcore.js             # /sdk/bcore/* validation
+│   ├── opencode.js          # encrypted OpenCode app API + admin actions
+│   └── opencode-admin.js    # standalone admin password/session auth
 └── frontend/                # sirf HTML render (koi DB/logic nahi)
     ├── ui.js                # shared kit: CSS, esc, MODE_*, palette
     ├── panel-ui.js          # panel chrome + role nav
     ├── auth.js              # login/register/reset/join pages
+    ├── opencode-admin.js    # standalone OpenCode login + control plane
     ├── panel/               # panel (admin) pages
     │   ├── dash.js          #   dashboard/generate/key-list
     │   ├── users.js         #   users/admins/permissions/referral

@@ -427,6 +427,12 @@ export async function applyOpenCodeAdminAction(db, p) {
   const id = parseInt(p.user_id, 10) || 0;
   try {
     await ensureOpenCodeDB(db);
+    if (action === 'toggle_global') {
+      const current = await settingsMap(db);
+      const next = String(current.global_enabled || '1') === '1' ? '0' : '1';
+      await db.prepare("INSERT INTO opencode_settings (key,value) VALUES ('global_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(next).run();
+      return { ok: next === '1' ? 'OpenCode is now ON for all accounts.' : 'OpenCode is now OFF for all accounts.' };
+    }
     if (action === 'save_settings') {
       const values = {
         global_enabled: String(p.global_enabled || '0') === '1' ? '1' : '0',

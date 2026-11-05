@@ -1,5 +1,31 @@
 # CHANGES.md
 
+## Pass 2026-11-06 — standalone OpenCode control plane
+
+- `/opencode` ab **SDK panel se alag standalone website** hai: apna login page,
+  apna `oc_admin` HttpOnly session cookie, apna dark control-plane shell aur
+  apni 4 pages (`/opencode`, `/opencode/users`, `/opencode/notices`,
+  `/opencode/settings`).
+- Naya `src/backend/opencode-admin.js`: password verify (constant-time SHA-256),
+  random 32-byte session token, D1 me sirf token hash, 7-day expiry,
+  per-IP login rate limit, secret cleanup. Password source priority:
+  `OPENCODE_ADMIN_PASSWORD` → `PANEL_ADMIN_PASSWORD` → `OPENCODE_ENC_KEY`.
+- Naya `src/frontend/opencode-admin.js`: standalone login page + overview,
+  accounts, notices aur settings pages. Global ON/OFF hero toggle, stats,
+  remote settings, Gmail account table with activate/extend/reset/revoke/
+  pending/disable/delete actions, notice composer/history, security status.
+- `applyOpenCodeAdminAction()` me naya `toggle_global` action — settings ko
+  wipe kiye bina global switch flip karta hai.
+- Router `/opencode/*` routes SDK session gate se **pehle** handle karta hai;
+  panel user id 1 owner shortcut ke roop me direct access rakhta hai, baaki
+  sab `/opencode/login` par jaate hain. Purana owner-only page hata diya.
+- Naya `opencode_admin_sessions` table + index (`schema.sql` me bhi).
+- `wrangler.toml` + `docs/OPENCODE.md` + README update; `/health` build
+  `2026-11-06-opencode-standalone`.
+- `test/smoke.mjs`: standalone login/session, owner bypass, toggle_global,
+  notice publish, logout revoke + inline-script audit for all new pages.
+  **191/191 passing**.
+
 ## Pass 2026-10-19 (5) — backend / frontend restructure
 
 - `src/` ab do saaf hisson me: **backend** (router, DB, APIs, crypto) aur

@@ -278,6 +278,15 @@ CREATE TABLE IF NOT EXISTS opencode_events (
 );
 CREATE INDEX IF NOT EXISTS idx_opencode_events ON opencode_events(created_at);
 
+-- Standalone /opencode admin sessions (separate from SDK `sessions`).
+CREATE TABLE IF NOT EXISTS opencode_admin_sessions (
+  token_hash TEXT PRIMARY KEY,
+  ip TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_opencode_admin_exp ON opencode_admin_sessions(expires_at);
+
 INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('global_enabled','1');
 INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('maintenance_message','');
 INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('support_url','');
