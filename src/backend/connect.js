@@ -279,15 +279,23 @@ export async function handleConnect(request, db, panel, env) {
     const lib = await libUrlFor(db, panel, st, ver);
     const label = ver ? (String(ver.name) + (ver.tag ? ' ' + String(ver.tag) : '')).toUpperCase() : st;
     const plan = ver && ver.tag ? String(ver.tag).toUpperCase() : (st === 'PUBLIC' || st === 'SAFE' ? 'FREE' : 'PAID');
+    // Response contract follows the classic mod/key panel format:
+    // real, token, modname, mod_status, credit, feature switches,
+    // expired_date/EXP/exdate, Enc, device, rng. Extra fields below keep
+    // loader/lib delivery working for existing clients.
     return J({
       status: true, data: {
-        real, token, Enc: enc, EXP: v.expiry, rng: Math.floor(Date.now() / 1000),
-        server_type: st, key_mode: st, mode: st === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
-        version: label, version_label: label, plan,
-        lib_url: lib, lib, modname: get('modname', 'YUVI MOD'), mod_status: get('mod_status', 'Online'), credit: get('credit', 'Yuvi Panel'),
+        real, token,
+        modname: get('modname', 'Infinite '), mod_status: get('mod_status', 'Safe'), credit: get('credit', 'MOD STATUS :- 100% SAFE'),
         ESP: get('ESP', 'on'), Item: get('Item', 'on'), AIM: get('AIM', 'on'), SilentAim: get('SilentAim', 'on'), BulletTrack: get('BulletTrack', 'on'),
         Floating: get('Floating', 'on'), Memory: get('Memory', 'on'), Setting: get('Setting', 'on'),
-        exdate: v.expiry, device: String(v.key.device_limit | 0),
+        expired_date: v.expiry, EXP: v.expiry, Enc: get('enc_label', 'List Of Games'), exdate: v.expiry,
+        device: (v.key.device_limit | 0), rng: Math.floor(Date.now() / 1000),
+        server_type: st, key_mode: st, mode: st === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
+        version: label, version_label: label, plan,
+        lib_url: lib, lib,
+        enc,
+        device_limit: String(v.key.device_limit | 0),
       }
     });
   } catch (e) { return J({ status: false, reason: 'SERVER ERROR' + await errDetail(db, request, e, env) }, 500); }

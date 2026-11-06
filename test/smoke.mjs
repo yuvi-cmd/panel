@@ -404,6 +404,9 @@ console.log('connect + encrypt');
   const cb = await c.json();
   ok(c.status === 200 && cb.status === true && cb.data && cb.data.lib_url === 'https://cdn.example.com/private.zip', 'connect lib_url comes from mod_versions');
   ok(cb.data && cb.data.version === 'PRIVATE PAID' && cb.data.plan === 'PAID', 'connect version label + plan from tag');
+  ok(cb.data && cb.data.expired_date === cb.data.EXP && cb.data.expired_date === cb.data.exdate, 'connect expiry aliases (expired_date/EXP/exdate) match');
+  ok(cb.data && cb.data.Enc === 'List Of Games', 'connect Enc label follows app contract');
+  ok(cb.data && typeof cb.data.device === 'number' && cb.data.device === 1, 'connect device is numeric key limit');
 
   // Malformed lib URL (bare host like "storage") must not reach clients.
   const fsvBad = new FormData();

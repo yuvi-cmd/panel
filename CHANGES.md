@@ -1,5 +1,24 @@
 # CHANGES.md
 
+## Pass 2026-11-06 (2) — /connect classic panel response contract
+
+- `/connect/:panel` ab classic mod-panel response shape deta hai:
+  `real, token, modname, mod_status, credit, ESP, Item, AIM, SilentAim,
+  BulletTrack, Floating, Memory, Setting, expired_date, EXP, Enc, exdate,
+  device, rng` — usi order me. `expired_date`/`EXP`/`exdate` teeno same
+  expiry, `Enc` default `List Of Games` (mod_settings `enc_label` se
+  override), `device` numeric key limit.
+- Purane loader/lib-delivery fields (`server_type`, `version`, `plan`,
+  `lib_url`, `lib`, `device_limit`) response me end me retained hain,
+  taaki existing clients na tootein. Lowercase `enc` (MD5) bhi retained.
+- Default mod identity sample contract jaisi: `Infinite ` / `Safe` /
+  `MOD STATUS :- 100% SAFE` (panel Server & Mod page se change ho sakti hai).
+- `/api-test` CONNECT response ab pretty-printed JSON dikhata hai
+  (HTTP status sirf non-200 par), taaki live output classic panel response
+  jaisa dikhe. ENCRYPT preview pehle jaisa.
+- `test/smoke.mjs`: +3 assertions (expiry aliases, Enc label, numeric
+  device).
+
 ## Pass 2026-11-06 — standalone OpenCode control plane
 
 - `/opencode` ab **SDK panel se alag standalone website** hai: apna login page,
