@@ -12,7 +12,7 @@ does not reuse the SDK/MUNDO/BCORE tables or the SDK login session.
 - Standalone admin login: <https://panel.imranfarhat255.workers.dev/opencode/login>
 - Health: <https://panel.imranfarhat255.workers.dev/health>
 
-The Worker is deployed with build `2026-11-06-opencode-standalone`. If
+The Worker is deployed with build `2026-11-08-opencode-backnav`. If
 `/api/opencode/*` returns `code: "server_key_missing"`, set `OPENCODE_ENC_KEY`
 (see **Deploy** below) and redeploy. The app uses the same 64-hex key from
 `OpenCodeAndroid/.panel-secret`.
@@ -28,6 +28,11 @@ The Worker is deployed with build `2026-11-06-opencode-standalone`. If
 | `GET /opencode/notices` | Publish, pause, delete in-app notices |
 | `GET /opencode/settings` | Remote config, security status and API reference |
 | `POST /api/opencode/{register,login,status,logout}` | Encrypted Android app API (unchanged) |
+
+Every `/opencode*` page has a **Main panel** back link in the sidebar
+("Return to the main panel") and a compact button in the top bar. It points to
+`/dashboard`; standalone admin sessions without an SDK cookie land on the main
+panel login page instead.
 
 The admin pages accept **either** a standalone `oc_admin` cookie **or** an SDK
 session for panel user `id === 1`. That owner shortcut means the existing main
@@ -109,7 +114,7 @@ wrangler secret put OPENCODE_ADMIN_PASSWORD
 wrangler deploy
 ```
 
-`/health` should return 200 with build `2026-11-06-opencode-standalone`. A
+`/health` should return 200 with build `2026-11-08-opencode-backnav`. A
 missing/invalid `OPENCODE_ENC_KEY` makes `/api/opencode/*` return
 `server_key_missing`; fix the secret before shipping.
 

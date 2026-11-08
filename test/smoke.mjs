@@ -860,6 +860,7 @@ console.log('opencode standalone panel');
   const oh = await ownerPanel.text();
   ok(ownerPanel.status === 200 && oh.includes('Standalone control') && oh.includes('OpenCode access is live'), 'SDK owner id 1 bypasses standalone login');
   ok(oh.includes('Remote settings'), 'overview exposes remote settings');
+  ok(oh.includes('href="/dashboard"'), 'overview renders main panel back link (sidebar + top bar)');
 
   env.OPENCODE_ADMIN_PASSWORD = 'adminpass123';
   const badFd = new FormData(); badFd.set('password', 'wrong-pass');
@@ -873,7 +874,9 @@ console.log('opencode standalone panel');
   ok(/HttpOnly/.test(setCookie) && /SameSite=Lax/.test(setCookie), 'admin cookie is HttpOnly + SameSite=Lax');
 
   const dash = await call(env, 'GET', '/opencode', { cookie: adminCookie });
-  ok(dash.status === 200 && (await dash.text()).includes('OpenCode access is live'), 'admin session renders overview');
+  const dashHtml = await dash.text();
+  ok(dash.status === 200 && dashHtml.includes('OpenCode access is live'), 'admin session renders overview');
+  ok(dashHtml.includes('oc-backpanel') && dashHtml.includes('Main panel'), 'admin session sees back-to-main-panel link');
   const usersPage = await call(env, 'GET', '/opencode/users', { cookie: adminCookie });
   ok(usersPage.status === 200 && (await usersPage.text()).includes('App accounts'), 'users page renders');
   const noticesPage = await call(env, 'GET', '/opencode/notices', { cookie: adminCookie });

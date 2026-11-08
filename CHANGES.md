@@ -1,5 +1,23 @@
 # CHANGES.md
 
+## Pass 2026-11-08 — OpenCode "Main panel" back navigation + repo hygiene
+
+- `/opencode*` standalone control plane ab main panel par wapas ja sakta
+  hai: sidebar footer me full-width **Main panel** link (`/dashboard`) aur
+  top bar me compact **Main panel** button — mobile aur desktop dono par.
+- Standalone `oc_admin` sessions (SDK cookie ke bina) `/dashboard` se main
+  panel login par land hoti hain — dono cases cover.
+- `/health` build ab `2026-11-08-opencode-backnav`; `docs/OPENCODE.md`
+  updated (routes table + back-nav note).
+- Naya `.gitignore`: `node_modules/`, `.wrangler/`, `.dev.vars*`, `*.log`.
+- Android app login/register ka asli blocker live Worker me
+  `OPENCODE_ENC_KEY` secret missing tha (`server_key_missing`). Repo code
+  sahi hai; deployed Worker par secret set karna aur `wrangler deploy`
+  chalana zaroori hai — dekho `docs/OPENCODE.md` → Deploy. Verified locally:
+  encrypted register/login/status/logout + admin activate → app active.
+- `test/smoke.mjs`: +2 assertions (back link rendered for owner + admin
+  session). **196/196 passing**.
+
 ## Pass 2026-11-06 (2) — /connect classic panel response contract
 
 - `/connect/:panel` ab classic mod-panel response shape deta hai:

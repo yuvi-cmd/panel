@@ -30,6 +30,10 @@ const OCSS = `
 .oc-enc span{font-size:9.5px;color:#64748B;}
 .oc-signout{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;padding:9px;border-radius:9px;background:rgba(239,68,68,.10);border:1px solid rgba(239,68,68,.20);color:#FCA5A5;font-size:11.5px;font-weight:800;text-decoration:none;}
 .oc-signout:hover{background:rgba(239,68,68,.16);}
+.oc-backpanel{display:flex;align-items:center;gap:9px;width:100%;padding:9px 11px;margin-bottom:8px;border-radius:9px;background:rgba(99,102,241,.12);border:1px solid rgba(129,140,248,.28);color:#C7D2FE;font-size:11.5px;font-weight:800;letter-spacing:.02em;text-decoration:none;transition:background .15s,border-color .15s;}
+.oc-backpanel:hover{background:rgba(99,102,241,.22);border-color:rgba(165,180,252,.48);color:#E0E7FF;}
+.oc-backpanel i{font-size:15px;width:22px;text-align:center;}
+.oc-backpanel .oc-backpanel-arrow{margin-left:auto;font-size:13px;width:auto;color:#A5B4FC;}
 .oc-main{flex:1;min-width:0;margin-left:268px;}
 .oc-top{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:14px;padding:12px 24px;background:var(--surface);border-bottom:1px solid var(--line);}
 .oc-menu{display:none;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;flex-shrink:0;}
@@ -43,6 +47,10 @@ const OCSS = `
 html[data-mode="dark"] .oc-actor{color:#C7D2FE;}
 .oc-top-logout{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--muted);font-size:11px;font-weight:800;text-decoration:none;white-space:nowrap;}
 .oc-top-logout:hover{color:var(--danger-tx);border-color:var(--danger-line);background:var(--danger-bg);}
+.oc-top-back{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border-radius:9px;border:1px solid rgba(99,102,241,.35);background:rgba(99,102,241,.08);color:#4F46E5;font-size:11px;font-weight:800;text-decoration:none;white-space:nowrap;transition:background .15s,border-color .15s;}
+.oc-top-back:hover{background:rgba(99,102,241,.16);border-color:rgba(99,102,241,.55);}
+html[data-mode="dark"] .oc-top-back{color:#C7D2FE;border-color:rgba(165,180,252,.32);background:rgba(99,102,241,.14);}
+html[data-mode="dark"] .oc-top-back:hover{background:rgba(99,102,241,.24);}
 .oc-content{padding:24px;max-width:1280px;margin:0 auto;}
 .oc-overlay{display:none;position:fixed;inset:0;background:rgba(2,6,23,.55);backdrop-filter:blur(3px);z-index:55;}
 .oc-alert{display:flex;align-items:flex-start;gap:9px;padding:12px 14px;border-radius:11px;font-size:12.5px;font-weight:700;margin-bottom:16px;border:1px solid;}
@@ -293,6 +301,7 @@ export function opencodeAdminLayout(o) {
     + '</nav>'
     + '<div class="oc-side-foot">'
     + '<div class="oc-enc"><span class="oc-dot' + (encOk ? ' on' : '') + '"></span><div><p>Encryption ' + (encOk ? 'configured' : 'missing') + '</p><span>' + (encOk ? 'OPENCODE_ENC_KEY is set' : 'Set OPENCODE_ENC_KEY on Worker') + '</span></div></div>'
+    + '<a href="/dashboard" class="oc-backpanel" title="Return to the main panel"><i class="bi bi-grid-1x2-fill"></i> Main panel<i class="bi bi-arrow-up-right oc-backpanel-arrow"></i></a>'
     + '<a href="/opencode/logout" class="oc-signout"><i class="bi bi-box-arrow-right"></i> Sign out</a>'
     + '</div></aside>'
     + '<div id="ocOverlay" class="oc-overlay" onclick="ocSidebar()"></div>'
@@ -301,6 +310,7 @@ export function opencodeAdminLayout(o) {
     + '<button class="oc-menu" onclick="ocSidebar()" aria-label="Open menu"><i class="bi bi-list text-lg"></i></button>'
     + '<div class="min-w-0"><p class="oc-crumb">OpenCode <span>/</span> Standalone control</p><h1 class="oc-title">' + esc(o.title) + '</h1></div>'
     + '<div class="oc-top-actions"><span class="oc-live">Live</span>' + MODE_BTN
+    + '<a href="/dashboard" class="oc-top-back" title="Back to main panel"><i class="bi bi-grid-1x2-fill"></i><span class="hidden sm:inline">Main panel</span></a>'
     + '<span class="oc-actor"><i class="bi bi-person-check-fill"></i> ' + esc(actor) + '</span>'
     + '<a href="/opencode/logout" class="oc-top-logout"><i class="bi bi-box-arrow-right"></i><span class="hidden sm:inline">Sign out</span></a></div>'
     + '</header>'
