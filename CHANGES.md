@@ -1,5 +1,23 @@
 # CHANGES.md
 
+## Pass 2026-11-08 (2) — OpenCode app key: DB auto-seed, no Cloudflare step
+
+- `/api/opencode/*` ko ab koi Cloudflare secret chahiye hi nahi. Key
+  resolution (first wins): env `OPENCODE_ENC_KEY` (64 hex) → D1
+  `opencode_settings.opencode_enc_key` (64 hex = raw, anything else =
+  SHA-256 passphrase) → **auto-seeded default passphrase**
+  `YUVISDK88702026BASE64` (connect.js ARCX keys jaisa public-by-design
+  idiom). `ensureOpenCodeDB()` har bootstrap me `INSERT OR IGNORE` karta
+  hai, to fresh deploy par sab automatically chalta hai.
+- `server_key_missing` 503 path hata diya — ye error ab kabhi nahi aata.
+- `/opencode/settings` page me ab **active key source** dikhta hai
+  (env / D1 custom / auto-seeded default) aur SQL override snippet bhi.
+- `/health` build ab `2026-11-08-opencode-dbkey`; schema.sql + docs update.
+- Android app ka `.so` same passphrase ke SHA-256 ke saath rebuild karna hota
+  hai (dekho `docs/OPENCODE.md` → Wire protocol).
+- `test/smoke.mjs`: 3 naye assertions — default key se encrypted
+  register/login, raw 64-hex D1 override, env secret precedence.
+
 ## Pass 2026-11-08 — OpenCode "Main panel" back navigation + repo hygiene
 
 - `/opencode*` standalone control plane ab main panel par wapas ja sakta

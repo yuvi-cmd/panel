@@ -153,7 +153,3 @@ export async function destroyOpenCodeAdminSession(db, request) {
     .run()
     .catch(() => {});
 }
-
-export function opencodeEncryptionConfigured(env) {
-  return /^[a-f0-9]{64}$/i.test(String(env?.OPENCODE_ENC_KEY || '').trim());
-}

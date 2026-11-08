@@ -224,6 +224,13 @@ function statCard(label, value, icon, tone) {
     + '<div><p class="oc-kpi-label">' + esc(label) + '</p><p class="oc-kpi-val">' + esc(String(value || 0)) + '</p></div></div>';
 }
 
+function encSourceLabel(o) {
+  const source = o && o.encSource;
+  if (source === 'env') return 'Worker secret OPENCODE_ENC_KEY';
+  if (source === 'db') return 'Custom key (opencode_enc_key row)';
+  return 'Auto-seeded default passphrase';
+}
+
 function navItem(href, label, icon, route, active) {
   return '<a href="' + href + '" class="oc-link' + (active === route ? ' active' : '') + '"><i class="bi ' + icon + '"></i><span>' + esc(label) + '</span></a>';
 }
@@ -300,7 +307,7 @@ export function opencodeAdminLayout(o) {
     + '<div class="oc-apirow"><span>Accounts</span><code>@gmail.com</code></div>'
     + '</nav>'
     + '<div class="oc-side-foot">'
-    + '<div class="oc-enc"><span class="oc-dot' + (encOk ? ' on' : '') + '"></span><div><p>Encryption ' + (encOk ? 'configured' : 'missing') + '</p><span>' + (encOk ? 'OPENCODE_ENC_KEY is set' : 'Set OPENCODE_ENC_KEY on Worker') + '</span></div></div>'
+    + '<div class="oc-enc"><span class="oc-dot' + (encOk ? ' on' : '') + '"></span><div><p>Encryption ' + (encOk ? 'configured' : 'missing') + '</p><span>' + esc(encSourceLabel(o)) + '</span></div></div>'
     + '<a href="/dashboard" class="oc-backpanel" title="Return to the main panel"><i class="bi bi-grid-1x2-fill"></i> Main panel<i class="bi bi-arrow-up-right oc-backpanel-arrow"></i></a>'
     + '<a href="/opencode/logout" class="oc-signout"><i class="bi bi-box-arrow-right"></i> Sign out</a>'
     + '</div></aside>'
@@ -389,7 +396,7 @@ export function opencodeOverview(data, o) {
     + '<div class="glass-card oc-panel" style="margin-bottom:16px;"><div class="oc-panel-head"><div><h3><i class="bi bi-shield-check mr-1"></i> App security posture</h3>'
     + '<p>These controls are enforced server-side; the app cannot bypass them.</p></div></div>'
     + '<div class="grid grid-cols-1 md:grid-cols-3 gap-2">'
-    + '<div class="oc-status-card"><i class="bi bi-key-fill"></i><div><p>AES-256-GCM</p><small>' + (o.encOk ? 'OPENCODE_ENC_KEY configured' : 'Missing OPENCODE_ENC_KEY') + '</small></div></div>'
+    + '<div class="oc-status-card"><i class="bi bi-key-fill"></i><div><p>AES-256-GCM</p><small>' + esc(encSourceLabel(o)) + '</small></div></div>'
     + '<div class="oc-status-card"><i class="bi bi-google"></i><div><p>Gmail-only signup</p><small>@gmail.com enforced by the API</small></div></div>'
     + '<div class="oc-status-card"><i class="bi bi-phone-fill"></i><div><p>Device lock</p><small>One device per account, admin reset</small></div></div>'
     + '</div></div>';
@@ -480,11 +487,11 @@ export function opencodeSettingsPage(data, o) {
     + '<div><label class="oc-label" for="ocSupportUrl">Support URL</label><input id="ocSupportUrl" name="support_url" value="' + esc(s.support_url || '') + '" class="oc-input" placeholder="https://t.me/..."></div>'
     + '<div><label class="oc-label" for="ocMinVer">Min app version code</label><input id="ocMinVer" type="number" min="1" name="min_version_code" value="' + esc(s.min_version_code || '1') + '" class="oc-input"></div></div>'
     + '<button name="action" value="save_settings" class="oc-btn oc-btn-block"><i class="bi bi-floppy-fill"></i> Save settings</button></form>'
-    + '<div class="glass-card oc-panel"><div class="oc-panel-head"><div><h3><i class="bi bi-shield-lock-fill mr-1"></i> Security status</h3><p>Secrets live in Cloudflare, never in D1 or the HTML.</p></div></div>'
-    + '<div class="oc-status-card"><i class="bi bi-key-fill"></i><div><p>App encryption key</p><small class="' + (encOk ? 'ok' : 'warn') + '">' + (encOk ? 'OPENCODE_ENC_KEY configured (AES-256-GCM)' : 'Missing OPENCODE_ENC_KEY — app API returns server_key_missing') + '</small></div></div>'
+    + '<div class="glass-card oc-panel"><div class="oc-panel-head"><div><h3><i class="bi bi-shield-lock-fill mr-1"></i> Security status</h3><p>The app key works out of the box (auto-seed); a custom key or a Worker secret overrides it.</p></div></div>'
+    + '<div class="oc-status-card"><i class="bi bi-key-fill"></i><div><p>App encryption key</p><small class="' + (encOk ? 'ok' : 'warn') + '">' + esc(encSourceLabel(o)) + ' (AES-256-GCM)</small></div></div>'
     + '<div class="oc-status-card"><i class="bi bi-person-lock"></i><div><p>Standalone admin password</p><small class="' + (source ? 'ok' : 'warn') + '">' + (source ? 'Configured via ' + esc(source) : 'Not configured — set OPENCODE_ADMIN_PASSWORD') + '</small></div></div>'
     + '<div class="oc-status-card"><i class="bi bi-cookie"></i><div><p>Admin session</p><small>HttpOnly cookie <b>oc_admin</b>, 7-day expiry, SameSite=Lax. Owner id 1 can also enter from the SDK panel.</small></div></div>'
-    + '<div class="oc-status-card"><i class="bi bi-terminal"></i><div><p>Worker commands</p><small>Run these from the repo root with Wrangler authenticated.</small><div class="oc-code" style="margin-top:8px;"><span class="c">wrangler secret put OPENCODE_ENC_KEY</span><br><span class="c">wrangler secret put OPENCODE_ADMIN_PASSWORD</span><br>wrangler deploy</div></div></div></div></div>'
+    + '<div class="oc-status-card"><i class="bi bi-database-fill"></i><div><p>Custom key (no Cloudflare step)</p><small>Run this once against the <b>panel</b> D1 database. 64 hex chars = raw key, anything else = SHA-256 passphrase. The APK must be rebuilt with the same value.</small><div class="oc-code" style="margin-top:8px;">INSERT OR REPLACE INTO opencode_settings (key,value)<br>VALUES (\'opencode_enc_key\',\'<i>&lt;64-hex or passphrase&gt;</i>\');</div></div></div></div></div>'
     + '<div class="glass-card oc-panel" style="margin-top:16px;"><div class="oc-panel-head"><div><h3><i class="bi bi-phone-fill mr-1"></i> Android app API</h3><p>Separate from the SDK/tenant routes; all bodies are encrypted envelopes.</p></div></div>'
     + '<div class="grid grid-cols-1 md:grid-cols-2 gap-2">'
     + '<div class="oc-status-card"><i class="bi bi-box-arrow-in-right"></i><div><p>POST /api/opencode/register</p><small>@gmail.com + password (8-128 chars) + device id. Creates a pending account.</small></div></div>'

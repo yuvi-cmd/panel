@@ -14,7 +14,7 @@ import { html, redir, parseCookies, formParams, tsMs, deny } from './http.js';
 import { getSession, sessCookie, clearCookie } from './session.js';
 import { THEMES, HEX6, getTheme, getAccent, panelName } from './theme.js';
 import { deviceFingerprint } from './device.js';
-import { handleOpenCodeApi, getOpenCodeAdminData, applyOpenCodeAdminAction } from './opencode.js';
+import { handleOpenCodeApi, getOpenCodeAdminData, applyOpenCodeAdminAction, opencodeKeyStatus } from './opencode.js';
 import {
   adminCookie,
   adminLoginRate,
@@ -24,7 +24,6 @@ import {
   createOpenCodeAdminSession,
   destroyOpenCodeAdminSession,
   getOpenCodeAdminSession,
-  opencodeEncryptionConfigured,
   verifyAdminPassword,
 } from './opencode-admin.js';
 
@@ -56,7 +55,7 @@ export default {
     if (path.startsWith('/connect/')) return handleConnect(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
     if (path === '/connect') return handleConnect(request, db, url.searchParams.get('panel_code') || mainPanel, env);
     if (path === '/health') {
-      return new Response(JSON.stringify({ ok: true, build: '2026-11-08-opencode-backnav', panel: mainPanel }), { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
+      return new Response(JSON.stringify({ ok: true, build: '2026-11-08-opencode-dbkey', panel: mainPanel }), { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
     }
     if (path.startsWith('/encrypt/')) return handleEncrypt(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
     if (path.startsWith('/sdk/mundo/') || path === '/sdk/mundo') return handleMundo(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel), env);
@@ -139,12 +138,14 @@ export default {
         data = { settings: {}, notices: [], users: [], stats: {} };
         adminError = 'OpenCode database is not ready: ' + String(e?.message || e).slice(0, 200);
       }
+      const keyStatus = await opencodeKeyStatus(db, env).catch(() => ({ configured: true, source: 'default' }));
       const common = {
         ok: url.searchParams.get('ok') || '',
         error: adminError || url.searchParams.get('error') || '',
         q: url.searchParams.get('q') || '',
         actor,
-        encOk: opencodeEncryptionConfigured(env),
+        encOk: keyStatus.configured,
+        encSource: keyStatus.source,
         adminSource: adminPasswordSource(env),
       };
       const content = page.route === 'users' ? opencodeUsersPage(data, common)
@@ -159,6 +160,7 @@ export default {
         error: common.error,
         actor,
         encOk: common.encOk,
+        encSource: common.encSource,
       }));
     }
 

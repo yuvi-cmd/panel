@@ -12,6 +12,12 @@ const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 const B64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 const GMAIL_RE = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@gmail\.com$/i;
 const DEVICE_RE = /^[A-Za-z0-9._:-]{8,160}$/;
+// Public-by-design OpenCode transport passphrase (same idiom as the ARCX
+// layer keys in connect.js). The Android APK embeds the SHA-256 of this
+// string, so a fresh build works with zero server configuration. Setting a
+// 64-hex value anywhere (env secret or the opencode_enc_key row) overrides
+// it; a non-hex stored value is always SHA-256 derived.
+const DEFAULT_OPENCODE_KEY = 'YUVISDK88702026BASE64';
 
 const OPENCODE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS opencode_users (
@@ -77,6 +83,7 @@ export async function ensureOpenCodeDB(db) {
     await db.prepare("INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('maintenance_message','')").run();
     await db.prepare("INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('support_url','')").run();
     await db.prepare("INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('min_version_code','1')").run();
+    await db.prepare("INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('opencode_enc_key',?)").bind(DEFAULT_OPENCODE_KEY).run();
   } catch (e) {
     console.error('opencode settings seed failed:', String(e?.message || e));
   }
@@ -106,19 +113,47 @@ function b64Bytes(value) {
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
+async function sha256Bytes(value) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(value)));
+  return new Uint8Array(digest);
+}
 function encKey(env) {
   const raw = typeof env?.OPENCODE_ENC_KEY === 'string' ? env.OPENCODE_ENC_KEY.trim() : '';
   if (!/^[a-f0-9]{64}$/i.test(raw)) return null;
   return hexBytes(raw);
 }
-async function aesKey(env) {
-  const raw = encKey(env);
-  if (!raw) return null;
-  return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+// Key resolution order (first wins):
+//   1. env OPENCODE_ENC_KEY (64 hex) — Cloudflare Worker secret override
+//   2. opencode_settings.opencode_enc_key (64 hex = raw key, anything else = SHA-256 passphrase)
+//   3. auto-seeded default passphrase (DEFAULT_OPENCODE_KEY), SHA-256 derived
+// The default is seeded by ensureOpenCodeDB(), so a fresh deploy works with
+// zero manual Cloudflare configuration.
+async function resolveEncKey(db, env) {
+  const fromEnv = encKey(env);
+  if (fromEnv) return { key: fromEnv, source: 'env' };
+  let stored = '';
+  try {
+    const row = await db.prepare("SELECT value FROM opencode_settings WHERE key='opencode_enc_key'").first();
+    stored = String(row?.value || '').trim();
+  } catch {
+    // opencode_settings may not exist yet on a cold database; fall back to the
+    // default rather than failing every encrypted request.
+    stored = '';
+  }
+  if (/^[a-f0-9]{64}$/i.test(stored)) return { key: hexBytes(stored), source: 'db' };
+  if (stored) return { key: await sha256Bytes(stored), source: stored === DEFAULT_OPENCODE_KEY ? 'default' : 'db' };
+  return { key: await sha256Bytes(DEFAULT_OPENCODE_KEY), source: 'default' };
 }
-async function decryptEnvelope(body, env) {
-  const key = await aesKey(env);
-  if (!key) throw new Error('encryption_not_configured');
+export async function opencodeKeyStatus(db, env) {
+  const resolved = await resolveEncKey(db, env);
+  return { configured: true, source: resolved.source };
+}
+async function aesKey(db, env) {
+  const { key } = await resolveEncKey(db, env);
+  return crypto.subtle.importKey('raw', key, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+async function decryptEnvelope(body, db, env) {
+  const key = await aesKey(db, env);
   if (!body || body.v !== 1) throw new Error('invalid_envelope');
   const nonce = b64Bytes(body.n);
   const data = b64Bytes(body.d);
@@ -126,9 +161,8 @@ async function decryptEnvelope(body, env) {
   const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce, additionalData: AAD }, key, data);
   return JSON.parse(new TextDecoder().decode(plain));
 }
-async function encryptEnvelope(obj, env) {
-  const key = await aesKey(env);
-  if (!key) throw new Error('encryption_not_configured');
+async function encryptEnvelope(obj, db, env) {
+  const key = await aesKey(db, env);
   const nonce = new Uint8Array(12);
   crypto.getRandomValues(nonce);
   const data = await crypto.subtle.encrypt(
@@ -269,25 +303,20 @@ export async function handleOpenCodeApi(request, db, env) {
   if (request.method !== 'POST') {
     return json(clientError('POST required', 'method'), 405, cors);
   }
-  if (!encKey(env)) {
-    return json(clientError('OpenCode encryption key is not configured on the server', 'server_key_missing'), 503, cors);
-  }
+  // The encryption key always resolves (env secret → DB row → auto-seeded
+  // default passphrase), so there is no 503 "server_key_missing" path anymore.
 
   let payload;
   try {
     const body = await request.json();
-    payload = await decryptEnvelope(body, env);
+    payload = await decryptEnvelope(body, db, env);
   } catch (e) {
-    const message = String(e?.message || '');
-    return json(clientError(
-      message === 'encryption_not_configured' ? 'Server encryption is not configured' : 'Invalid encrypted request',
-      message === 'encryption_not_configured' ? 'server_key_missing' : 'bad_envelope'
-    ), 400, cors);
+    return json(clientError('Invalid encrypted request', 'bad_envelope'), 400, cors);
   }
 
   const ts = Number(payload?.ts || 0);
   if (!ts || Math.abs(Date.now() - ts) > 24 * 60 * 60 * 1000) {
-    return json(await encryptEnvelope(clientError('Request timestamp is invalid', 'bad_timestamp'), env), 200, cors);
+    return json(await encryptEnvelope(clientError('Request timestamp is invalid', 'bad_timestamp'), db, env), 200, cors);
   }
 
   const ip = clientIp(request);
@@ -297,7 +326,7 @@ export async function handleOpenCodeApi(request, db, env) {
       ? hitRate('oc-register:' + ip, 6, 10 * 60e3)
       : hitRate('oc-status:' + ip, 180, 60e3);
   if (!limiter.allowed) {
-    return json(await encryptEnvelope(clientError('Too many requests. Try again shortly.', 'rate_limited'), env), 200, cors);
+    return json(await encryptEnvelope(clientError('Too many requests. Try again shortly.', 'rate_limited'), db, env), 200, cors);
   }
 
   const deviceId = cleanDevice(payload.device_id);
@@ -312,7 +341,7 @@ export async function handleOpenCodeApi(request, db, env) {
       if (password.length < 8 || password.length > 128) throw new Error('Password must be 8-128 characters');
       if (!deviceId) throw new Error('Device identifier is missing');
       if (await db.prepare('SELECT id FROM opencode_users WHERE email=?').bind(email).first().catch(() => null)) {
-        return json(await encryptEnvelope(clientError('An account with this email already exists', 'email_exists'), env), 200, cors);
+        return json(await encryptEnvelope(clientError('An account with this email already exists', 'email_exists'), db, env), 200, cors);
       }
       const hash = await hashPassword(password);
       const ins = await db.prepare(
@@ -324,7 +353,7 @@ export async function handleOpenCodeApi(request, db, env) {
         .bind(await sha256Hex(token), row.id, deviceId, Date.now() + SESSION_MS).run();
       await db.prepare("INSERT INTO opencode_events (user_id,kind,detail) VALUES (?,?,?)").bind(row.id, 'register', ip).run().catch(() => {});
       const state = await statePayload(db, row, { token });
-      return json(await encryptEnvelope(state, env), 200, cors);
+      return json(await encryptEnvelope(state, db, env), 200, cors);
     }
 
     if (action === 'login') {
@@ -333,15 +362,15 @@ export async function handleOpenCodeApi(request, db, env) {
       if (!email || !password) throw new Error('Email and password are required');
       const loginLimit = hitRate('oc-login-email:' + email, 10, 10 * 60e3);
       if (!loginLimit.allowed) {
-        return json(await encryptEnvelope(clientError('Too many login attempts for this account', 'rate_limited'), env), 200, cors);
+        return json(await encryptEnvelope(clientError('Too many login attempts for this account', 'rate_limited'), db, env), 200, cors);
       }
       const row = await db.prepare('SELECT * FROM opencode_users WHERE email=?').bind(email).first().catch(() => null);
       if (!row || !(await verifyPassword(password, row.password_hash))) {
-        return json(await encryptEnvelope(clientError('Invalid email or password', 'bad_credentials'), env), 200, cors);
+        return json(await encryptEnvelope(clientError('Invalid email or password', 'bad_credentials'), db, env), 200, cors);
       }
       if (!deviceId) throw new Error('Device identifier is missing');
       if (row.device_id && row.device_id !== deviceId) {
-        return json(await encryptEnvelope(clientError('This account is locked to another device. Ask the admin to reset it.', 'device_mismatch'), env), 200, cors);
+        return json(await encryptEnvelope(clientError('This account is locked to another device. Ask the admin to reset it.', 'device_mismatch'), db, env), 200, cors);
       }
       const now = Date.now();
       await db.prepare("UPDATE opencode_users SET device_id=?,device_name=?,last_login=datetime('now'),last_seen=datetime('now') WHERE id=?")
@@ -352,40 +381,40 @@ export async function handleOpenCodeApi(request, db, env) {
         .bind(await sha256Hex(token), row.id, deviceId, now + SESSION_MS).run();
       await db.prepare("INSERT INTO opencode_events (user_id,kind,detail) VALUES (?,?,?)").bind(row.id, 'login', ip).run().catch(() => {});
       const fresh = await db.prepare('SELECT * FROM opencode_users WHERE id=?').bind(row.id).first();
-      return json(await encryptEnvelope(await statePayload(db, fresh, { token }), env), 200, cors);
+      return json(await encryptEnvelope(await statePayload(db, fresh, { token }), db, env), 200, cors);
     }
 
     if (action === 'logout') {
       const token = String(payload.token || '').trim();
       if (token) await db.prepare('DELETE FROM opencode_sessions WHERE token_hash=?').bind(await sha256Hex(token)).run().catch(() => {});
-      return json(await encryptEnvelope({ ok: true }, env), 200, cors);
+      return json(await encryptEnvelope({ ok: true }, db, env), 200, cors);
     }
 
     if (action === 'status' || action === 'ping') {
       const token = String(payload.token || '').trim();
-      if (!token) return json(await encryptEnvelope(clientError('Login required', 'session_invalid'), env), 200, cors);
+      if (!token) return json(await encryptEnvelope(clientError('Login required', 'session_invalid'), db, env), 200, cors);
       const tokenHash = await sha256Hex(token);
       const session = await db.prepare('SELECT * FROM opencode_sessions WHERE token_hash=?').bind(tokenHash).first().catch(() => null);
       if (!session || Number(session.expires_at || 0) <= Date.now()) {
         if (session) await db.prepare('DELETE FROM opencode_sessions WHERE token_hash=?').bind(tokenHash).run().catch(() => {});
-        return json(await encryptEnvelope(clientError('Session expired. Please login again.', 'session_invalid'), env), 200, cors);
+        return json(await encryptEnvelope(clientError('Session expired. Please login again.', 'session_invalid'), db, env), 200, cors);
       }
       const row = await db.prepare('SELECT * FROM opencode_users WHERE id=?').bind(session.user_id).first().catch(() => null);
-      if (!row) return json(await encryptEnvelope(clientError('Account not found', 'session_invalid'), env), 200, cors);
+      if (!row) return json(await encryptEnvelope(clientError('Account not found', 'session_invalid'), db, env), 200, cors);
       if (deviceId && (session.device_id !== deviceId || row.device_id !== deviceId)) {
-        return json(await encryptEnvelope(clientError('This account is locked to another device', 'device_mismatch'), env), 200, cors);
+        return json(await encryptEnvelope(clientError('This account is locked to another device', 'device_mismatch'), db, env), 200, cors);
       }
       await db.prepare("UPDATE opencode_users SET last_seen=datetime('now') WHERE id=?").bind(row.id).run().catch(() => {});
       await db.prepare("UPDATE opencode_users SET device_name=? WHERE id=? AND ?<>''").bind(deviceName, row.id, deviceName).run().catch(() => {});
-      return json(await encryptEnvelope(await statePayload(db, row), env), 200, cors);
+      return json(await encryptEnvelope(await statePayload(db, row), db, env), 200, cors);
     }
 
-    return json(await encryptEnvelope(clientError('Unknown action', 'not_found'), env), 200, cors);
+    return json(await encryptEnvelope(clientError('Unknown action', 'not_found'), db, env), 200, cors);
   } catch (e) {
     const message = String(e?.message || 'Server error');
     const safe = message.includes('UNIQUE') ? 'Account already exists' : message;
     try {
-      return json(await encryptEnvelope(clientError(safe, 'server_error'), env), 200, cors);
+      return json(await encryptEnvelope(clientError(safe, 'server_error'), db, env), 200, cors);
     } catch {
       return json(clientError('Server error', 'server_error'), 500, cors);
     }

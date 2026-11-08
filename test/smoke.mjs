@@ -908,6 +908,53 @@ console.log('opencode standalone panel');
   delete env.OPENCODE_ADMIN_PASSWORD;
 }
 
+// ---------- 7k. OpenCode app API — D1 auto-seeded default key ----------
+console.log('opencode app api key resolution');
+{
+  globalThis.__opencodeDbReady = false; // force bootstrap on the fresh DB below
+  const cryptoNode = await import('node:crypto');
+  async function ocCall(env2, db2, action, body, keyHex) {
+    const key = Buffer.from(keyHex, 'hex');
+    const AAD = Buffer.from('opencode:v1');
+    const payload = { ...body, ts: Date.now(), device_id: 'smoke-device-001', device_name: 'smoke' };
+    const nonce = cryptoNode.randomBytes(12);
+    const cipher = cryptoNode.createCipheriv('aes-256-gcm', key, nonce);
+    cipher.setAAD(AAD);
+    const ct = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
+    const wire = JSON.stringify({ v: 1, n: nonce.toString('base64'), d: Buffer.concat([ct, cipher.getAuthTag()]).toString('base64') });
+    const req = new Request('https://panel.test/api/opencode/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: wire });
+    const res = await app.fetch(req, env2, {});
+    const parsed = JSON.parse(await res.text());
+    if (!parsed.d) return { http: res.status, plain: parsed, raw: true };
+    const nonce2 = Buffer.from(parsed.n, 'base64');
+    const data = Buffer.from(parsed.d, 'base64');
+    const decipher = cryptoNode.createDecipheriv('aes-256-gcm', key, nonce2);
+    decipher.setAAD(AAD);
+    decipher.setAuthTag(data.subarray(data.length - 16));
+    return { http: res.status, plain: JSON.parse(Buffer.concat([decipher.update(data.subarray(0, data.length - 16)), decipher.final()]).toString('utf8')) };
+  }
+  const sha256Hex = (v) => cryptoNode.createHash('sha256').update(String(v), 'utf8').digest('hex');
+  const DEFAULT_PASSPHRASE = 'YUVISDK88702026BASE64';
+  const envNoKey = { DB: makeDb(), PANEL_CODE: 'YUVI_001', PANEL_NAME: 'TEST PANEL' }; // no OPENCODE_ENC_KEY
+  const r1 = await ocCall(envNoKey, null, 'register', { email: 'smoke.dbkey.' + Date.now() + '@gmail.com', password: 'smoke-pass-123', display_name: 'DbKey' }, sha256Hex(DEFAULT_PASSPHRASE));
+  ok(r1.plain && r1.plain.ok === true && r1.plain.reason === 'pending', 'default auto-seeded passphrase registers a pending account', JSON.stringify(r1.plain || {}));
+  const r2 = await ocCall(envNoKey, null, 'login', { email: 'no.such.user@gmail.com', password: 'whatever-123' }, sha256Hex(DEFAULT_PASSPHRASE));
+  ok(r2.plain && r2.plain.ok === false && r2.plain.code === 'bad_credentials', 'default key decrypts login response');
+
+  // raw 64-hex override in D1 beats the default passphrase
+  const rawKey = 'ab'.repeat(32);
+  await envNoKey.DB.prepare("INSERT OR REPLACE INTO opencode_settings (key,value) VALUES ('opencode_enc_key',?)").bind(rawKey).run();
+  const r3 = await ocCall(envNoKey, null, 'login', { email: 'no.such.user@gmail.com', password: 'whatever-123' }, rawKey);
+  ok(r3.plain && r3.plain.code === 'bad_credentials', '64-hex opencode_enc_key row is used as raw AES key');
+  const r4 = await ocCall(envNoKey, null, 'login', { email: 'no.such.user@gmail.com', password: 'whatever-123' }, sha256Hex(DEFAULT_PASSPHRASE));
+  ok(r4.raw === true || (r4.plain && r4.plain.ok === false && r4.plain.code === 'bad_envelope') || r4.http === 400, 'old passphrase no longer decrypts after raw-key override');
+
+  // env secret wins over everything
+  const envWithSecret = { DB: envNoKey.DB, PANEL_CODE: 'YUVI_001', OPENCODE_ENC_KEY: 'cd'.repeat(32) };
+  const r5 = await ocCall(envWithSecret, null, 'login', { email: 'no.such.user@gmail.com', password: 'whatever-123' }, 'cd'.repeat(32));
+  ok(r5.plain && r5.plain.code === 'bad_credentials', 'OPENCODE_ENC_KEY env secret takes precedence over D1');
+}
+
 // ---------- 8. inline-script audit: every rendered page's scripts must parse ----------
 // A single broken <script> kills the whole tag (sidebar toggle, copy buttons,
 // filters). node --check cannot see inside template literals, so audit the

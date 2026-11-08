@@ -291,3 +291,7 @@ INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('global_enabled','1'
 INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('maintenance_message','');
 INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('support_url','');
 INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('min_version_code','1');
+-- Default OpenCode app API transport passphrase (SHA-256 derived at runtime).
+-- Override with 64 hex (raw key) or any passphrase via:
+--   INSERT OR REPLACE INTO opencode_settings (key,value) VALUES ('opencode_enc_key','...');
+INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('opencode_enc_key','YUVISDK88702026BASE64');

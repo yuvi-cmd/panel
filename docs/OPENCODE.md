@@ -12,10 +12,12 @@ does not reuse the SDK/MUNDO/BCORE tables or the SDK login session.
 - Standalone admin login: <https://panel.imranfarhat255.workers.dev/opencode/login>
 - Health: <https://panel.imranfarhat255.workers.dev/health>
 
-The Worker is deployed with build `2026-11-08-opencode-backnav`. If
-`/api/opencode/*` returns `code: "server_key_missing"`, set `OPENCODE_ENC_KEY`
-(see **Deploy** below) and redeploy. The app uses the same 64-hex key from
-`OpenCodeAndroid/.panel-secret`.
+The Worker is deployed with build `2026-11-08-opencode-dbkey`. The app
+encryption key **no longer needs a Cloudflare secret**: a default transport
+passphrase is auto-seeded into `opencode_settings` on first request and used
+when no override exists (see **Wire protocol**). A fresh deploy works with
+zero manual crypto configuration. If you set `OPENCODE_ENC_KEY` later, it
+overrides everything; note the APK must be built with the matching key.
 
 ## Pages and routes
 
@@ -89,10 +91,29 @@ JSON envelope:
 ```
 
 The plaintext payload contains `ts`, `device_id`, `device_name`, and
-`email`/`password` or `token`. Responses use the same envelope. The key is a
-Cloudflare Worker secret named `OPENCODE_ENC_KEY` (exactly 64 hex chars = 32
-bytes); the Android app receives the same key from its native `.so`. AAD is the
+`email`/`password` or `token`. Responses use the same envelope. AAD is the
 ASCII string `opencode:v1`. TLS is still required.
+
+**Key resolution (first wins):**
+
+1. Worker secret `OPENCODE_ENC_KEY` — exactly 64 hex chars (raw key bytes).
+2. D1 `opencode_settings` row `opencode_enc_key` — 64 hex chars = raw key;
+   anything else = passphrase, SHA-256 derived (auto-seeded at bootstrap with
+   the default `YUVISDK88702026BASE64`).
+3. If the row is missing entirely, the default passphrase is derived anyway.
+
+The default is a public-by-design passphrase (same idiom as the ARCX layer
+keys in `connect.js`); the Android APK embeds its SHA-256. A custom key is
+set once against the D1 database — no Cloudflare dashboard step:
+
+```sql
+INSERT OR REPLACE INTO opencode_settings (key,value)
+VALUES ('opencode_enc_key','<64 hex chars, or a passphrase>');
+```
+
+**Any key change requires an APK rebuild** — the app embeds the key in
+`libopencode_boot.so`. Rebuild the native library (or the full APK) with the
+matching key in `OpenCodeAndroid/.panel-secret` before shipping it.
 
 The app's native URL is embedded in `libopencode_boot.so`. The Worker URL in
 this repo's app counterpart is `https://panel.imranfarhat255.workers.dev`.
@@ -105,18 +126,15 @@ cd panel
 # One time (or rely on the API's auto-create):
 wrangler d1 execute panel --remote --file=schema.sql
 
-# SECRETS: read OPENCODE_ENC_KEY from OpenCodeAndroid/.panel-secret, then paste
-# it when wrangler prompts. Choose a separate admin password.
-# Never put secrets in wrangler.toml, git, or chat logs.
-wrangler secret put OPENCODE_ENC_KEY
-wrangler secret put OPENCODE_ADMIN_PASSWORD
+# NOTHING else is required for the app API — the default transport key is
+# auto-seeded. Optional overrides:
+wrangler secret put OPENCODE_ENC_KEY        # raw 64-hex override
+wrangler secret put OPENCODE_ADMIN_PASSWORD # /opencode/login password
 
 wrangler deploy
 ```
 
-`/health` should return 200 with build `2026-11-08-opencode-backnav`. A
-missing/invalid `OPENCODE_ENC_KEY` makes `/api/opencode/*` return
-`server_key_missing`; fix the secret before shipping.
+`/health` should return 200 with build `2026-11-08-opencode-dbkey`.
 
 ## Admin use
 
@@ -129,7 +147,8 @@ missing/invalid `OPENCODE_ENC_KEY` makes `/api/opencode/*` return
    delete.
 4. Open **Notices** to publish the message shown inside the app.
 5. Open **Settings** for the support URL, minimum version code and maintenance
-   message. The page also reports whether the Worker secrets are configured.
+   message. The page also reports the active encryption key source (env secret,
+   D1 row, or the auto-seeded default passphrase).
 
 ## Security notes
 
