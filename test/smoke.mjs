@@ -937,7 +937,7 @@ console.log('opencode app api key resolution');
   const DEFAULT_PASSPHRASE = 'YUVISDK88702026BASE64';
   const envNoKey = { DB: makeDb(), PANEL_CODE: 'YUVI_001', PANEL_NAME: 'TEST PANEL' }; // no OPENCODE_ENC_KEY
   const r1 = await ocCall(envNoKey, null, 'register', { email: 'smoke.dbkey.' + Date.now() + '@gmail.com', password: 'smoke-pass-123', display_name: 'DbKey' }, sha256Hex(DEFAULT_PASSPHRASE));
-  ok(r1.plain && r1.plain.ok === true && r1.plain.reason === 'pending', 'default auto-seeded passphrase registers a pending account', JSON.stringify(r1.plain || {}));
+  ok(r1.plain && r1.plain.ok === true && r1.plain.reason === 'active', 'default auto-seeded passphrase registers an active account', JSON.stringify(r1.plain || {}));
   const r2 = await ocCall(envNoKey, null, 'login', { email: 'no.such.user@gmail.com', password: 'whatever-123' }, sha256Hex(DEFAULT_PASSPHRASE));
   ok(r2.plain && r2.plain.ok === false && r2.plain.code === 'bad_credentials', 'default key decrypts login response');
 

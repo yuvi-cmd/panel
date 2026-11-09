@@ -344,9 +344,11 @@ export async function handleOpenCodeApi(request, db, env) {
         return json(await encryptEnvelope(clientError('An account with this email already exists', 'email_exists'), db, env), 200, cors);
       }
       const hash = await hashPassword(password);
+      // New accounts are active immediately — no admin approval gate. The
+      // admin can still disable/reset any account from the /opencode panel.
       const ins = await db.prepare(
         'INSERT INTO opencode_users (email,password_hash,display_name,device_id,device_name,status) VALUES (?,?,?,?,?,?)'
-      ).bind(email, hash, displayName, deviceId, deviceName, 'pending').run();
+      ).bind(email, hash, displayName, deviceId, deviceName, 'active').run();
       const row = await db.prepare('SELECT * FROM opencode_users WHERE id=?').bind(ins.meta.last_row_id).first();
       const token = 'oc_' + randomB64(32);
       await db.prepare('INSERT INTO opencode_sessions (token_hash,user_id,device_id,expires_at) VALUES (?,?,?,?)')

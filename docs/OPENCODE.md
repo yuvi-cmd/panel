@@ -12,7 +12,7 @@ does not reuse the SDK/MUNDO/BCORE tables or the SDK login session.
 - Standalone admin login: <https://panel.imranfarhat255.workers.dev/opencode/login>
 - Health: <https://panel.imranfarhat255.workers.dev/health>
 
-The Worker is deployed with build `2026-11-08-opencode-dbkey`. The app
+The Worker is deployed with build `2026-11-09-register-active`. The app
 encryption key **no longer needs a Cloudflare secret**: a default transport
 passphrase is auto-seeded into `opencode_settings` on first request and used
 when no override exists (see **Wire protocol**). A fresh deploy works with
@@ -61,7 +61,8 @@ instead of the form. The owner can still enter through the main SDK panel.
 
 ## What the panel does
 
-- Registers app accounts with an `@gmail.com` address only.
+- Registers app accounts with an `@gmail.com` address only. **New accounts are
+  active immediately** (no approval gate); the admin disables/resets from here.
 - Hashes passwords with PBKDF2-SHA256 (100,000 rounds, random salt).
 - Issues opaque app session tokens; only SHA-256 hashes are stored in D1.
 - Binds each account to one app-generated device id.
@@ -134,7 +135,7 @@ wrangler secret put OPENCODE_ADMIN_PASSWORD # /opencode/login password
 wrangler deploy
 ```
 
-`/health` should return 200 with build `2026-11-08-opencode-dbkey`.
+`/health` should return 200 with build `2026-11-09-register-active`.
 
 ## Admin use
 
@@ -143,8 +144,9 @@ wrangler deploy
    **OpenCode Control** in the sidebar.
 2. Use the overview global switch to pause/resume every app install.
 3. Open **App accounts** to search registrations, activate a pending account
-   for N days, extend from expiry, reset a device, revoke sessions, disable or
-   delete.
+   for N days (accounts created before this change are still `pending` and
+   need one activation), extend from expiry, reset a device, revoke sessions,
+   disable or delete.
 4. Open **Notices** to publish the message shown inside the app.
 5. Open **Settings** for the support URL, minimum version code and maintenance
    message. The page also reports the active encryption key source (env secret,

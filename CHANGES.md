@@ -1,5 +1,15 @@
 # CHANGES.md
 
+## Pass 2026-11-09 — Register = instant active (no approval gate)
+
+- Naye registered accounts ab turant `active` hote hain (pehle `pending`
+  the — admin approval required). `expires_at` NULL = never expires.
+  Global ON/OFF switch aur har admin action (disable/reset/delete/
+  pending) waise hi kaam karte hain.
+- Purane pending accounts waise hi rahenge — unko ek baar Activate karna
+  hoga (/opencode → App accounts).
+- smoke test updated (register asserts `active`).
+
 ## Pass 2026-11-08 (2) — OpenCode app key: DB auto-seed, no Cloudflare step
 
 - `/api/opencode/*` ko ab koi Cloudflare secret chahiye hi nahi. Key
