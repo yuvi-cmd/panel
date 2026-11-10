@@ -7,6 +7,7 @@ import { mundoSaltFromEnv, mundoAesKeyHex, hashPassword, verifyPassword, randomH
 import { handleApi } from './api.js';
 import { clientIp, hitRate, isProfessor } from './security.js';
 import { handleConnect, handleEncrypt, ensureModVersions, libUrlOk } from './connect.js';
+import { handleNexon } from './nexon.js';
 import { handleMundo } from './mundo.js';
 import { handleBcore } from './bcore.js';
 import { ensureDB } from './db.js';
@@ -50,12 +51,14 @@ export default {
     const method = request.method.toUpperCase();
     await ensureDB(db, mainPanel);
 
-    if (method === 'OPTIONS' && (path.startsWith('/sdk/') || path.startsWith('/connect/') || path.startsWith('/encrypt/') || path.startsWith('/api/')))
+    if (method === 'OPTIONS' && (path.startsWith('/sdk/') || path.startsWith('/connect/') || path.startsWith('/encrypt/') || path.startsWith('/nexon/') || path.startsWith('/api/')))
       return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
     if (path.startsWith('/connect/')) return handleConnect(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
     if (path === '/connect') return handleConnect(request, db, url.searchParams.get('panel_code') || mainPanel, env);
+    if (path.startsWith('/nexon/')) return handleNexon(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
+    if (path === '/nexon') return handleNexon(request, db, url.searchParams.get('panel_code') || mainPanel, env);
     if (path === '/health') {
-      return new Response(JSON.stringify({ ok: true, build: '2026-11-10-apk-bootstrap', panel: mainPanel }), { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
+      return new Response(JSON.stringify({ ok: true, build: '2026-11-10-nexon', panel: mainPanel }), { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
     }
     if (path.startsWith('/encrypt/')) return handleEncrypt(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
     if (path.startsWith('/sdk/mundo/') || path === '/sdk/mundo') return handleMundo(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel), env);

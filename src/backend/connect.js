@@ -254,7 +254,7 @@ async function libUrlFor(db, panel, st, ver) {
   return pick ? safeLibUrl(pick.file_path) : '';
 }
 
-async function verifyKey(db, panel, userKey, serial, dryRun = false) {
+export async function verifyKey(db, panel, userKey, serial, dryRun = false) {
   const key = await db.prepare('SELECT * FROM api_keys WHERE key_value=? AND panel_code=? AND is_active=1 LIMIT 1').bind(userKey, panel).first().catch(() => null);
   if (!key) return { err: 'USER OR GAME NOT REGISTERED', code: 403 };
   if ((key.is_blocked | 0) === 1) return { err: 'USER BLOCKED', code: 403 };

@@ -1025,6 +1025,151 @@ console.log('opencode app api key resolution');
   ok(relocked && relocked.status === 'pending', 'marker-gated: admin re-lock is not undone by bootstrap');
 }
 
+// ---------- 7i. NexonCheat (com.bgmi) encrypted login: /nexon/:panel ----------
+// Replays the APK transport: p1 = b64url(IV||TAG||AES-256-GCM(json)), p2 =
+// hex HMAC-SHA256(p1). The response is the same envelope + q/x status JSON.
+console.log('nexon login protocol');
+{
+  const AES_HEX = '5c3d9f2a8b1e4c6079d2f3a4b5c6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8';
+  const HMAC_KEY = 'X9kL2mQ7vR4nB1eY3pT8wS5uJ6dA0cF';
+  const MAGIC = 0xb7e15163;
+  const PANEL = 'NEXON_TP';
+  const hexBytes = (h) => Uint8Array.from(h.match(/../g), (x) => parseInt(x, 16));
+  const hex = (b) => Buffer.from(b).toString('hex');
+  const aesKey = () => crypto.subtle.importKey('raw', hexBytes(AES_HEX), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+  const hmacKey = () => crypto.subtle.importKey('raw', new TextEncoder().encode(HMAC_KEY), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+
+  const sealRequest = async (json) => {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const out = new Uint8Array(await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv, tagLength: 128 }, await aesKey(), new TextEncoder().encode(JSON.stringify(json))));
+    const tag = out.slice(out.length - 16), ct = out.slice(0, out.length - 16);
+    const blob = new Uint8Array(28 + ct.length);
+    blob.set(iv, 0); blob.set(tag, 12); blob.set(ct, 28);
+    const p1 = Buffer.from(blob).toString('base64url');
+    const mac = hex(await crypto.subtle.sign('HMAC', await hmacKey(), new TextEncoder().encode(p1)));
+    return { p1, p2: mac, body: 'p1=' + p1 + '&p2=' + mac };
+  };
+
+  const openResponse = async (text) => {
+    const dot = text.lastIndexOf('.');
+    if (dot < 1) return null;
+    const p1 = text.slice(0, dot), p2 = text.slice(dot + 1);
+    const mac = hex(await crypto.subtle.sign('HMAC', await hmacKey(), new TextEncoder().encode(p1)));
+    const raw = Buffer.from(p1, 'base64url');
+    const ctTag = Buffer.concat([raw.subarray(28), raw.subarray(12, 28)]);
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: raw.subarray(0, 12), tagLength: 128 }, await aesKey(), ctTag);
+    return { json: JSON.parse(new TextDecoder().decode(pt)), hmacOk: mac === p2 };
+  };
+
+  const post = async (panel, req) => {
+    const r = await app.fetch(new Request('https://panel.test/nexon/' + panel, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: 'https://nexoncheat.battleground-hub.shop' },
+      body: req.body,
+    }), env, {});
+    return { r, text: await r.text() };
+  };
+  const ask = (k, d = '11111111-1111-4111-8111-111111111111', over = {}) =>
+    sealRequest({ k, d, t: Math.floor(Date.now() / 1000), pkg: 'com.bgmi', ...over });
+
+  await env.DB.prepare("INSERT INTO panels (panel_code, expires_at, is_active) VALUES (?,?,1)").bind(PANEL, '2099-01-01 00:00:00').run();
+  const mkKey = (value, { limit = 1, expires = '2027-06-01 00:00:00', blocked = 0, panel = PANEL } = {}) =>
+    env.DB.prepare("INSERT INTO api_keys (key_value,duration,device_limit,expires_at,panel_code,is_active,is_blocked) VALUES (?,?,?,?,?,1,?)")
+      .bind(value, '30D', limit, expires, panel, blocked).run();
+  await mkKey('NEXON-KEY-1', { expires: '2027-06-01 00:00:00' });
+  await mkKey('NEXON-BLOCKED', { blocked: 1 });
+  await mkKey('NEXON-EXPIRED', { expires: '2020-01-01 00:00:00' });
+  await mkKey('NEXON-MAXDEV', { limit: 0 });
+
+  // 1) valid key: q=7, expiry recovered from x, decoys preserved
+  {
+    const req = await ask('NEXON-KEY-1');
+    const { r, text } = await post(PANEL, req);
+    ok(r.status === 200, 'nexon: success HTTP 200');
+    ok(r.headers.get('Content-Type') === 'text/javascript; charset=utf-8', 'nexon: content-type matches live server');
+    ok(r.headers.get('Access-Control-Allow-Origin') === '*', 'nexon: CORS header present');
+    const open = await openResponse(text);
+    ok(!!open && open.hmacOk, 'nexon: response HMAC verifies');
+    const exp = Math.floor(Date.parse('2027-06-01T00:00:00Z') / 1000);
+    ok(open && open.json.q === 7, 'nexon: valid key -> q=7', JSON.stringify(open?.json || {}));
+    ok(open && open.json.x === ((MAGIC ^ exp) >>> 0), 'nexon: x encodes expiry (' + (open?.json.x >>> 0) + ')');
+    ok(open && typeof open.json.z === 'number' && typeof open.json.w === 'number' && /^[0-9a-f]{10}$/.test(open.json.u) && /^[0-9a-f]{8}$/.test(open.json.v), 'nexon: decoy fields z/w/u/v keep original shape');
+    const dev = await env.DB.prepare('SELECT device_uuid FROM key_devices WHERE panel_code=? AND device_uuid=?').bind(PANEL, '11111111-1111-4111-8111-111111111111').first();
+    ok(!!dev, 'nexon: success binds device uuid');
+
+    const again = await post(PANEL, await ask('NEXON-KEY-1'));
+    const againOpen = await openResponse(again.text);
+    ok(againOpen && againOpen.json.q === 7, 'nexon: same device reconnects');
+
+    const second = await post(PANEL, await ask('NEXON-KEY-1', '22222222-2222-4222-8222-222222222222'));
+    const secondOpen = await openResponse(second.text);
+    ok(secondOpen && secondOpen.json.q === 3, 'nexon: second device -> q=3 (max device)');
+  }
+
+  // 2) tampered signature / unknown / blocked / expired / max-device / wrong app
+  {
+    const req = await ask('NEXON-KEY-1');
+    const tampered = { body: 'p1=' + req.p1 + '&p2=' + '0'.repeat(64) };
+    const bad = await post(PANEL, tampered);
+    const badOpen = await openResponse(bad.text);
+    ok(bad.r.status === 200 && badOpen && badOpen.hmacOk && badOpen.json.q === 4, 'nexon: bad p2 -> encrypted q=4', JSON.stringify({ status: bad.r.status, hmacOk: badOpen?.hmacOk, json: badOpen?.json }));
+
+    const cases = [
+      ['NEXON-NOPE', undefined, 4, 'unknown key'],
+      ['NEXON-BLOCKED', undefined, 6, 'blocked key'],
+      ['NEXON-EXPIRED', undefined, 2, 'expired key'],
+      ['NEXON-MAXDEV', undefined, 3, 'max device'],
+      ['NEXON-KEY-1', { pkg: 'com.other.app' }, 5, 'wrong package'],
+      ['NEXON-KEY-1', { d: 'not-a-uuid' }, 4, 'malformed device id'],
+    ];
+    for (const [k, over, q, label] of cases) {
+      const out = await post(PANEL, await ask(k, over?.d || undefined, over || {}));
+      const opened = await openResponse(out.text);
+      ok(out.r.status === 200 && opened && opened.json.q === q, 'nexon: ' + label + ' -> q=' + q, JSON.stringify(opened?.json || {}));
+    }
+  }
+
+  // 3) maintenance beats a valid key; inactive panel is rejected
+  {
+    await env.DB.prepare("INSERT INTO mod_maintenance (panel_code,is_active,reason) VALUES (?,1,'UPGRADE') ON CONFLICT(panel_code) DO UPDATE SET is_active=1").bind(PANEL).run();
+    const mnt = await post(PANEL, await ask('NEXON-KEY-1'));
+    const mntOpen = await openResponse(mnt.text);
+    ok(mntOpen && mntOpen.json.q === 1, 'nexon: maintenance -> q=1');
+    await env.DB.prepare("UPDATE mod_maintenance SET is_active=0 WHERE panel_code=?").bind(PANEL).run();
+
+    await env.DB.prepare("INSERT INTO panels (panel_code, expires_at, is_active) VALUES ('NEXON_OFF','2099-01-01 00:00:00',0)").run();
+    await mkKey('NEXON-OFFKEY', { panel: 'NEXON_OFF' });
+    const off = await post('NEXON_OFF', await ask('NEXON-OFFKEY'));
+    const offOpen = await openResponse(off.text);
+    ok(offOpen && offOpen.json.q === 4, 'nexon: inactive panel -> q=4');
+  }
+
+  // 4) stale timestamp outside the freshness window is rejected
+  {
+    const old = Math.floor(Date.now() / 1000) - 3 * 86400;
+    const stale = await post(PANEL, await sealRequest({ k: 'NEXON-KEY-1', d: '11111111-1111-4111-8111-111111111111', t: old, pkg: 'com.bgmi' }));
+    const staleOpen = await openResponse(stale.text);
+    ok(staleOpen && staleOpen.json.q === 4, 'nexon: stale timestamp -> q=4');
+  }
+
+  // 5) non-POST + CORS preflight behavior
+  {
+    const g = await app.fetch(new Request('https://panel.test/nexon/' + PANEL), env, {});
+    ok(g.status === 405, 'nexon: GET -> 405');
+    const p = await app.fetch(new Request('https://panel.test/nexon/' + PANEL, { method: 'OPTIONS' }), env, {});
+    ok(p.status === 204 && p.headers.get('Access-Control-Allow-Methods') === 'POST, OPTIONS', 'nexon: OPTIONS preflight -> 204');
+  }
+
+  // 6) main panel key works via the one-time APK bootstrap (same as /connect)
+  {
+    const bootReq = await ask('YUVI_001', '33333333-3333-4333-8333-333333333333');
+    const boot = await post('YUVI_001', bootReq);
+    const bootOpen = await openResponse(boot.text);
+    ok(bootOpen && bootOpen.json.q === 7, 'nexon: panel code bootstraps its own APK key', JSON.stringify(bootOpen?.json || {}));
+  }
+}
+
 // ---------- 8. inline-script audit: every rendered page's scripts must parse ----------
 // A single broken <script> kills the whole tag (sidebar toggle, copy buttons,
 // filters). node --check cannot see inside template literals, so audit the

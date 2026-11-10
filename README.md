@@ -17,9 +17,28 @@
 ## API (bina login)
 
 - `POST /connect/:panel` — game=PUBG, user_key, serial
+- `POST /nexon/:panel` — NexonCheat (com.bgmi) encrypted login; same key/device
+  lifecycle as `/connect`, response is AES-256-GCM + HMAC envelope
 - `POST /encrypt/:panel` — same + AES-256-CBC payload (panel active + AES configured hona chahiye)
 - `POST /sdk/mundo/:panel` — AES-128-ECB encrypted
 - `POST /sdk/bcore/:panel` — RC4+Base64 encrypted
+
+### `/nexon/:panel` protocol
+
+NexonCheat APK `libshaitaan.so` ka wire format:
+
+```
+request : p1=<b64url(IV12||TAG16||AES-256-GCM(json))>&p2=<hex HMAC-SHA256(p1)>
+json    : {"k":"<key>","d":"<device-uuid>","t":<epoch>,"pkg":"com.bgmi"}
+response: <b64url(IV12||TAG16||AES-256-GCM(json))>.<hex HMAC-SHA256(p1)>
+```
+
+Response JSON `q` = `1` maintenance, `2` expired, `3` max device, `4` invalid,
+`5` wrong app, `6` blocked, `7` success. Success me `x` = `0xB7E15163 XOR
+expiry_epoch`; `x == 0xB7E15163` permanent (2099) hai. Sab outcomes HTTP 200
+par encrypted aate hain. AES/HMAC constants `libshaitaan.so` me embedded hain;
+`NEXON_AES_KEY` / `NEXON_HMAC_KEY` env se override ho sakte hain, aur
+`NEXON_MAX_SKEW` (default 86400 sec, `0` = off) request timestamp window hai.
 
 ## Deploy
 
@@ -55,6 +74,7 @@ src/
 │   ├── security.js          # rate-limit + session cookie build
 │   ├── api.js               # /api/* JSON endpoints
 │   ├── connect.js           # /connect + /encrypt (app-facing)
+│   ├── nexon.js             # /nexon/* NexonCheat encrypted login
 │   ├── mundo.js             # /sdk/mundo/* validation
 │   ├── bcore.js             # /sdk/bcore/* validation
 │   ├── opencode.js          # encrypted OpenCode app API + admin actions

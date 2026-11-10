@@ -1,5 +1,23 @@
 # CHANGES.md
 
+## Pass 2026-11-10 (3) — NexonCheat `/nexon/:panel` encrypted login
+
+- Naya `POST /nexon/:panel` endpoint NexonCheat (com.bgmi) APK ke wire format
+  ko samajhta hai: `p1` = base64url(IV12||TAG16||AES-256-GCM), `p2` =
+  HMAC-SHA256(p1 text). Response bhi wahi envelope + `.<hex hmac>` hai.
+- Request JSON `{k,d,t,pkg}` verify hota hai; `d` uuid format, `t` freshness
+  window (`NEXON_MAX_SKEW`, default 24h), `pkg` sirf `com.bgmi`.
+- Key lifecycle `/connect` jaisa hi `verifyKey` se: panel active, maintenance,
+  blocked, expired, max-device, device bind + `last_seen`.
+- Status codes APK ke `Check()` switch se: `q=1` maintenance, `2` expired,
+  `3` max device, `4` invalid, `5` wrong app, `6` blocked, `7` success.
+  Success payload `x = 0xB7E15163 XOR expiry_epoch` bhejta hai (magic value =
+  permanent 2099), plus original-shape decoys `z,w,u,v`.
+- `/health` build ab `2026-11-10-nexon`.
+- Tests: `test/smoke.mjs` me valid/invalid HMAC, unknown/blocked/expired/
+  max-device/wrong-app, maintenance, inactive panel, stale timestamp, device
+  binding, OPTIONS/GET aur main-panel bootstrap contract cover hain.
+
 ## Pass 2026-11-10 (2) — APK bootstrap key (login without panel UI)
 
 - `/connect/:panel` ab main panel ke liye ek **one-time, marker-gated**
