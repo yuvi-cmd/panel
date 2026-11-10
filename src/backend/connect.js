@@ -46,6 +46,34 @@ export async function ensureModVersions(db, panel) {
   } catch {}
 }
 
+// One-time, marker-gated APK bootstrap for the panel's own tenant.
+//
+// A legacy/fresh D1 can be fully migrated and still have zero api_keys: the
+// panel UI is then the only way to create the first key, so the APK can never
+// log in. Seed a key equal to the panel code once (the URL already carries
+// `/connect/YUVI_001`, so the app can use `YUVI_001` as user_key). The marker
+// keeps this one-time: an admin can delete/rotate the key later without the
+// next connect silently recreating it.
+export async function ensureApkBootstrapKey(db, panel, env) {
+  const mainPanel = clean(env && env.PANEL_CODE, 20) || 'YUVI_001';
+  if (!panel || panel !== mainPanel) return;
+  try {
+    const marker = await db.prepare("SELECT setting_value FROM mod_settings WHERE panel_code=? AND setting_name='apk_bootstrap_seeded'").bind(panel).first().catch(() => null);
+    if (marker) return;
+    await db.prepare('INSERT OR IGNORE INTO panels (panel_code,is_active) VALUES (?,1)').bind(panel).run().catch(() => {});
+    await db.prepare('UPDATE panels SET is_active=1 WHERE panel_code=?').bind(panel).run().catch(() => {});
+    const owner = await db.prepare("SELECT id FROM users WHERE panel_code=? ORDER BY CASE role WHEN 'PROFESSOR' THEN 0 WHEN 'OWNER' THEN 1 WHEN 'ADMIN' THEN 2 ELSE 3 END, id ASC LIMIT 1").bind(panel).first().catch(() => null);
+    const creator = (owner && owner.id) || 1;
+    const expires = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 19).replace('T', ' ');
+    await db.prepare('INSERT OR IGNORE INTO api_keys (key_value,duration,device_limit,expires_at,panel_code,is_active,is_blocked,created_by,server_type) VALUES (?,?,?,?,?,?,?,?,?)')
+      .bind(panel, '30D', 1, expires, panel, 1, 0, creator, 'PRIVATE').run().catch(() => {});
+    await ensureModVersions(db, panel);
+    await db.prepare("INSERT OR IGNORE INTO mod_settings (setting_name,setting_value,panel_code) VALUES ('apk_bootstrap_seeded','1',?)").bind(panel).run().catch(() => {});
+  } catch (e) {
+    try { console.error('apk bootstrap failed:', String((e && e.message) || e)); } catch {}
+  }
+}
+
 const md5 = s => md5hex(s);
 const clean = (v, max = 255) => (typeof v === 'string' && v.trim() !== '' && v.trim().length <= max) ? v.trim() : '';
 
@@ -263,6 +291,7 @@ export async function handleConnect(request, db, panel, env) {
   const game = clean(fd.get('game'), 50), userKey = clean(fd.get('user_key'), 50), serial = clean(fd.get('serial'), 100);
   if (!game || !userKey || !serial || game !== 'PUBG') return J({ status: false, reason: game !== 'PUBG' && game ? 'USER OR GAME NOT REGISTERED' : 'INVALID PARAMETER' }, game && game !== 'PUBG' ? 403 : 400);
   try {
+    if (userKey === panel) await ensureApkBootstrapKey(db, panel, env);
     const prow = await db.prepare('SELECT is_active FROM panels WHERE panel_code=?').bind(panel).first().catch(() => null);
     if (!prow || (prow.is_active | 0) !== 1) return J({ status: false, reason: 'USER OR GAME NOT REGISTERED' }, 403);
     const mnt = await db.prepare('SELECT is_active,reason FROM mod_maintenance WHERE panel_code=?').bind(panel).first().catch(() => null);

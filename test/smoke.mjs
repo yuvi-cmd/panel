@@ -692,6 +692,57 @@ console.log('fresh install');
   globalThis.__arcDbReady = '';
 }
 
+// ---------- 7e-2. APK bootstrap key: legacy D1 login without panel UI ----------
+console.log('apk bootstrap key');
+{
+  const bootEnv = { DB: makeDb(), PANEL_CODE: 'YUVI_001', PANEL_NAME: 'TEST PANEL' };
+  globalThis.__arcDbReady = '';
+  // Create the schema first, then simulate an existing but inactive tenant.
+  const h0 = await call(bootEnv, 'GET', '/health');
+  ok(h0.status === 200, 'bootstrap: schema created via /health');
+  await bootEnv.DB.prepare("UPDATE panels SET is_active=0 WHERE panel_code='YUVI_001'").run();
+
+  const fd = new FormData();
+  fd.set('game', 'PUBG');
+  fd.set('user_key', 'YUVI_001');
+  fd.set('serial', 'DEV-BOOT');
+  const r1 = await call(bootEnv, 'POST', '/connect/YUVI_001', { form: fd });
+  const b1 = await r1.json().catch(() => ({}));
+  ok(r1.status === 200 && b1.status === true && b1.data && b1.data.device === 1, 'bootstrap: first YUVI_001 connect succeeds', JSON.stringify(b1).slice(0, 140));
+  ok(b1.data && b1.data.version === 'PRIVATE' && b1.data.plan === 'PAID', 'bootstrap: starter version/plan returned');
+  const row = await bootEnv.DB.prepare("SELECT key_value,duration,device_limit,is_active,server_type FROM api_keys WHERE panel_code='YUVI_001' AND key_value='YUVI_001'").first();
+  ok(!!row && row.duration === '30D' && (row.device_limit | 0) === 1 && (row.is_active | 0) === 1 && row.server_type === 'PRIVATE', 'bootstrap: key seeded with 30D/1 device/PRIVATE');
+  const p = await bootEnv.DB.prepare("SELECT is_active FROM panels WHERE panel_code='YUVI_001'").first();
+  ok((p?.is_active | 0) === 1, 'bootstrap: inactive main panel reactivated');
+  const marker = await bootEnv.DB.prepare("SELECT setting_value FROM mod_settings WHERE panel_code='YUVI_001' AND setting_name='apk_bootstrap_seeded'").first();
+  ok(marker?.setting_value === '1', 'bootstrap: one-time marker written');
+  const vers = await bootEnv.DB.prepare("SELECT COUNT(*) n FROM mod_versions WHERE panel_code='YUVI_001'").first();
+  ok((vers?.n | 0) >= 4, 'bootstrap: starter mod versions seeded');
+
+  const same = await call(bootEnv, 'POST', '/connect/YUVI_001', { form: fd });
+  ok(same.status === 200, 'bootstrap: same device can reconnect');
+  const fd2 = new FormData();
+  fd2.set('game', 'PUBG'); fd2.set('user_key', 'YUVI_001'); fd2.set('serial', 'DEV-OTHER');
+  const other = await call(bootEnv, 'POST', '/connect/YUVI_001', { form: fd2 });
+  const ob = await other.json().catch(() => ({}));
+  ok(other.status === 403 && ob.reason === 'MAX DEVICE REACHED', 'bootstrap: device limit enforced');
+
+  // One-time: deleting the seeded key must NOT recreate it on next connect.
+  await bootEnv.DB.prepare("DELETE FROM api_keys WHERE panel_code='YUVI_001' AND key_value='YUVI_001'").run();
+  const again = await call(bootEnv, 'POST', '/connect/YUVI_001', { form: fd });
+  const ab = await again.json().catch(() => ({}));
+  ok(again.status === 403 && ab.reason === 'USER OR GAME NOT REGISTERED', 'bootstrap: marker prevents key recreation after admin delete');
+
+  // Other tenants must never get an auto-created key.
+  const fd3 = new FormData();
+  fd3.set('game', 'PUBG'); fd3.set('user_key', 'OTHER'); fd3.set('serial', 'DEV-X');
+  const otherTenant = await call(bootEnv, 'POST', '/connect/OTHER', { form: fd3 });
+  const ot = await otherTenant.json().catch(() => ({}));
+  const otherKey = await bootEnv.DB.prepare("SELECT id FROM api_keys WHERE panel_code='OTHER' AND key_value='OTHER'").first();
+  ok(otherTenant.status === 403 && !otherKey && ot.reason === 'USER OR GAME NOT REGISTERED', 'bootstrap: non-main tenant is not seeded');
+  globalThis.__arcDbReady = '';
+}
+
 // ---------- 7f. DEBUG_ERRORS flag: 500s hide internals unless opted in ----------
 console.log('debug errors flag');
 {

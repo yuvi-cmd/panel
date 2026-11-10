@@ -1,5 +1,20 @@
 # CHANGES.md
 
+## Pass 2026-11-10 (2) — APK bootstrap key (login without panel UI)
+
+- `/connect/:panel` ab main panel ke liye ek **one-time, marker-gated**
+  bootstrap karta hai: agar `api_keys` me `YUVI_001` row nahi hai, to pehla
+  `user_key=YUVI_001` request us key ko seed kar deta hai (`30D`,
+  `device_limit=1`, `PRIVATE`, pehla device bind hone par).
+- Saath me missing `panels` row insert / inactive row reactivate hoti hai,
+  aur starter `mod_versions` seed hote hain. Isse purane D1 par bhi APK
+  login chalta hai bina admin panel me manually key banane ke.
+- Marker `mod_settings.apk_bootstrap_seeded='1'` ensure karta hai ki admin
+  key delete/rotate kare to wo dobara auto-create na ho.
+- `/health` build ab `2026-11-10-apk-bootstrap`.
+- Sirf panel-code key request (`user_key == panel`) par chalta hai; koi
+  arbitrary key auto-create nahi hoti.
+
 ## Pass 2026-11-10 — One-time auto-activation of legacy pending accounts
 
 - `ensureOpenCodeDB()` me ek baar chalne wali migration: jo purane
