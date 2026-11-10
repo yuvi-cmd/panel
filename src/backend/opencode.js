@@ -87,6 +87,19 @@ export async function ensureOpenCodeDB(db) {
   } catch (e) {
     console.error('opencode settings seed failed:', String(e?.message || e));
   }
+  // One-time migration: accounts that registered before approvals were dropped
+  // are activated here, once per database. Marker-gated so an admin re-locking
+  // an account later is not silently undone.
+  try {
+    const done = await db.prepare("SELECT value FROM opencode_settings WHERE key='pending_auto_activated'").first();
+    if (done?.value !== '1') {
+      await db.prepare("UPDATE opencode_users SET status='active' WHERE status='pending'").run();
+      await db.prepare("INSERT OR REPLACE INTO opencode_settings (key,value) VALUES ('pending_auto_activated','1')").run();
+      console.log('opencode: auto-activated pre-existing pending accounts (one-time)');
+    }
+  } catch (e) {
+    console.error('opencode pending auto-activation failed:', String(e?.message || e));
+  }
   globalThis.__opencodeDbReady = true;
 }
 

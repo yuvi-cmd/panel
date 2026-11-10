@@ -1,5 +1,16 @@
 # CHANGES.md
 
+## Pass 2026-11-10 — One-time auto-activation of legacy pending accounts
+
+- `ensureOpenCodeDB()` me ek baar chalne wali migration: jo purane
+  `pending` accounts the (jis time pe approval gate tha), wo ab automatically
+  `active` ho jaate hain — marker `opencode_settings.pending_auto_activated='1'`
+  ke saath, taaki admin ka baad ka re-lock kabhi undo na ho.
+- Naye registrations pehle se hi turant active hain.
+- `/health` build ab `2026-11-10-pending-migration`.
+- smoke tests: +2 assertions (migration aktivasi, marker-gated re-lock).
+  **203/203 passing**.
+
 ## Pass 2026-11-09 — Register = instant active (no approval gate)
 
 - Naye registered accounts ab turant `active` hote hain (pehle `pending`

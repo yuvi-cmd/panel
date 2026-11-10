@@ -953,6 +953,25 @@ console.log('opencode app api key resolution');
   const envWithSecret = { DB: envNoKey.DB, PANEL_CODE: 'YUVI_001', OPENCODE_ENC_KEY: 'cd'.repeat(32) };
   const r5 = await ocCall(envWithSecret, null, 'login', { email: 'no.such.user@gmail.com', password: 'whatever-123' }, 'cd'.repeat(32));
   ok(r5.plain && r5.plain.code === 'bad_credentials', 'OPENCODE_ENC_KEY env secret takes precedence over D1');
+
+  // one-time migration: pending accounts existing before the approval gate
+  // was dropped are activated on bootstrap (marker-gated, once per DB)
+  globalThis.__opencodeDbReady = false;
+  const envMig = { DB: makeDb(), PANEL_CODE: 'YUVI_001', PANEL_NAME: 'TEST PANEL' };
+  await envMig.DB.exec("CREATE TABLE IF NOT EXISTS opencode_users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '', device_id TEXT NOT NULL DEFAULT '', device_name TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', expires_at TEXT, last_login TEXT, last_seen TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')))");
+  await envMig.DB.exec("CREATE TABLE IF NOT EXISTS opencode_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')");
+  await envMig.DB.prepare("INSERT INTO opencode_users (email,password_hash,status) VALUES ('migrate.me@gmail.com','pbkdf2$100000$aa$bb','pending')").run();
+  const { ensureOpenCodeDB } = await import('../src/backend/opencode.js');
+  globalThis.__opencodeDbReady = false;
+  await ensureOpenCodeDB(envMig.DB);
+  const migrated = await envMig.DB.prepare("SELECT status FROM opencode_users WHERE email='migrate.me@gmail.com'").first();
+  ok(migrated && migrated.status === 'active', 'one-time migration activates pre-existing pending accounts', JSON.stringify(migrated || {}));
+  // re-lock manually (admin action) — a later bootstrap must NOT re-activate
+  await envMig.DB.prepare("UPDATE opencode_users SET status='pending' WHERE email='migrate.me@gmail.com'").run();
+  globalThis.__opencodeDbReady = false;
+  await ensureOpenCodeDB(envMig.DB);
+  const relocked = await envMig.DB.prepare("SELECT status FROM opencode_users WHERE email='migrate.me@gmail.com'").first();
+  ok(relocked && relocked.status === 'pending', 'marker-gated: admin re-lock is not undone by bootstrap');
 }
 
 // ---------- 8. inline-script audit: every rendered page's scripts must parse ----------
