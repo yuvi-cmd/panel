@@ -198,8 +198,10 @@ function formValue(body, name) {
   return '';
 }
 
-export async function handleNexon(request, db, panel, env) {
+export async function handleNexon(request, db, panel, env, ctx) {
   const cors = { 'Access-Control-Allow-Origin': '*' };
+  let logKey = '';
+  let logDev = '';
   const headers = {
     'Content-Type': 'text/javascript; charset=utf-8',
     'Cache-Control': 'no-store',
@@ -207,6 +209,13 @@ export async function handleNexon(request, db, panel, env) {
   };
 
   const reply = async (obj) => {
+    try {
+      const hit = db.prepare('INSERT INTO nexon_hits (panel_code,key_value,device_uuid,q,user_agent) VALUES (?,?,?,?,?)')
+        .bind(String(panel || ''), logKey, logDev, Number(obj && obj.q) || 0, String(request.headers.get('user-agent') || '').slice(0, 300))
+        .run().catch(() => {});
+      if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(hit);
+      else await hit;
+    } catch {}
     try {
       return new Response(await seal(env, obj), { status: 200, headers });
     } catch (e) {
@@ -244,6 +253,8 @@ export async function handleNexon(request, db, panel, env) {
 
   const k = clean(payload.k, 100);
   const d = clean(payload.d, 64);
+  logKey = k;
+  logDev = d;
   if (!k || !UUID_RE.test(d)) return fail(Q.INVALID);
 
   // A key issued for another package mirrors the APK's "bound to a different

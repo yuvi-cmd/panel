@@ -113,6 +113,16 @@ CREATE TABLE IF NOT EXISTS mod_tags (
   UNIQUE(panel_code, name)
 );
 
+CREATE TABLE IF NOT EXISTS nexon_hits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  panel_code TEXT NOT NULL DEFAULT 'YUVI_001',
+  key_value TEXT,
+  device_uuid TEXT,
+  q INTEGER,
+  user_agent TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS referrals (
   code TEXT PRIMARY KEY,
   role TEXT NOT NULL DEFAULT 'RESELLER',

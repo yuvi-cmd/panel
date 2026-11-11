@@ -55,10 +55,44 @@ export default {
       return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
     if (path.startsWith('/connect/')) return handleConnect(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
     if (path === '/connect') return handleConnect(request, db, url.searchParams.get('panel_code') || mainPanel, env);
-    if (path.startsWith('/nexon/')) return handleNexon(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
-    if (path === '/nexon') return handleNexon(request, db, url.searchParams.get('panel_code') || mainPanel, env);
+    if (path.startsWith('/nexon/')) return handleNexon(request, db, decodeURIComponent(path.split('/')[2] || ''), env, ctx);
+    if (path === '/nexon') return handleNexon(request, db, url.searchParams.get('panel_code') || mainPanel, env, ctx);
+    // TEMPORARY diagnostics for the CA-bundle login failure. Remove after the
+    // device login is confirmed; token-protected, no secrets are exposed.
+    if (path === '/nexon-diag') {
+      const DIAG_TOKEN = '71bcbb0871010ef6e5ce81b95ee0ea45';
+      const J = (o, c = 200) => new Response(JSON.stringify(o), { status: c, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
+      if (url.searchParams.get('token') !== DIAG_TOKEN) return J({ ok: false, error: 'FORBIDDEN' }, 403);
+      const action = url.searchParams.get('action') || 'state';
+      try {
+        if (action === 'state') {
+          const keys = await db.prepare('SELECT id,key_value,panel_code,is_active,is_blocked,expires_at,device_limit,uses FROM api_keys ORDER BY id ASC LIMIT 100').all();
+          const devices = await db.prepare('SELECT key_id,device_uuid,last_seen FROM key_devices ORDER BY last_seen DESC LIMIT 100').all();
+          return J({ ok: true, keys: keys.results, devices: devices.results });
+        }
+        if (action === 'reset') {
+          const key = String(url.searchParams.get('key') || 'YUVI_001');
+          const row = await db.prepare('SELECT id,key_value,panel_code FROM api_keys WHERE key_value=? LIMIT 1').bind(key).first();
+          if (!row) return J({ ok: false, error: 'KEY NOT FOUND', key }, 404);
+          await db.prepare('DELETE FROM key_devices WHERE key_id=?').bind(row.id).run();
+          await db.prepare("UPDATE api_keys SET is_active=1,is_blocked=0,device_limit=1,expires_at=datetime('now','+30 days') WHERE id=?").bind(row.id).run();
+          return J({ ok: true, key: row.key_value, panel: row.panel_code, id: row.id });
+        }
+        if (action === 'hits') {
+          const hits = await db.prepare('SELECT id,panel_code,key_value,device_uuid,q,user_agent,created_at FROM nexon_hits ORDER BY id DESC LIMIT 50').all();
+          return J({ ok: true, hits: hits.results });
+        }
+        if (action === 'clearhits') {
+          await db.prepare('DELETE FROM nexon_hits').run();
+          return J({ ok: true });
+        }
+        return J({ ok: false, error: 'UNKNOWN ACTION' }, 400);
+      } catch (e) {
+        return J({ ok: false, error: String((e && e.message) || e) }, 500);
+      }
+    }
     if (path === '/health') {
-      return new Response(JSON.stringify({ ok: true, build: '2026-11-10-nexon', panel: mainPanel }), { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
+      return new Response(JSON.stringify({ ok: true, build: '2026-11-11-cafix', panel: mainPanel }), { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
     }
     if (path.startsWith('/encrypt/')) return handleEncrypt(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
     if (path.startsWith('/sdk/mundo/') || path === '/sdk/mundo') return handleMundo(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel), env);
