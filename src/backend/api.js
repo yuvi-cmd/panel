@@ -271,7 +271,7 @@ export async function handleApi(request, db, env) {
   if (path === '/api/generate' && method === 'POST') {
     const p = await readBody(request);
     const dur = String(p.duration || '');
-    const limit = Math.min(10, Math.max(1, parseInt(p.device_limit, 10) || 1));
+    const limit = Math.min(10000, Math.max(1, parseInt(p.device_limit, 10) || 1));
     const amount = Math.min(500, Math.max(1, parseInt(p.bulk_amount, 10) || parseInt(p.quantity, 10) || 1));
     const custom = cleanStr(p.custom_key, 50);
     let server = 'PRIVATE';

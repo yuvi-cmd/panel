@@ -373,7 +373,7 @@ export default {
       if (method === 'POST') {
         const p = await formParams(request);
         const dur = String(p.duration || '');
-        const limit = Math.min(10, Math.max(1, parseInt(p.device_limit, 10) || 1));
+        const limit = Math.min(10000, Math.max(1, parseInt(p.device_limit, 10) || 1));
         let amount = Math.min(500, Math.max(1, parseInt(p.bulk_amount, 10) || 1));
         if (p.is_bulk == null && amount <= 1) amount = 1;
         let custom = String(p.custom_key || '').trim();
