@@ -1170,6 +1170,20 @@ console.log('nexon login protocol');
   }
 }
 
+// ---------- 7j. NexonCheat legacy apk_kill status endpoint ----------
+console.log('apk kill status');
+{
+  const r = await app.fetch(new Request('https://panel.test/server/apk_kill.php?cv=6.9&t=' + Date.now()), env, {});
+  ok(r.status === 200, 'apk kill: HTTP 200');
+  ok((r.headers.get('Content-Type') || '').startsWith('text/plain'), 'apk kill: text/plain content type');
+  const text = (await r.text()).trim();
+  const raw = Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+  for (let i = 0; i < raw.length; i++) raw[i] ^= 0xa5;
+  let parsed = null;
+  try { parsed = JSON.parse(new TextDecoder().decode(raw)); } catch { parsed = null; }
+  ok(parsed && parsed.kill === 0 && parsed.force_update === 0 && parsed.ok === 1, 'apk kill: PanelCrypto.e() decodes to kill=0 JSON', text.slice(0, 60));
+}
+
 // ---------- 8. inline-script audit: every rendered page's scripts must parse ----------
 // A single broken <script> kills the whole tag (sidebar toggle, copy buttons,
 // filters). node --check cannot see inside template literals, so audit the

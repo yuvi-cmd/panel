@@ -8,6 +8,7 @@ import { handleApi } from './api.js';
 import { clientIp, hitRate, isProfessor } from './security.js';
 import { handleConnect, handleEncrypt, ensureModVersions, libUrlOk } from './connect.js';
 import { handleNexon } from './nexon.js';
+import { handleApkKill } from './apk-kill.js';
 import { handleMundo } from './mundo.js';
 import { handleBcore } from './bcore.js';
 import { ensureDB } from './db.js';
@@ -91,8 +92,9 @@ export default {
         return J({ ok: false, error: String((e && e.message) || e) }, 500);
       }
     }
+    if (path === '/server/apk_kill.php') return handleApkKill(request, db, env, ctx);
     if (path === '/health') {
-      return new Response(JSON.stringify({ ok: true, build: '2026-11-11-cafix', panel: mainPanel }), { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
+      return new Response(JSON.stringify({ ok: true, build: '2026-11-11-killfix', panel: mainPanel }), { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
     }
     if (path.startsWith('/encrypt/')) return handleEncrypt(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
     if (path.startsWith('/sdk/mundo/') || path === '/sdk/mundo') return handleMundo(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel), env);
