@@ -54,3 +54,45 @@ export async function handleBgmiLog(request, db, env, ctx) {
     }
   );
 }
+
+// libbgmi.so license/auth heartbeat. Original host
+// (nexoncheat.battleground-hub.shop) returns a random JS comment with 200,
+// e.g. `/* v8.81 */`; client sirf status check karta hai. Same shape mirror
+// karte hain, aur request diag table me log hoti hai.
+export async function handleValidBool(request, db, env, ctx) {
+  const url = new URL(request.url);
+
+  let size = 0;
+  let body = '';
+  try {
+    const ab = await request.arrayBuffer();
+    size = ab.byteLength;
+    if (size > 0 && size <= 64 * 1024) {
+      body = new TextDecoder('utf-8', { fatal: false }).decode(ab);
+    }
+  } catch {}
+
+  const q = [url.search.slice(0, 600), body.slice(0, 300)].filter(Boolean).join(' | ');
+  const ua = String(request.headers.get('user-agent') || '').slice(0, 300);
+
+  const row = db.prepare(
+    'INSERT INTO nexon_hits (panel_code,key_value,device_uuid,q,user_agent) VALUES (?,?,?,?,?)'
+  ).bind(
+    'BGMI_VALID',
+    `${request.method.toUpperCase()} ${url.pathname}`.slice(0, 300),
+    q.slice(0, 300),
+    size,
+    ua
+  ).run().catch(() => {});
+  if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(row);
+  else await row;
+
+  return new Response('/* v3.65 */', {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/javascript; charset=utf-8',
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+      'Access-Control-Allow-Origin': '*',
+    },
+  });
+}
