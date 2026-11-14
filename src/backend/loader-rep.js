@@ -218,6 +218,7 @@ export async function processLoaderRep(db, env, panelRaw, action, payload, opts 
     const timezone = tzRaw || 'UTC';
     const body = {
       status: 'success',
+      success: true,
       message: newlyBound ? 'License valid and HWID bound' : 'License valid',
       expiry: fmtExpiry(expiry, timezone),
       timezone,
@@ -243,6 +244,7 @@ export async function processLoaderRep(db, env, panelRaw, action, payload, opts 
       status: 200,
       body: {
         status: 'success',
+        success: true,
         message: 'Update available',
         package_name: pkg,
         version: String((cfg && cfg.version) || '1.0'),
