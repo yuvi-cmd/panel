@@ -2,6 +2,8 @@
 
 `panel-glass.zip` ka **poora panel** — PHP ki jagah **Cloudflare Worker + D1**. Same iOS blue glass UI, mobile responsive.
 
+**Live panel:** <https://panel.imranfarhat255.workers.dev>
+
 ## Pages
 
 - `/login` (device-lock), `/register` (referral), `/reset-device` (24h limit), `/join-panel` (empty panel claim), `/setup` (pehla admin)
@@ -11,6 +13,7 @@
 - `/loader-rep` — Ztrax-compatible encrypted license endpoint ke docs + admin tester
   (endpoint, wire format, cipher logic, error table, APK post-body replay).
   HWID hardcoded nahi hota — APK ki body ke andar se hi aata hai.
+  Live: `https://panel.imranfarhat255.workers.dev/ZTRAXPANEL/api.php?action=validate_license`
 - `/sdk/*` — MUNDO + BCORE dashboard/generate/keys/server/hash (sirf main OWNER id==1)
 - `/opencode` — standalone OpenCode Android control plane with its **own login**
   (`/opencode/login`), global APK ON/OFF, Gmail accounts, device lock, notices and
