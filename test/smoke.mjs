@@ -1257,11 +1257,30 @@ console.log('loader-rep');
   ok(testReq && testRes && Buffer.from(testRes.key).equals(Buffer.from(testReq.key)) && testRes.payload.message === tb.response.json.message, 'loader-rep: tester envelope echo decrypts to same JSON');
   ok(((await keyRow(LKEY_DRY)).uses | 0) === 0 && ((await devCount(LKEY_DRY)).c | 0) === 0, 'loader-rep: dry-run binds nothing');
 
-  // 7) page is admin-gated and documents the endpoint + cipher
+  // 7) APK post-body replay: HWID comes from the decrypted body, no hardcoding
+  const apkWireKey = crypto.getRandomValues(new Uint8Array(32));
+  const apkPayload = { app_secret: SECRET, hwid: HWID3, key: LKEY_DRY, timezone: 'Asia/Kolkata' };
+  const apkBody = buildEnvelope(apkPayload, apkWireKey);
+  const t2 = await call(env, 'POST', '/api/loader-rep-test', { cookie: ownerCookie, json: { panel_code: 'YUVI_001', body: apkBody } });
+  const t2b = await t2.json();
+  const replayReq = t2b.ok && openEnvelope(t2b.request.envelope);
+  const replayRes = replayReq && openEnvelope(t2b.response.envelope);
+  ok(t2.status === 200 && t2b.ok === true && t2b.request.plain === JSON.stringify(apkPayload), 'loader-rep: APK body replay decrypts exact posted JSON', JSON.stringify(t2b).slice(0, 160));
+  ok(replayReq && Buffer.from(replayReq.key).equals(Buffer.from(apkWireKey)) && replayRes && replayRes.payload.status === 'success', 'loader-rep: APK body response uses request envelope key');
+  ok(((await keyRow(LKEY_DRY)).uses | 0) === 0 && ((await devCount(LKEY_DRY)).c | 0) === 0, 'loader-rep: APK body dry-run binds nothing');
+
+  // 8) fields mode never generates/hardcodes an HWID
+  const t3 = await call(env, 'POST', '/api/loader-rep-test', { cookie: ownerCookie, json: { key: LKEY_DRY } });
+  const t3b = await t3.json();
+  ok(t3.status === 400 && /hwid required/.test(t3b.error || ''), 'loader-rep: missing HWID is rejected (no random fallback)');
+
+  // 9) page is admin-gated and documents the endpoint + cipher
   const page = await call(env, 'GET', '/loader-rep', { cookie: ownerCookie });
   const pageText = await page.text();
   ok(page.status === 200 && pageText.includes('/loader-rep/YUVI_001/api.php?action=validate_license') && pageText.includes('/api/loader-rep-test'), 'loader-rep: page renders endpoints + tester');
   ok(pageText.includes('U[ ct[i] ]') && pageText.includes('0, 214, 14, 225'), 'loader-rep: page shows cipher logic + U table');
+  ok(pageText.includes('id="lr-body"') && pageText.includes('APK post body'), 'loader-rep: page has APK post-body replay mode');
+  ok(!/id="lr-hwid"[^>]*value="/.test(pageText), 'loader-rep: HWID input is not prefilled/hardcoded');
   const anon = await call(env, 'GET', '/loader-rep');
   ok(anon.status === 302 && (anon.headers.get('Location') || '') === '/login', 'loader-rep: page redirects anonymous to /login');
 }

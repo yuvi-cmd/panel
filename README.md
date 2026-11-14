@@ -8,8 +8,9 @@
 - `/dashboard` (role stats), `/generate` (pricing + balance + bulk + server type), `/keys` (reset/edit/extend/bulk)
 - `/users`, `/admins`, `/permissions`, `/referral` (OWNER/ADMIN rules PHP jaise)
 - `/server` (maintenance + mod config), `/settings` (password + branding + API URLs), `/aes` (AES rotate + activation keys), `/api-test`, `/loader-manager`, `/create-panel` (id==1)
-- `/loader-rep` — Ztrax-compatible encrypted license endpoint ke docs + admin dry-run
-  tester (endpoint, wire format, cipher logic, error table, decrypted response)
+- `/loader-rep` — Ztrax-compatible encrypted license endpoint ke docs + admin tester
+  (endpoint, wire format, cipher logic, error table, APK post-body replay).
+  HWID hardcoded nahi hota — APK ki body ke andar se hi aata hai.
 - `/sdk/*` — MUNDO + BCORE dashboard/generate/keys/server/hash (sirf main OWNER id==1)
 - `/opencode` — standalone OpenCode Android control plane with its **own login**
   (`/opencode/login`), global APK ON/OFF, Gmail accounts, device lock, notices and

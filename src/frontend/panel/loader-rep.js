@@ -12,10 +12,6 @@ export function loaderRepPage(o) {
   const alias = base + '/ZTRAXPANEL/api.php';
   const secret = o.appSecret || '';
 
-  const rb = new Uint8Array(32);
-  crypto.getRandomValues(rb);
-  const demoHwid = [...rb].map((b) => b.toString(16).padStart(2, '0')).join('');
-
   const copy = (id) => '<button type="button" onclick="doCopy(document.getElementById(\'' + id + '\').innerText,this)" title="Copy" class="clay-card w-9 h-9 shrink-0 flex items-center justify-center rounded-xl text-slate-600"><i class="bi bi-link-45deg"></i></button>';
 
   const endpointRow = (label, icon, color, id, value) =>
@@ -49,7 +45,7 @@ export function loaderRepPage(o) {
     + '<div class="space-y-2">'
     + endpointRow('validate_license · POST', 'bi-shield-check', '#10b981', 'lr-ep-val', endpoint + '?action=validate_license')
     + endpointRow('get_update · POST', 'bi-cloud-arrow-down-fill', '#3b82f6', 'lr-ep-upd', endpoint + '?action=get_update')
-    + endpointRow('Drop-in alias (same handler)', 'bi-arrow-repeat', '#8b5cf6', 'lr-ep-alias', alias + '?action=validate_license')
+    + endpointRow('APK POST path · drop-in alias', 'bi-arrow-repeat', '#8b5cf6', 'lr-ep-alias', alias + '?action=validate_license')
     + '</div>'
     + '<div class="mt-3 rounded-xl border border-slate-200 p-3 text-[11px] leading-relaxed" style="color:var(--muted)">'
     + '<b>Headers:</b> <code class="font-mono">Content-Type: application/x-www-form-urlencoded</code> · <b>Body:</b> raw envelope (not JSON). '
@@ -57,15 +53,26 @@ export function loaderRepPage(o) {
     + '</div></div>'
 
     + '<div class="glass-card p-5 md:p-6 relative overflow-hidden mb-4" style="border-left:4px solid #6366f1"><div class="absolute top-0 left-0 right-0 h-1 avatar-premium"></div>'
-    + '<h3 class="font-black mb-1"><i class="bi bi-lightning-charge-fill mr-1"></i>Live Encrypted Test <span class="text-[10px] font-bold text-slate-400">admin only · dry-run (device bind nahi hota)</span></h3>'
-    + '<p class="text-[11px] text-slate-500 mb-3">Yahan se seedha isi panel ke endpoint par encrypted request jaati hai. Neeche raw wire + decrypted JSON dono dikhenge. Real client first success par HWID bind karta hai; tester sirf preview karta hai.</p>'
+    + '<h3 class="font-black mb-1"><i class="bi bi-lightning-charge-fill mr-1"></i>APK License Test <span class="text-[10px] font-bold text-slate-400">admin only · dry-run default</span></h3>'
+    + '<p class="text-[11px] text-slate-500 mb-3">Do mode: (1) <b>APK post body</b> — jo body APK ne license endpoint par bheji hai wahi paste karo; HWID, key, timezone sab body ke andar se decrypt hote hain. (2) <b>Key + HWID</b> — naya request banao. Yahan koi HWID hardcoded ya auto-generate nahi hota.</p>'
     + '<div class="grid md:grid-cols-4 gap-2">'
-    + '<div class="md:col-span-2"><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">License key (' + esc(panel) + ')</label><input id="lr-key" placeholder="paste panel key" class="w-full clay-card px-3 py-2.5 text-sm font-mono rounded-xl focus:outline-none"></div>'
-    + '<div><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">HWID (64 hex)</label><input id="lr-hwid" value="' + demoHwid + '" class="w-full clay-card px-3 py-2.5 text-xs font-mono rounded-xl focus:outline-none"></div>'
+    + '<div><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Mode</label><select id="lr-mode" onchange="lrMode()" class="w-full clay-card custom-select px-3 py-2.5 text-sm font-bold rounded-xl"><option value="body">APK post body</option><option value="fields">Key + HWID</option></select></div>'
+    + '<div><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Action</label><select id="lr-action" class="w-full clay-card custom-select px-3 py-2.5 text-sm font-bold rounded-xl"><option value="validate_license">validate_license</option><option value="get_update">get_update</option></select></div>'
+    + '<div><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">panel_code</label><input id="lr-panel" value="' + esc(panel) + '" class="w-full clay-card px-3 py-2.5 text-sm font-mono rounded-xl focus:outline-none"></div>'
+    + '<div><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Writes</label><label class="clay-card px-3 py-2.5 rounded-xl flex items-center gap-2 text-[11px] font-bold text-slate-600"><input type="checkbox" id="lr-real" class="accent-indigo-500"> Real mode (bind)</label></div>'
+    + '</div>'
+    + '<div id="lr-body-wrap" class="mt-3">'
+    + '<label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">APK ka exact POST body (<code class="font-mono">b64(key32)+++b64(ct)</code>)</label>'
+    + '<textarea id="lr-body" rows="4" placeholder="paste the raw body the APK posted — response usi envelope key me aayega" class="w-full clay-card px-3 py-2.5 text-[10px] font-mono rounded-xl focus:outline-none"></textarea>'
+    + '<p class="text-[10px] text-slate-400 mt-1">HWID body ke andar se aata hai. Panel koi HWID hardcode nahi karta — jo APK bhejta hai wahi validate/bind hota hai.</p>'
+    + '</div>'
+    + '<div id="lr-fields-wrap" class="hidden grid md:grid-cols-3 gap-2 mt-3">'
+    + '<div><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">License key (' + esc(panel) + ')</label><input id="lr-key" placeholder="paste panel key" class="w-full clay-card px-3 py-2.5 text-sm font-mono rounded-xl focus:outline-none"></div>'
+    + '<div><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">HWID (64 hex)</label><input id="lr-hwid" placeholder="device ka apna HWID — koi default nahi" class="w-full clay-card px-3 py-2.5 text-xs font-mono rounded-xl focus:outline-none"></div>'
     + '<div><label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Timezone</label><select id="lr-tz" class="w-full clay-card custom-select px-3 py-2.5 text-sm font-bold rounded-xl"><option value="Asia/Kolkata">Asia/Kolkata</option><option value="">(empty → UTC)</option><option value="UTC">UTC</option></select></div>'
     + '</div>'
-    + '<input type="hidden" id="lr-panel" value="' + esc(panel) + '">'
-    + '<button onclick="lrRun()" class="btn-premium w-full py-3.5 rounded-2xl text-xs font-extrabold uppercase mt-3"><i class="bi bi-send-fill"></i> Send encrypted request</button>'
+    + '<p class="text-[10px] text-slate-400 mt-2">Real mode off = dry-run (koi bind/uses++ nahi). On = exactly endpoint jaisa response, device bind + <code class="font-mono">uses++</code>.</p>'
+    + '<button onclick="lrRun()" class="btn-premium w-full py-3.5 rounded-2xl text-xs font-extrabold uppercase mt-3"><i class="bi bi-send-fill"></i> Send request</button>'
     + '<div class="grid md:grid-cols-2 gap-3 mt-3">'
     + '<div><p class="text-[10px] font-extrabold text-slate-500 uppercase mb-1">1 · Request envelope (wire)</p><pre id="lr-req-raw" class="bg-slate-900 text-slate-100 text-[10px] rounded-2xl p-3 overflow-x-auto whitespace-pre-wrap" style="min-height:86px">—</pre></div>'
     + '<div><p class="text-[10px] font-extrabold text-slate-500 uppercase mb-1">2 · Request decrypted (JSON)</p><pre id="lr-req-plain" class="bg-slate-900 text-cyan-100 text-[10px] rounded-2xl p-3 overflow-x-auto whitespace-pre-wrap" style="min-height:86px">—</pre></div>'
@@ -108,16 +115,26 @@ export function loaderRepPage(o) {
     + '<div class="glass-card p-5"><h3 class="font-black text-sm mb-2"><i class="bi bi-filetype-py mr-1"></i>Reference decrypt (Python)</h3>'
     + '<pre class="bg-slate-900 text-emerald-100 text-[10px] rounded-2xl p-3 overflow-x-auto whitespace-pre-wrap">import base64\n\nU = [...]  # 256 values\nD = [...]  # 32 values\n\ndef dec(ct, key):\n    return bytes(U[ct[i]] ^ D[i % 32] ^ key[i % 32]\n                 for i in range(len(ct)))\n\nbody = open("capture.txt", "rb").read().strip()\nkb, cb = body.split(b"+++", 1)\nkey = base64.b64decode(kb)\nprint(dec(base64.b64decode(cb), key).decode())</pre>'
     + '<p class="text-[11px] text-slate-500 mt-3"><b>Replay:</b> same JSON ko encrypt karke <code class="font-mono">POST {endpoint}?action=validate_license</code> par bhejo. Response ko usi key se decrypt karo.</p>'
+    + '<p class="text-[11px] text-slate-500 mt-3 mb-1"><b>APK ka actual POST replay (curl):</b></p>'
+    + '<pre class="bg-slate-900 text-emerald-100 text-[10px] rounded-2xl p-3 overflow-x-auto whitespace-pre-wrap">curl -X POST \'' + esc(alias) + '?action=validate_license\' \\\n  -H \'Content-Type: application/x-www-form-urlencoded\' \\\n  --data-binary @apk_post_body.txt</pre>'
+    + '<p class="text-[10px] text-slate-400 mt-2">`apk_post_body.txt` = exactly wahi body jo APK ne post ki. HWID us body ke JSON ke andar hota hai — panel use hi validate/bind karta hai, koi hardcoded HWID nahi.</p>'
     + '<p class="text-[11px] text-slate-500 mt-2"><b>panel_code:</b> URL path me hai — <code class="font-mono">/loader-rep/' + esc(panel) + '/api.php</code>. Doosre tenant ke liye uska code daalo; keys usi tenant se aayengi.</p>'
     + '<p class="text-[11px] text-slate-500 mt-2"><b>get_update:</b> exact original field set capture nahi hua tha, isliye yeh tenant ke loader_config + mod_versions URL se map kiya gaya hai (status/message/package_name/version/game_status/download_url).</p></div>'
     + '</div>'
 
     + '<script>'
+    + 'function lrMode(){var m=document.getElementById("lr-mode").value;document.getElementById("lr-body-wrap").classList.toggle("hidden",m!=="body");document.getElementById("lr-fields-wrap").classList.toggle("hidden",m!=="fields");}'
     + 'async function lrRun(){'
     + 'var a=document.getElementById("lr-req-raw"),b=document.getElementById("lr-req-plain"),c=document.getElementById("lr-res-raw"),d=document.getElementById("lr-res-plain");'
-    + 'a.textContent="••• encrypting •••";b.textContent="•••";c.textContent="•••";d.textContent="•••";'
+    + 'var mode=document.getElementById("lr-mode").value;'
+    + 'var real=document.getElementById("lr-real").checked;'
+    + 'var o={panel_code:document.getElementById("lr-panel").value,action:document.getElementById("lr-action").value,dry_run:!real};'
+    + 'if(mode==="body"){o.body=document.getElementById("lr-body").value.trim();if(!o.body){d.textContent="PASTE APK POST BODY pehle.";return;}}'
+    + 'else{o.key=document.getElementById("lr-key").value;o.hwid=document.getElementById("lr-hwid").value;o.timezone=document.getElementById("lr-tz").value;}'
+    + 'if(real&&!confirm("Real mode: device bind + uses++ hoga. Continue?"))return;'
+    + 'a.textContent="••• request •••";b.textContent="•••";c.textContent="•••";d.textContent="•••";'
     + 'try{'
-    + 'var r=await fetch("/api/loader-rep-test",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({panel_code:document.getElementById("lr-panel").value,key:document.getElementById("lr-key").value,hwid:document.getElementById("lr-hwid").value,timezone:document.getElementById("lr-tz").value})});'
+    + 'var r=await fetch("/api/loader-rep-test",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(o)});'
     + 'var j=await r.json();'
     + 'if(!j.ok){a.textContent="—";b.textContent="—";c.textContent="—";d.textContent="ERROR: "+(j.error||("HTTP "+r.status));return;}'
     + 'a.textContent=j.request.envelope;b.textContent=j.request.plain;'
