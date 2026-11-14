@@ -13,6 +13,7 @@ import { handleBgmiLog } from './bgmi-log.js';
 import { handleUnlockProxy } from './unlock-proxy.js';
 import { handleMundo } from './mundo.js';
 import { handleBcore } from './bcore.js';
+import { handleLoaderRep, loaderRepSecret } from './loader-rep.js';
 import { ensureDB } from './db.js';
 import { html, redir, parseCookies, formParams, tsMs, deny } from './http.js';
 import { getSession, sessCookie, clearCookie } from './session.js';
@@ -41,6 +42,7 @@ import { serverPage as sdkServerPage, hashPage as sdkHashPage } from '../fronten
 import { panelDashboard, panelGenerate, panelKeyList, KEY_PRICING, KEY_DURATIONS, arcxRand } from '../frontend/panel/dash.js';
 import { usersPage, adminsPage, permissionsPage, referralPage } from '../frontend/panel/users.js';
 import { serverPage, settingsPage, aesPage, apiTestPage, createPanelPage, loaderPage, MOD_FIELDS } from '../frontend/panel/system.js';
+import { loaderRepPage } from '../frontend/panel/loader-rep.js';
 import { opencodeLoginPage, opencodeAdminLayout, opencodeOverview, opencodeUsersPage, opencodeNoticesPage, opencodeSettingsPage } from '../frontend/opencode-admin.js';
 
 
@@ -104,6 +106,13 @@ export default {
       return new Response(JSON.stringify({ ok: true, build: '2026-11-11-bgmihook3', panel: mainPanel }), { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
     }
     if (path.startsWith('/encrypt/')) return handleEncrypt(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
+    // Loader-rep: Ztrax-compatible encrypted endpoint (b64(key)+++b64(ct)).
+    // /ZTRAXPANEL/api.php is the drop-in alias for a URL-patched loader APK;
+    // /loader-rep/<PANEL_CODE>/api.php is the tenant-scoped form.
+    if (path === '/ZTRAXPANEL/api.php' || /^\/loader-rep(?:\/[^/]+)?\/api\.php$/.test(path)) {
+      const m = path.match(/^\/loader-rep\/([^/]+)\/api\.php$/);
+      return handleLoaderRep(request, db, env, m ? decodeURIComponent(m[1]) : mainPanel);
+    }
     if (path.startsWith('/sdk/mundo/') || path === '/sdk/mundo') return handleMundo(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel), env);
     if (path.startsWith('/sdk/bcore/') || path === '/sdk/bcore') return handleBcore(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel), env);
     if (path.startsWith('/api/opencode/')) return handleOpenCodeApi(request, db, env);
@@ -670,6 +679,16 @@ export default {
       if (needOA()) return deny();
       const base = 'https://' + url.host;
       return P('api-test', 'Live API Tester', apiTestPage({ connect: base + '/connect/' + myPanel, encrypt: base + '/encrypt/' + myPanel }));
+    }
+
+    // ---------- LOADER-REP ----------
+    if (path === '/loader-rep') {
+      if (needOA()) return deny();
+      return P('loader-rep', 'Loader-rep', loaderRepPage({
+        base: 'https://' + url.host,
+        panelCode: myPanel,
+        appSecret: loaderRepSecret(env),
+      }));
     }
 
     // ---------- SERVER ----------

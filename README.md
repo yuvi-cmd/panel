@@ -8,6 +8,8 @@
 - `/dashboard` (role stats), `/generate` (pricing + balance + bulk + server type), `/keys` (reset/edit/extend/bulk)
 - `/users`, `/admins`, `/permissions`, `/referral` (OWNER/ADMIN rules PHP jaise)
 - `/server` (maintenance + mod config), `/settings` (password + branding + API URLs), `/aes` (AES rotate + activation keys), `/api-test`, `/loader-manager`, `/create-panel` (id==1)
+- `/loader-rep` — Ztrax-compatible encrypted license endpoint ke docs + admin dry-run
+  tester (endpoint, wire format, cipher logic, error table, decrypted response)
 - `/sdk/*` — MUNDO + BCORE dashboard/generate/keys/server/hash (sirf main OWNER id==1)
 - `/opencode` — standalone OpenCode Android control plane with its **own login**
   (`/opencode/login`), global APK ON/OFF, Gmail accounts, device lock, notices and
@@ -20,6 +22,10 @@
 - `POST /nexon/:panel` — NexonCheat (com.bgmi) encrypted login; same key/device
   lifecycle as `/connect`, response is AES-256-GCM + HMAC envelope
 - `POST /encrypt/:panel` — same + AES-256-CBC payload (panel active + AES configured hona chahiye)
+- `POST /loader-rep/:panel/api.php?action=validate_license|get_update` — Ztrax-compatible
+  encrypted license API: body `b64(32-byte key)+++b64(ciphertext)`, response same key
+  echo + same cipher. Keys/HWID devices `api_keys`/`key_devices` se aate hain.
+  Drop-in alias: `POST /ZTRAXPANEL/api.php?action=...`
 - `POST /sdk/mundo/:panel` — AES-128-ECB encrypted
 - `POST /sdk/bcore/:panel` — RC4+Base64 encrypted
 

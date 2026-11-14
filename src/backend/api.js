@@ -511,6 +511,40 @@ export async function handleApi(request, db, env) {
       encryptErr, decryptErr });
   }
 
+  // ---- loader-rep live tester (admin, dry-run) ----------------------------------------------
+  // Builds the exact Ztrax envelope for the given panel key/HWID, runs it
+  // through the real validation logic without binding the device, then returns
+  // both wire envelopes + decrypted JSON for the Loader-rep page.
+  if (path === '/api/loader-rep-test' && method === 'POST') {
+    if (!isOA) return J({ ok: false, error: 'Forbidden.' }, 403);
+    const p = await readBody(request);
+    const keyValue = cleanStr(p.key, 64);
+    if (!keyValue) return J({ ok: false, error: 'key required.' }, 400);
+    let hwid = String(p.hwid || '').trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(hwid)) {
+      const rb = crypto.getRandomValues(new Uint8Array(32));
+      hwid = [...rb].map((b) => b.toString(16).padStart(2, '0')).join('');
+    }
+    const panel = cleanPanelCode(p.panel_code) || myPanel;
+    const timezone = String(p.timezone || '').trim().slice(0, 64);
+    const { buildEnvelope, loaderRepSecret, processLoaderRep } = await import('./loader-rep.js');
+    const wireKey = crypto.getRandomValues(new Uint8Array(32));
+    const payload = { app_secret: loaderRepSecret(env), hwid, key: keyValue, timezone };
+    const result = await processLoaderRep(db, env, panel, 'validate_license', payload, { dryRun: true });
+    return J({
+      ok: true,
+      panel,
+      hwid,
+      request: { plain: JSON.stringify(payload), envelope: buildEnvelope(payload, wireKey) },
+      http: result.status,
+      response: {
+        envelope: buildEnvelope(result.body, wireKey),
+        plain: JSON.stringify(result.body),
+        json: result.body,
+      },
+    });
+  }
+
   // ---- panels (tenant mgmt; super-admin / professor only) -----------------------------------
   if (path === '/api/panels' && method === 'GET') {
     if (!(myId === 1 || isProfessor(sess))) return J({ ok: false, error: 'Forbidden.' }, 403);

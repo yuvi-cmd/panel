@@ -1184,13 +1184,95 @@ console.log('apk kill status');
   ok(parsed && parsed.kill === 0 && parsed.force_update === 0 && parsed.ok === 1, 'apk kill: PanelCrypto.e() decodes to kill=0 JSON', text.slice(0, 60));
 }
 
+// ---------- 7k. Loader-rep: Ztrax-compatible encrypted license endpoint ----------
+console.log('loader-rep');
+{
+  const { buildEnvelope, openEnvelope } = await import('../src/backend/loader-rep.js');
+  const SECRET = 'trexjaat@StrongSecretKey#9876543210XYZabcdef';
+  const HWID = 'ab'.repeat(32);
+  const HWID2 = 'cd'.repeat(32);
+  const HWID3 = 'ef'.repeat(32);
+  const LKEY = 'LR-TEST-KEY-1';
+  const LKEY_DRY = 'LR-TEST-KEY-2';
+  await env.DB.prepare("INSERT INTO api_keys (key_value,duration,device_limit,panel_code,created_by,server_type) VALUES (?,?,?,?,?,?)").bind(LKEY, '30D', 2, 'YUVI_001', 1, 'PRIVATE').run();
+  await env.DB.prepare("INSERT INTO api_keys (key_value,duration,device_limit,panel_code,created_by,server_type) VALUES (?,?,?,?,?,?)").bind(LKEY_DRY, '30D', 2, 'YUVI_001', 1, 'PRIVATE').run();
+
+  const send = async (pathAndQuery, payload) => {
+    const wireKey = crypto.getRandomValues(new Uint8Array(32));
+    const res = await app.fetch(new Request('https://panel.test' + pathAndQuery, { method: 'POST', body: buildEnvelope(payload, wireKey) }), env, {});
+    const text = await res.text();
+    return { res, wireKey, opened: openEnvelope(text), text };
+  };
+  const keyRow = (kv) => env.DB.prepare('SELECT * FROM api_keys WHERE key_value=?').bind(kv).first();
+  const devCount = (kv) => env.DB.prepare('SELECT COUNT(*) c FROM key_devices WHERE key_id=(SELECT id FROM api_keys WHERE key_value=?)').bind(kv).first();
+
+  // 1) first bind: exact success envelope + DB writes
+  let r = await send('/loader-rep/YUVI_001/api.php?action=validate_license', { app_secret: SECRET, hwid: HWID, key: LKEY, timezone: 'Asia/Kolkata' });
+  const b1 = r.opened && r.opened.payload;
+  ok(r.res.status === 200 && (r.res.headers.get('Content-Type') || '').startsWith('text/plain'), 'loader-rep: encrypted 200 text/plain', r.text.slice(0, 80));
+  ok(r.opened && Buffer.from(r.opened.key).equals(Buffer.from(r.wireKey)), 'loader-rep: response echoes request key');
+  ok(b1 && b1.status === 'success' && b1.message === 'License valid and HWID bound', 'loader-rep: first bind message', JSON.stringify(b1));
+  ok(b1 && b1.device_limit === 2 && b1.devices_used === 1 && b1.package_name === 'com.pubg.imobile', 'loader-rep: device fields + package');
+  ok(b1 && / IST$/.test(b1.expiry) && b1.timezone === 'Asia/Kolkata' && /despite the 'IST' label/.test(b1.timezone_note), 'loader-rep: IST expiry + timezone note');
+  let kr = await keyRow(LKEY);
+  ok(kr && kr.expires_at && (kr.uses | 0) === 1, 'loader-rep: pending expiry materialised + uses=1 on bind');
+  ok(((await devCount(LKEY)).c | 0) === 1, 'loader-rep: HWID bound in key_devices');
+
+  // 2) same HWID -> plain "License valid", no extra uses
+  r = await send('/loader-rep/YUVI_001/api.php?action=validate_license', { app_secret: SECRET, hwid: HWID, key: LKEY, timezone: 'Asia/Kolkata' });
+  ok(r.opened && r.opened.payload.message === 'License valid' && r.opened.payload.devices_used === 1, 'loader-rep: second call "License valid"');
+  ok(((await keyRow(LKEY)).uses | 0) === 1, 'loader-rep: repeat call does not bump uses');
+
+  // 3) second HWID binds; a third hits device_limit=2
+  r = await send('/loader-rep/YUVI_001/api.php?action=validate_license', { app_secret: SECRET, hwid: HWID2, key: LKEY, timezone: 'Asia/Kolkata' });
+  ok(r.opened && r.opened.payload.message === 'License valid and HWID bound' && r.opened.payload.devices_used === 2, 'loader-rep: second device binds');
+  ok(((await keyRow(LKEY)).uses | 0) === 2, 'loader-rep: second bind bumps uses');
+  r = await send('/loader-rep/YUVI_001/api.php?action=validate_license', { app_secret: SECRET, hwid: HWID3, key: LKEY, timezone: 'Asia/Kolkata' });
+  ok(r.res.status === 200 && r.opened && r.opened.payload.message === 'Device limit reached', 'loader-rep: device limit reached');
+
+  // 4) error paths keep the same envelope + messages
+  r = await send('/loader-rep/YUVI_001/api.php?action=validate_license', { app_secret: 'bad', hwid: HWID, key: LKEY });
+  ok(r.res.status === 401 && r.opened && r.opened.payload.message === 'all old app closed', 'loader-rep: wrong app_secret -> 401');
+  r = await send('/loader-rep/YUVI_001/api.php?action=validate_license', { app_secret: SECRET, hwid: 'ABC', key: LKEY });
+  ok(r.res.status === 400 && r.opened && r.opened.payload.message === 'Invalid HWID format', 'loader-rep: bad hwid -> 400');
+  r = await send('/loader-rep/YUVI_001/api.php?action=validate_license', { app_secret: SECRET, hwid: HWID, key: 'NO-SUCH-KEY' });
+  ok(r.res.status === 200 && r.opened && r.opened.payload.message === 'Invalid license key', 'loader-rep: unknown key -> Invalid license key');
+
+  // 5) drop-in alias + protocol-level errors
+  r = await send('/ZTRAXPANEL/api.php?action=validate_license', { app_secret: SECRET, hwid: HWID, key: LKEY, timezone: 'Asia/Kolkata' });
+  ok(r.res.status === 200 && r.opened && r.opened.payload.status === 'success', 'loader-rep: /ZTRAXPANEL/api.php alias works');
+  let res = await app.fetch(new Request('https://panel.test/loader-rep/YUVI_001/api.php', { method: 'POST', body: 'x' }), env, {});
+  ok(res.status === 400 && (await res.text()) === '{"success":false,"status":"error","message":"Invalid API request."}', 'loader-rep: missing action -> exact plain error');
+  res = await app.fetch(new Request('https://panel.test/loader-rep/YUVI_001/api.php?action=validate_license', { method: 'GET' }), env, {});
+  ok(res.status === 400, 'loader-rep: GET -> 400');
+  res = await app.fetch(new Request('https://panel.test/loader-rep/YUVI_001/api.php?action=validate_license', { method: 'POST', body: 'not-an-envelope' }), env, {});
+  ok(res.status === 400 && (await res.text()) === '{"success":false,"status":"error","message":"Invalid request body"}', 'loader-rep: malformed envelope -> 400');
+
+  // 6) admin dry-run tester: same wire format, zero DB writes
+  const t = await call(env, 'POST', '/api/loader-rep-test', { cookie: ownerCookie, json: { panel_code: 'YUVI_001', key: LKEY_DRY, hwid: HWID2, timezone: 'Asia/Kolkata' } });
+  const tb = await t.json();
+  ok(t.status === 200 && tb.ok === true && tb.http === 200 && tb.response.json.status === 'success', 'loader-rep: /api/loader-rep-test dry-run ok', JSON.stringify(tb).slice(0, 160));
+  const testReq = openEnvelope(tb.request.envelope);
+  const testRes = testReq && openEnvelope(tb.response.envelope);
+  ok(testReq && testRes && Buffer.from(testRes.key).equals(Buffer.from(testReq.key)) && testRes.payload.message === tb.response.json.message, 'loader-rep: tester envelope echo decrypts to same JSON');
+  ok(((await keyRow(LKEY_DRY)).uses | 0) === 0 && ((await devCount(LKEY_DRY)).c | 0) === 0, 'loader-rep: dry-run binds nothing');
+
+  // 7) page is admin-gated and documents the endpoint + cipher
+  const page = await call(env, 'GET', '/loader-rep', { cookie: ownerCookie });
+  const pageText = await page.text();
+  ok(page.status === 200 && pageText.includes('/loader-rep/YUVI_001/api.php?action=validate_license') && pageText.includes('/api/loader-rep-test'), 'loader-rep: page renders endpoints + tester');
+  ok(pageText.includes('U[ ct[i] ]') && pageText.includes('0, 214, 14, 225'), 'loader-rep: page shows cipher logic + U table');
+  const anon = await call(env, 'GET', '/loader-rep');
+  ok(anon.status === 302 && (anon.headers.get('Location') || '') === '/login', 'loader-rep: page redirects anonymous to /login');
+}
+
 // ---------- 8. inline-script audit: every rendered page's scripts must parse ----------
 // A single broken <script> kills the whole tag (sidebar toggle, copy buttons,
 // filters). node --check cannot see inside template literals, so audit the
 // actual rendered HTML.
 console.log('inline script audit');
 {
-  const htmlPaths = ['/login', '/register', '/reset-device', '/join-panel', '/dashboard', '/generate', '/keys', '/users', '/admins', '/permissions', '/referral', '/aes', '/api-test', '/server', '/settings', '/loader-manager', '/create-panel', '/sdk', '/sdk/generate', '/sdk/keys', '/sdk/server', '/sdk/hash', '/opencode', '/opencode/users', '/opencode/notices', '/opencode/settings', '/opencode/login'];
+  const htmlPaths = ['/login', '/register', '/reset-device', '/join-panel', '/dashboard', '/generate', '/keys', '/users', '/admins', '/permissions', '/referral', '/aes', '/api-test', '/loader-rep', '/server', '/settings', '/loader-manager', '/create-panel', '/sdk', '/sdk/generate', '/sdk/keys', '/sdk/server', '/sdk/hash', '/opencode', '/opencode/users', '/opencode/notices', '/opencode/settings', '/opencode/login'];
   let checked = 0;
   for (const p of htmlPaths) {
     const r = await call(env, 'GET', p, { cookie: ownerCookie });
