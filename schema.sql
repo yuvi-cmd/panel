@@ -296,6 +296,7 @@ CREATE TABLE IF NOT EXISTS opencode_admin_sessions (
   expires_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_opencode_admin_exp ON opencode_admin_sessions(expires_at);
+CREATE TABLE IF NOT EXISTS loader_rep_debug (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', method TEXT, path TEXT, query TEXT, action_raw TEXT, action_final TEXT, content_type TEXT, user_agent TEXT, ip TEXT, body_len INTEGER NOT NULL DEFAULT 0, body_prefix TEXT, plain TEXT, http_status INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 
 INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('global_enabled','1');
 INSERT OR IGNORE INTO opencode_settings (key,value) VALUES ('maintenance_message','');

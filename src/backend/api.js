@@ -29,7 +29,7 @@ import {
 const KEY_PRICING = { '2H': 10, '1D': 80, '3D': 150, '7D': 250, '15D': 350, '30D': 500, '60D': 900 };
 const KEY_DURATIONS = ['2H', '1D', '3D', '7D', '15D', '30D', '60D'];
 // Bump on every behaviour-changing release; visible at /api/health.
-const WORKER_VERSION = '1.4.0';
+const WORKER_VERSION = '1.4.1';
 
 function arcxRand(len) {
   const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -568,6 +568,14 @@ export async function handleApi(request, db, env) {
         json: result.body,
       },
     });
+  }
+
+  // ---- loader-rep request debug (admin): what did the APK actually send? --------------------
+  if (path === '/api/loader-rep-debug' && method === 'GET') {
+    if (!isOA) return J({ ok: false, error: 'Forbidden.' }, 403);
+    const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') || '30', 10) || 30));
+    const items = (await db.prepare('SELECT * FROM loader_rep_debug ORDER BY id DESC LIMIT ?').bind(limit).all().catch(() => ({ results: [] }))).results || [];
+    return J({ ok: true, items });
   }
 
   // ---- panels (tenant mgmt; super-admin / professor only) -----------------------------------

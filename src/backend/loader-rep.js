@@ -265,35 +265,95 @@ function plain(obj, status, cors) {
   });
 }
 
+// Ztrax's native URL builder has a hardcoded 51-byte base URL and appends
+// "?action=" itself. Accept the query aliases anyway, plus an action field in
+// the (decrypted) body, so a wrong/absent query can never break login.
+export function normalizeLoaderAction(raw) {
+  const v = String(raw || '').trim();
+  if (!v) return '';
+  const k = v.toLowerCase().replace(/[\s_-]+/g, '');
+  if (k === 'validatelicense' || k === 'validate' || k === 'login') return 'validate_license';
+  if (k === 'getupdate' || k === 'getupdates' || k === 'update' || k === 'checkupdate') return 'get_update';
+  return '';
+}
+
+async function logLoaderRepDebug(db, row) {
+  try {
+    await db.prepare(
+      'INSERT INTO loader_rep_debug (panel_code,method,path,query,action_raw,action_final,content_type,user_agent,ip,body_len,body_prefix,plain,http_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
+    ).bind(
+      row.panel, row.method, row.path, row.query, row.actionRaw, row.actionFinal,
+      row.contentType, row.userAgent, row.ip, row.bodyLen, row.bodyPrefix, row.plain, row.status
+    ).run();
+    await db.prepare('DELETE FROM loader_rep_debug WHERE id <= (SELECT MAX(id) FROM loader_rep_debug) - 200').run().catch(() => {});
+  } catch {
+    // Debug logging must never break the loader endpoint.
+  }
+}
+
 export async function handleLoaderRep(request, db, env, panelRaw) {
   const cors = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Action',
   };
-  if (request.method.toUpperCase() === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
-  if (request.method.toUpperCase() !== 'POST') {
-    return plain({ success: false, status: 'error', message: 'Invalid API request.' }, 400, cors);
-  }
-
-  const url = new URL(request.url);
-  const action = url.searchParams.get('action') || '';
-  if (action !== 'validate_license' && action !== 'get_update') {
-    // Exact body the original panel returns for a missing/unknown action.
-    return plain({ success: false, status: 'error', message: 'Invalid API request.' }, 400, cors);
-  }
-
   const panel = cleanPanelCode(panelRaw) || cleanPanelCode(env && env.PANEL_CODE) || 'YUVI_001';
+  const requestUrl = new URL(request.url);
+  const method = request.method.toUpperCase();
+  const meta = {
+    panel,
+    method,
+    path: requestUrl.pathname,
+    query: requestUrl.search.slice(0, 500),
+    actionRaw: (requestUrl.searchParams.get('action') || '') + '|' + (request.headers.get('X-Action') || ''),
+    contentType: (request.headers.get('Content-Type') || '').slice(0, 120),
+    userAgent: (request.headers.get('User-Agent') || '').slice(0, 200),
+    ip: clientIp(request),
+    bodyLen: 0,
+    bodyPrefix: '',
+    plain: '',
+    actionFinal: '',
+    status: 0,
+  };
+
+  if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+  if (method !== 'POST') {
+    await logLoaderRepDebug(db, meta);
+    return plain({ success: false, status: 'error', message: 'Invalid API request.' }, 400, cors);
+  }
+
   const rl = hitRate('loader-rep:' + panel + ':' + clientIp(request), 240, 60e3);
   if (!rl.allowed) return plain({ success: false, status: 'error', message: 'Too many requests' }, 429, cors);
 
   const raw = await request.text().catch(() => '');
+  meta.bodyLen = raw.length;
+  meta.bodyPrefix = raw.slice(0, 2000);
   const opened = openEnvelope(raw);
+  if (opened) meta.plain = JSON.stringify(opened.payload).slice(0, 4000);
+
+  let action = normalizeLoaderAction(requestUrl.searchParams.get('action'))
+    || normalizeLoaderAction(request.headers.get('X-Action'));
+  if (!action && opened && opened.payload) {
+    const p = opened.payload;
+    action = normalizeLoaderAction(p.action) || normalizeLoaderAction(p.type) || normalizeLoaderAction(p.method);
+    if (!action) {
+      // Action-less legacy clients: infer from the request fields.
+      if (p.hwid !== undefined || p.key !== undefined) action = 'validate_license';
+      else if (p.package_name !== undefined) action = 'get_update';
+    }
+  }
+  meta.actionFinal = action;
+
   if (!opened) {
+    meta.status = 400;
+    await logLoaderRepDebug(db, meta);
     return plain({ success: false, status: 'error', message: 'Invalid request body' }, 400, cors);
   }
 
   const result = await processLoaderRep(db, env, panel, action, opened.payload);
+  meta.status = result.status;
+  await logLoaderRepDebug(db, meta);
+
   const out = buildEnvelope(result.body, opened.key);
   return new Response(out, {
     status: result.status,

@@ -109,7 +109,9 @@ export default {
     // Loader-rep: Ztrax-compatible encrypted endpoint (b64(key)+++b64(ct)).
     // /ZTRAXPANEL/api.php is the drop-in alias for a URL-patched loader APK;
     // /loader-rep/<PANEL_CODE>/api.php is the tenant-scoped form.
-    if (path === '/ZTRAXPANEL/api.php' || /^\/loader-rep(?:\/[^/]+)?\/api\.php$/.test(path)) {
+    // /zz/api.php exists because Ztrax's URL builder hardcodes a 51-char base:
+    // https://panel.imranfarhat255.workers.dev/zz/api.php is exactly 51.
+    if (path === '/ZTRAXPANEL/api.php' || path === '/zz/api.php' || /^\/loader-rep(?:\/[^/]+)?\/api\.php$/.test(path)) {
       const m = path.match(/^\/loader-rep\/([^/]+)\/api\.php$/);
       return handleLoaderRep(request, db, env, m ? decodeURIComponent(m[1]) : mainPanel);
     }
