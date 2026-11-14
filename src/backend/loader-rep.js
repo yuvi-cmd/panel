@@ -249,36 +249,39 @@ export async function processLoaderRep(db, env, panelRaw, action, payload, opts 
     if (!pkg) {
       return { status: 400, body: { status: 'error', message: 'Invalid package name' } };
     }
-    // Ztrax's UpdateManager.checkForUpdates() parses this JSON itself:
-    //   root.library = { version, hash, url, file_size? }  -> .so library update
-    //   root.apk     = { version, hash, url, file_size? }  -> self APK update
-    // Missing/flat shapes throw JSONException inside the app and the update
-    // check dies silently, so both objects must always be present.
+    // The original panel only knows ONE package. For every other package it
+    // returns this exact error and UpdateManager.checkForUpdates() simply
+    // calls onAllUpdatesComplete(). Returning success for every package made
+    // the loader download the PUBG .so once per package (saved as
+    // libsystem_patch.so), wasting 10 MB per app on every fresh install.
+    if (pkg !== 'com.pubg.imobile') {
+      return { status: 200, body: { status: 'error', message: 'No update information available' } };
+    }
+
+    // Live original-panel response shape (verified byte-for-byte):
+    // {"status":"success","apk":null,
+    //  "library_auto":{version,url,file_size,hash,game_status},
+    //  "library_manual":null,
+    //  "library":{version,url,file_size,hash,game_status}}
     //
-    // library: served straight from the original panel's live-verified .so
-    // (URL/hash/size observed on the wire; override via env vars). The app
-    // downloads it with a plain GET and verifies sha256 itself.
-    // apk: reports the installed app's own versionName/base.apk sha256 so
-    // checkForUpdates() takes the "already up to date" path (version equal
-    // short-circuits the hash compare) and never tries to re-download itself.
+    // `apk` MUST be null. checkForUpdates() treats a non-null apk object as a
+    // self-update candidate; sending {"url":""} only happens to be harmless
+    // because the version matches the installed 1.0.
+    //
+    // library / library_auto: served straight from the original panel's
+    // live-verified .so (URL/hash/size observed on the wire; override via env
+    // vars). The app downloads it with a plain GET and verifies sha256 itself.
     const libUrl = String((env && env.LOADER_REP_LIB_URL) || LOADER_REP_LIB_URL).trim();
     const libVer = String((env && env.LOADER_REP_LIB_VERSION) || LOADER_REP_LIB_VERSION).trim();
     const libHash = String((env && env.LOADER_REP_LIB_SHA256) || LOADER_REP_LIB_SHA256).trim().toLowerCase();
     const libSize = parseInt((env && env.LOADER_REP_LIB_SIZE) || LOADER_REP_LIB_SIZE, 10) || 0;
-    const apkVer = String((env && env.LOADER_REP_APK_VERSION) || LOADER_REP_APK_VERSION).trim();
-    const apkHash = String((env && env.LOADER_REP_APK_SHA256) || LOADER_REP_APK_SHA256).trim().toLowerCase();
+    const lib = { version: libVer, url: libUrl, file_size: libSize, hash: libHash, game_status: 'Safe' };
     const body = {
       status: 'success',
-      success: true,
-      message: 'Update available',
-      package_name: pkg,
-      version: libVer,
-      version_name: 'libsystem_patch',
-      version_tag: libVer,
-      game_status: 'Safe',
-      download_url: libUrl,
-      library: { version: libVer, hash: libHash, url: libUrl, file_size: libSize },
-      apk: { version: apkVer, hash: apkHash, url: '', file_size: 0 },
+      apk: null,
+      library_auto: lib,
+      library_manual: null,
+      library: lib,
     };
     return { status: 200, body };
   }
