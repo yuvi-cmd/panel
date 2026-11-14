@@ -17,6 +17,20 @@ import { cleanPanelCode, hitRate, clientIp } from './security.js';
 export const LOADER_REP_DEFAULT_SECRET = 'trexjaat@StrongSecretKey#9876543210XYZabcdef';
 export const LOADER_REP_DEFAULT_PACKAGE = 'com.pubg.imobile';
 
+// Library update served by get_update — values observed live from the original
+// panel's own get_update download (see ztrax reverse-engineering notes). The
+// app does a plain GET on `url` and sha256-verifies the result, so hash/size
+// must describe that exact file. Overridable per deployment via env vars.
+export const LOADER_REP_LIB_URL =
+  'https://battlegrounds-hub.online/ZTRAXPANEL/Uploads/library/com.pubg.imobile/auto/1794240308_089ab1b8f88656ba.so';
+export const LOADER_REP_LIB_VERSION = '8.1';
+export const LOADER_REP_LIB_SHA256 = '5b3fec7242c641302787d00cf00e73ee38c339c36ab6aef4d39142932cba4f31';
+export const LOADER_REP_LIB_SIZE = '10512328';
+// Self-update ("apk" object): the installed loader reports versionName 1.0 and
+// this base.apk sha256, so checkForUpdates() sees "already up to date".
+export const LOADER_REP_APK_VERSION = '1.0';
+export const LOADER_REP_APK_SHA256 = 'c0e7057826d5d1e8071d4cb279e38a49fbdf1468dd84d3b49134b1e0a1bcd47a';
+
 // Recovered cipher tables (see ztrax-conversations.md / ztrax-analyt.md).
 const U = [
   0, 214, 14, 225, 152, 25, 253, 154, 123, 132, 124, 51, 244, 104, 97, 106,
@@ -235,25 +249,38 @@ export async function processLoaderRep(db, env, panelRaw, action, payload, opts 
     if (!pkg) {
       return { status: 400, body: { status: 'error', message: 'Invalid package name' } };
     }
-    // Panel-mapped equivalent (the original get_update field set was not
-    // captured byte-for-byte). Uses this tenant's loader config + first mod
-    // version URL.
-    const cfg = await db.prepare('SELECT version FROM loader_config WHERE panel_code=?').bind(panel).first().catch(() => null);
-    const ver = await db.prepare('SELECT name,tag,url FROM mod_versions WHERE panel_code=? ORDER BY sort ASC, id ASC LIMIT 1').bind(panel).first().catch(() => null);
-    return {
-      status: 200,
-      body: {
-        status: 'success',
-        success: true,
-        message: 'Update available',
-        package_name: pkg,
-        version: String((cfg && cfg.version) || '1.0'),
-        version_name: ver ? String(ver.name || '') : '',
-        version_tag: ver ? String(ver.tag || '') : '',
-        game_status: 'Safe',
-        download_url: ver ? String(ver.url || '') : '',
-      },
+    // Ztrax's UpdateManager.checkForUpdates() parses this JSON itself:
+    //   root.library = { version, hash, url, file_size? }  -> .so library update
+    //   root.apk     = { version, hash, url, file_size? }  -> self APK update
+    // Missing/flat shapes throw JSONException inside the app and the update
+    // check dies silently, so both objects must always be present.
+    //
+    // library: served straight from the original panel's live-verified .so
+    // (URL/hash/size observed on the wire; override via env vars). The app
+    // downloads it with a plain GET and verifies sha256 itself.
+    // apk: reports the installed app's own versionName/base.apk sha256 so
+    // checkForUpdates() takes the "already up to date" path (version equal
+    // short-circuits the hash compare) and never tries to re-download itself.
+    const libUrl = String((env && env.LOADER_REP_LIB_URL) || LOADER_REP_LIB_URL).trim();
+    const libVer = String((env && env.LOADER_REP_LIB_VERSION) || LOADER_REP_LIB_VERSION).trim();
+    const libHash = String((env && env.LOADER_REP_LIB_SHA256) || LOADER_REP_LIB_SHA256).trim().toLowerCase();
+    const libSize = parseInt((env && env.LOADER_REP_LIB_SIZE) || LOADER_REP_LIB_SIZE, 10) || 0;
+    const apkVer = String((env && env.LOADER_REP_APK_VERSION) || LOADER_REP_APK_VERSION).trim();
+    const apkHash = String((env && env.LOADER_REP_APK_SHA256) || LOADER_REP_APK_SHA256).trim().toLowerCase();
+    const body = {
+      status: 'success',
+      success: true,
+      message: 'Update available',
+      package_name: pkg,
+      version: libVer,
+      version_name: 'libsystem_patch',
+      version_tag: libVer,
+      game_status: 'Safe',
+      download_url: libUrl,
+      library: { version: libVer, hash: libHash, url: libUrl, file_size: libSize },
+      apk: { version: apkVer, hash: apkHash, url: '', file_size: 0 },
     };
+    return { status: 200, body };
   }
 
   return { status: 400, body: { success: false, status: 'error', message: 'Invalid API request.' } };

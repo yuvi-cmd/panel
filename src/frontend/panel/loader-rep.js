@@ -119,7 +119,7 @@ export function loaderRepPage(o) {
     + '<pre class="bg-slate-900 text-emerald-100 text-[10px] rounded-2xl p-3 overflow-x-auto whitespace-pre-wrap">curl -X POST \'' + esc(alias) + '?action=validate_license\' \\\n  -H \'Content-Type: application/x-www-form-urlencoded\' \\\n  --data-binary @apk_post_body.txt</pre>'
     + '<p class="text-[10px] text-slate-400 mt-2">`apk_post_body.txt` = exactly wahi body jo APK ne post ki. HWID us body ke JSON ke andar hota hai — panel use hi validate/bind karta hai, koi hardcoded HWID nahi.</p>'
     + '<p class="text-[11px] text-slate-500 mt-2"><b>panel_code:</b> URL path me hai — <code class="font-mono">/loader-rep/' + esc(panel) + '/api.php</code>. Doosre tenant ke liye uska code daalo; keys usi tenant se aayengi.</p>'
-    + '<p class="text-[11px] text-slate-500 mt-2"><b>get_update:</b> exact original field set capture nahi hua tha, isliye yeh tenant ke loader_config + mod_versions URL se map kiya gaya hai (status/message/package_name/version/game_status/download_url).</p></div>'
+    + '<p class="text-[11px] text-slate-500 mt-2"><b>get_update:</b> Ztrax\'s UpdateManager khud is JSON ko parse karta hai aur <code>library</code> + <code>apk</code> dono nested objects maangta hai (library: version/hash/url/file_size → .so download + sha256 verify; apk: installed app ka apna version/hash → "already up to date"). Library fields original panel ke live-verified .so se aate hain (env: LOADER_REP_LIB_URL / _VERSION / _SHA256 / _SIZE, apk: LOADER_REP_APK_VERSION / _SHA256). Flat fields backward-compat ke liye bhi bheje jaate hain.</p></div>'
     + '</div>'
 
     + '<script>'
