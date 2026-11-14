@@ -122,6 +122,18 @@ export function loaderRepPage(o) {
     + '<p class="text-[11px] text-slate-500 mt-2"><b>get_update:</b> original panel ka exact shape: <code>{"status":"success","apk":null,"library_auto":{...},"library_manual":null,"library":{...}}</code>. Sirf <code>com.pubg.imobile</code> ke liye success; baaki packages par <code>{"status":"error","message":"No update information available"}</code> (bilkul original ki tarah). <code>library</code>/<code>library_auto</code>: version/hash/url/file_size → app .so download + sha256 verify karta hai (env: LOADER_REP_LIB_URL / _VERSION / _SHA256 / _SIZE).</p></div>'
     + '</div>'
 
+    + '<div class="glass-card p-5 md:p-6 relative overflow-hidden mb-4" style="border-left:4px solid #f59e0b"><div class="absolute top-0 left-0 right-0 h-1 avatar-premium"></div>'
+    + '<div class="flex items-center justify-between mb-1"><h3 class="font-black"><i class="bi bi-activity mr-1"></i>Recent POSTs <span class="text-[10px] font-bold text-slate-400">panel pe aaye validate/update posts · success + error</span></h3>'
+    + '<button type="button" onclick="lrLogs()" class="clay-card px-3 py-1.5 rounded-xl text-[10px] font-extrabold text-slate-600 uppercase">Refresh</button></div>'
+    + '<p class="text-[11px] text-slate-500 mb-3">Har POST ka time, action, HTTP status (green = success, amber/red = error), IP aur decrypted plain body (pehle 160 chars). Last 100 entries (D1: loader_rep_debug).</p>'
+    + '<div class="overflow-x-auto"><table style="' + tableStyle + '"><thead><tr>'
+    + '<th class="text-left text-[9px] font-extrabold text-slate-400 uppercase py-1 pr-2">Time</th>'
+    + '<th class="text-left text-[9px] font-extrabold text-slate-400 uppercase py-1 pr-2">Action</th>'
+    + '<th class="text-left text-[9px] font-extrabold text-slate-400 uppercase py-1 pr-2">HTTP</th>'
+    + '<th class="text-left text-[9px] font-extrabold text-slate-400 uppercase py-1 pr-2">IP</th>'
+    + '<th class="text-left text-[9px] font-extrabold text-slate-400 uppercase py-1 pl-2">Body (plain)</th>'
+    + '</tr></thead><tbody id="lr-logs-body"><tr><td colspan="5" class="py-2 text-[11px] text-slate-400">Loading…</td></tr></tbody></table></div></div>'
+
     + '<script>'
     + 'function lrMode(){var m=document.getElementById("lr-mode").value;document.getElementById("lr-body-wrap").classList.toggle("hidden",m!=="body");document.getElementById("lr-fields-wrap").classList.toggle("hidden",m!=="fields");}'
     + 'async function lrRun(){'
@@ -142,6 +154,8 @@ export function loaderRepPage(o) {
     + 'd.textContent=JSON.stringify(j.response.json,null,2);'
     + '}catch(e){d.textContent="ERR: "+e;}'
     + '}'
+    + 'async function lrLogs(){var el=document.getElementById("lr-logs-body");el.textContent="Loading…";try{var r=await fetch("/api/loader-rep-logs",{headers:{"Accept":"application/json"}});var j=await r.json();el.textContent="";if(!j.ok){el.textContent=j.error||("HTTP "+r.status);return;}if(!j.rows.length){el.textContent="Abhi koi POST nahi aaya.";return;}j.rows.forEach(function(x){var tr=document.createElement("tr");var cells=[x.created_at,(x.action_final||x.action_raw||"?"),String(x.http_status|0),(x.ip||""),String(x.plain||"").slice(0,160)];cells.forEach(function(v,ix){var td=document.createElement("td");td.className=ix===4?"py-1.5 pl-2 text-[10px] font-mono text-slate-700 break-all max-w-[280px]":"py-1.5 pr-2 text-[10px] font-mono text-slate-500";if(ix===2){var s=x.http_status|0;var sp=document.createElement("span");sp.className="text-[10px] font-extrabold px-2 py-0.5 rounded-lg "+(s<400?"bg-emerald-50 text-emerald-600":s<500?"bg-amber-50 text-amber-600":"bg-red-50 text-red-500");sp.textContent=v;td.appendChild(sp);}else{td.textContent=v;}tr.appendChild(td);});el.appendChild(tr);});}catch(e){el.textContent="fetch failed: "+e;}}'
+    + 'lrLogs();'
     + '</script>';
 }
 

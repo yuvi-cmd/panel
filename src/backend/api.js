@@ -511,6 +511,13 @@ export async function handleApi(request, db, env) {
       encryptErr, decryptErr });
   }
 
+  // ---- loader-rep POST log (admin): recent validate/update posts, success & error ----
+  if (path === '/api/loader-rep-logs' && method === 'GET') {
+    if (!isOA) return J({ ok: false, error: 'Forbidden.' }, 403);
+    const rows = (await db.prepare('SELECT id,panel_code,method,path,query,action_raw,action_final,content_type,user_agent,ip,body_len,plain,http_status,created_at FROM loader_rep_debug ORDER BY id DESC LIMIT 100').all().catch(() => ({ results: [] }))).results || [];
+    return J({ ok: true, rows });
+  }
+
   // ---- loader-rep live tester (admin, dry-run by default) -------------------------------------
   // Two modes, both returning the exact wire envelopes + decrypted JSON:
   //   1. body: replay the exact envelope the APK POSTed to ?action=... (HWID,
