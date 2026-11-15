@@ -677,8 +677,8 @@ console.log('fresh install');
   const r0 = await app.fetch(new Request('https://panel.test/setup'), env3, {});
   ok(r0.status === 200, 'GET /setup renders on empty DB (got ' + r0.status + ')');
   const tables = (await db3.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all()).results.map((r) => r.name).sort();
-  const want = ['activation_keys', 'api_keys', 'bcore_key_bindings', 'bcore_keys', 'key_devices', 'loader_config', 'loader_files', 'mod_loaders', 'mod_maintenance', 'mod_settings', 'mod_tags', 'mod_versions', 'mundo_key_bindings', 'mundo_keys', 'nexon_hits', 'panels', 'referrals', 'sdk_hash_vault', 'sdk_server_status', 'sessions', 'users'];
-  ok(JSON.stringify(tables) === JSON.stringify(want), 'all 21 tables auto-created (' + tables.length + '/21)');
+  const want = ['activation_keys', 'api_keys', 'bcore_key_bindings', 'bcore_keys', 'key_devices', 'loader_config', 'loader_files', 'loader_rep_debug', 'mod_loaders', 'mod_maintenance', 'mod_settings', 'mod_tags', 'mod_versions', 'mundo_key_bindings', 'mundo_keys', 'nexon_hits', 'panels', 'referrals', 'sdk_hash_vault', 'sdk_server_status', 'sessions', 'users'];
+  ok(JSON.stringify(tables) === JSON.stringify(want), 'all 22 tables auto-created (' + tables.length + '/22)');
   const idx = (await db3.prepare("SELECT name FROM sqlite_master WHERE type='index' AND sql IS NOT NULL").all()).results.map((r) => r.name);
   ok(['idx_users_panel', 'idx_api_panel', 'idx_dev_panel', 'idx_sess_user'].every((n) => idx.includes(n)), 'indexes auto-created');
   const fd = new FormData();
@@ -1194,8 +1194,12 @@ console.log('loader-rep');
   const HWID3 = 'ef'.repeat(32);
   const LKEY = 'LR-TEST-KEY-1';
   const LKEY_DRY = 'LR-TEST-KEY-2';
+  const LKEY_EMPTY = 'LR-TEST-KEY-EMPTY-1';
+  const LKEY_EMPTY2 = 'LR-TEST-KEY-EMPTY-2';
   await env.DB.prepare("INSERT INTO api_keys (key_value,duration,device_limit,panel_code,created_by,server_type) VALUES (?,?,?,?,?,?)").bind(LKEY, '30D', 2, 'YUVI_001', 1, 'PRIVATE').run();
   await env.DB.prepare("INSERT INTO api_keys (key_value,duration,device_limit,panel_code,created_by,server_type) VALUES (?,?,?,?,?,?)").bind(LKEY_DRY, '30D', 2, 'YUVI_001', 1, 'PRIVATE').run();
+  await env.DB.prepare("INSERT INTO api_keys (key_value,duration,device_limit,panel_code,created_by,server_type) VALUES (?,?,?,?,?,?)").bind(LKEY_EMPTY, '30D', 1, 'YUVI_001', 1, 'PRIVATE').run();
+  await env.DB.prepare("INSERT INTO api_keys (key_value,duration,device_limit,panel_code,created_by,server_type) VALUES (?,?,?,?,?,?)").bind(LKEY_EMPTY2, '30D', 1, 'YUVI_001', 1, 'PRIVATE').run();
 
   const send = async (pathAndQuery, payload) => {
     const wireKey = crypto.getRandomValues(new Uint8Array(32));
@@ -1205,6 +1209,7 @@ console.log('loader-rep');
   };
   const keyRow = (kv) => env.DB.prepare('SELECT * FROM api_keys WHERE key_value=?').bind(kv).first();
   const devCount = (kv) => env.DB.prepare('SELECT COUNT(*) c FROM key_devices WHERE key_id=(SELECT id FROM api_keys WHERE key_value=?)').bind(kv).first();
+  const devUuid = (kv) => env.DB.prepare('SELECT device_uuid FROM key_devices WHERE key_id=(SELECT id FROM api_keys WHERE key_value=?)').bind(kv).first().then((r) => r && r.device_uuid);
 
   // 1) first bind: exact success envelope + DB writes
   let r = await send('/loader-rep/YUVI_001/api.php?action=validate_license', { app_secret: SECRET, hwid: HWID, key: LKEY, timezone: 'Asia/Kolkata' });
@@ -1230,6 +1235,18 @@ console.log('loader-rep');
   r = await send('/loader-rep/YUVI_001/api.php?action=validate_license', { app_secret: SECRET, hwid: HWID3, key: LKEY, timezone: 'Asia/Kolkata' });
   ok(r.res.status === 200 && r.opened && r.opened.payload.message === 'Device limit reached', 'loader-rep: device limit reached');
 
+  // 3b) legacy FireXLoader sends an empty HWID; bind a stable per-key fallback
+  r = await send('/loader-rep/YUVI_001/api.php?action=validate_license', { app_secret: SECRET, hwid: '', key: LKEY_EMPTY, timezone: 'Asia/Kolkata' });
+  ok(r.res.status === 200 && r.opened && r.opened.payload.status === 'success' && r.opened.payload.message === 'License valid and HWID bound' && r.opened.payload.devices_used === 1, 'loader-rep: empty HWID binds per-key fallback', JSON.stringify(r.opened && r.opened.payload));
+  const fallback1 = await devUuid(LKEY_EMPTY);
+  ok(typeof fallback1 === 'string' && /^[0-9a-f]{64}$/.test(fallback1), 'loader-rep: empty HWID stored as 64-hex fallback', fallback1);
+  r = await send('/loader-rep/YUVI_001/api.php?action=validate_license', { app_secret: SECRET, hwid: '', key: LKEY_EMPTY, timezone: 'Asia/Kolkata' });
+  ok(r.opened && r.opened.payload.message === 'License valid' && r.opened.payload.devices_used === 1, 'loader-rep: empty HWID repeat is stable');
+  ok(((await keyRow(LKEY_EMPTY)).uses | 0) === 1, 'loader-rep: empty HWID repeat does not bump uses');
+  r = await send('/loader-rep/YUVI_001/api.php?action=validate_license', { app_secret: SECRET, hwid: '', key: LKEY_EMPTY2, timezone: 'Asia/Kolkata' });
+  const fallback2 = await devUuid(LKEY_EMPTY2);
+  ok(typeof fallback2 === 'string' && /^[0-9a-f]{64}$/.test(fallback2) && fallback2 !== fallback1, 'loader-rep: empty HWID fallback is per-key', `${fallback1} vs ${fallback2}`);
+
   // 4) error paths keep the same envelope + messages
   r = await send('/loader-rep/YUVI_001/api.php?action=validate_license', { app_secret: 'bad', hwid: HWID, key: LKEY });
   ok(r.res.status === 401 && r.opened && r.opened.payload.message === 'all old app closed', 'loader-rep: wrong app_secret -> 401');
@@ -1241,8 +1258,9 @@ console.log('loader-rep');
   // 5) drop-in alias + protocol-level errors
   r = await send('/ZTRAXPANEL/api.php?action=validate_license', { app_secret: SECRET, hwid: HWID, key: LKEY, timezone: 'Asia/Kolkata' });
   ok(r.res.status === 200 && r.opened && r.opened.payload.status === 'success', 'loader-rep: /ZTRAXPANEL/api.php alias works');
-  let res = await app.fetch(new Request('https://panel.test/loader-rep/YUVI_001/api.php', { method: 'POST', body: 'x' }), env, {});
-  ok(res.status === 400 && (await res.text()) === '{"success":false,"status":"error","message":"Invalid API request."}', 'loader-rep: missing action -> exact plain error');
+  let res = await app.fetch(new Request('https://panel.test/loader-rep/YUVI_001/api.php', { method: 'POST', body: buildEnvelope({ app_secret: SECRET }, crypto.getRandomValues(new Uint8Array(32))) }), env, {});
+  const noActionResult = openEnvelope(await res.text());
+  ok(res.status === 400 && noActionResult && noActionResult.payload.message === 'Invalid API request.', 'loader-rep: missing action -> encrypted 400 invalid request');
   res = await app.fetch(new Request('https://panel.test/loader-rep/YUVI_001/api.php?action=validate_license', { method: 'GET' }), env, {});
   ok(res.status === 400, 'loader-rep: GET -> 400');
   res = await app.fetch(new Request('https://panel.test/loader-rep/YUVI_001/api.php?action=validate_license', { method: 'POST', body: 'not-an-envelope' }), env, {});

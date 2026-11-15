@@ -13,6 +13,7 @@
 //
 // Response envelope echoes the request key, exactly like the original panel.
 import { cleanPanelCode, hitRate, clientIp } from './security.js';
+import { sha256Hex } from './crypto.js';
 
 export const LOADER_REP_DEFAULT_SECRET = 'trexjaat@StrongSecretKey#9876543210XYZabcdef';
 export const LOADER_REP_DEFAULT_PACKAGE = 'com.pubg.imobile';
@@ -165,8 +166,14 @@ export async function processLoaderRep(db, env, panelRaw, action, payload, opts 
   }
 
   if (action === 'validate_license') {
-    const hwid = String((payload && payload.hwid) || '');
-    if (!/^[0-9a-f]{64}$/.test(hwid)) {
+    let hwid = String((payload && payload.hwid) || '');
+    if (!hwid) {
+      // Legacy FireXLoader builds have no device-ID path and send an empty
+      // HWID. Derive a stable per-key pseudo-device so device_limit,
+      // key_devices and the first-bind flow keep working unchanged.
+      const rawKey = String((payload && payload.key) || '').trim();
+      hwid = await sha256Hex(`firex-empty-hwid:v1:${panel}:${rawKey}`);
+    } else if (!/^[0-9a-f]{64}$/.test(hwid)) {
       return { status: 400, body: { status: 'error', message: 'Invalid HWID format' } };
     }
 
