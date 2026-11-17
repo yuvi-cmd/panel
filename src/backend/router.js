@@ -7,13 +7,8 @@ import { mundoSaltFromEnv, mundoAesKeyHex, hashPassword, verifyPassword, randomH
 import { handleApi } from './api.js';
 import { clientIp, hitRate, isProfessor } from './security.js';
 import { handleConnect, handleEncrypt, ensureModVersions, libUrlOk } from './connect.js';
-import { handleNexon } from './nexon.js';
-import { handleApkKill } from './apk-kill.js';
-import { handleBgmiLog } from './bgmi-log.js';
-import { handleUnlockProxy } from './unlock-proxy.js';
 import { handleMundo } from './mundo.js';
 import { handleBcore } from './bcore.js';
-import { handleLoaderRep, loaderRepSecret } from './loader-rep.js';
 import { ensureDB } from './db.js';
 import { html, redir, parseCookies, formParams, tsMs, deny } from './http.js';
 import { getSession, sessCookie, clearCookie } from './session.js';
@@ -42,7 +37,6 @@ import { serverPage as sdkServerPage, hashPage as sdkHashPage } from '../fronten
 import { panelDashboard, panelGenerate, panelKeyList, KEY_PRICING, KEY_DURATIONS, arcxRand } from '../frontend/panel/dash.js';
 import { usersPage, adminsPage, permissionsPage, referralPage } from '../frontend/panel/users.js';
 import { serverPage, settingsPage, aesPage, apiTestPage, createPanelPage, loaderPage, MOD_FIELDS } from '../frontend/panel/system.js';
-import { loaderRepPage } from '../frontend/panel/loader-rep.js';
 import { opencodeLoginPage, opencodeAdminLayout, opencodeOverview, opencodeUsersPage, opencodeNoticesPage, opencodeSettingsPage } from '../frontend/opencode-admin.js';
 
 
@@ -56,65 +50,14 @@ export default {
     const method = request.method.toUpperCase();
     await ensureDB(db, mainPanel);
 
-    if (method === 'OPTIONS' && (path.startsWith('/sdk/') || path.startsWith('/connect/') || path.startsWith('/encrypt/') || path.startsWith('/nexon/') || path.startsWith('/api/')))
+    if (method === 'OPTIONS' && (path.startsWith('/sdk/') || path.startsWith('/connect/') || path.startsWith('/encrypt/') || path.startsWith('/api/')))
       return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
     if (path.startsWith('/connect/')) return handleConnect(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
     if (path === '/connect') return handleConnect(request, db, url.searchParams.get('panel_code') || mainPanel, env);
-    if (path.startsWith('/nexon/')) return handleNexon(request, db, decodeURIComponent(path.split('/')[2] || ''), env, ctx);
-    if (path === '/nexon') return handleNexon(request, db, url.searchParams.get('panel_code') || mainPanel, env, ctx);
-    // TEMPORARY diagnostics for the CA-bundle login failure. Remove after the
-    // device login is confirmed; token-protected, no secrets are exposed.
-    if (path === '/nexon-diag') {
-      const DIAG_TOKEN = '71bcbb0871010ef6e5ce81b95ee0ea45';
-      const J = (o, c = 200) => new Response(JSON.stringify(o), { status: c, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
-      if (url.searchParams.get('token') !== DIAG_TOKEN) return J({ ok: false, error: 'FORBIDDEN' }, 403);
-      const action = url.searchParams.get('action') || 'state';
-      try {
-        if (action === 'state') {
-          const keys = await db.prepare('SELECT id,key_value,panel_code,is_active,is_blocked,expires_at,device_limit,uses FROM api_keys ORDER BY id ASC LIMIT 100').all();
-          const devices = await db.prepare('SELECT key_id,device_uuid,last_seen FROM key_devices ORDER BY last_seen DESC LIMIT 100').all();
-          return J({ ok: true, keys: keys.results, devices: devices.results });
-        }
-        if (action === 'reset') {
-          const key = String(url.searchParams.get('key') || 'YUVI_001');
-          const row = await db.prepare('SELECT id,key_value,panel_code FROM api_keys WHERE key_value=? LIMIT 1').bind(key).first();
-          if (!row) return J({ ok: false, error: 'KEY NOT FOUND', key }, 404);
-          await db.prepare('DELETE FROM key_devices WHERE key_id=?').bind(row.id).run();
-          await db.prepare("UPDATE api_keys SET is_active=1,is_blocked=0,device_limit=1,expires_at=datetime('now','+30 days') WHERE id=?").bind(row.id).run();
-          return J({ ok: true, key: row.key_value, panel: row.panel_code, id: row.id });
-        }
-        if (action === 'hits') {
-          const hits = await db.prepare('SELECT id,panel_code,key_value,device_uuid,q,user_agent,created_at FROM nexon_hits ORDER BY id DESC LIMIT 50').all();
-          return J({ ok: true, hits: hits.results });
-        }
-        if (action === 'clearhits') {
-          await db.prepare('DELETE FROM nexon_hits').run();
-          return J({ ok: true });
-        }
-        return J({ ok: false, error: 'UNKNOWN ACTION' }, 400);
-      } catch (e) {
-        return J({ ok: false, error: String((e && e.message) || e) }, 500);
-      }
-    }
-    if (path === '/server/apk_kill.php') return handleApkKill(request, db, env, ctx);
-    // libbgmi.so runtime redirect target: /validbool (Nexon login, p1/p2
-    // AES-GCM envelope) + /bot<token>/sendMessage, /bot<token>/sendPhoto.
-    if (path === '/validbool') return handleNexon(request, db, mainPanel, env, ctx);
-    if (path.startsWith('/bot')) return handleBgmiLog(request, db, env, ctx);
-    if (path === '/secure/unlock') return handleUnlockProxy(request, db, env, ctx);
     if (path === '/health') {
-      return new Response(JSON.stringify({ ok: true, build: '2026-11-11-bgmihook3', panel: mainPanel }), { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
+      return new Response(JSON.stringify({ ok: true, build: '2026-11-17-connect-only', panel: mainPanel }), { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
     }
     if (path.startsWith('/encrypt/')) return handleEncrypt(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
-    // Loader-rep: Ztrax-compatible encrypted endpoint (b64(key)+++b64(ct)).
-    // /ZTRAXPANEL/api.php is the drop-in alias for a URL-patched loader APK;
-    // /loader-rep/<PANEL_CODE>/api.php is the tenant-scoped form.
-    // /zz/api.php exists because Ztrax's URL builder hardcodes a 51-char base:
-    // https://panel.imranfarhat255.workers.dev/zz/api.php is exactly 51.
-    if (path === '/ZTRAXPANEL/api.php' || path === '/zz/api.php' || /^\/loader-rep(?:\/[^/]+)?\/api\.php$/.test(path)) {
-      const m = path.match(/^\/loader-rep\/([^/]+)\/api\.php$/);
-      return handleLoaderRep(request, db, env, m ? decodeURIComponent(m[1]) : mainPanel);
-    }
     if (path.startsWith('/sdk/mundo/') || path === '/sdk/mundo') return handleMundo(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel), env);
     if (path.startsWith('/sdk/bcore/') || path === '/sdk/bcore') return handleBcore(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel), env);
     if (path.startsWith('/api/opencode/')) return handleOpenCodeApi(request, db, env);
@@ -681,16 +624,6 @@ export default {
       if (needOA()) return deny();
       const base = 'https://' + url.host;
       return P('api-test', 'Live API Tester', apiTestPage({ connect: base + '/connect/' + myPanel, encrypt: base + '/encrypt/' + myPanel }));
-    }
-
-    // ---------- LOADER-REP ----------
-    if (path === '/loader-rep') {
-      if (needOA()) return deny();
-      return P('loader-rep', 'Loader-rep', loaderRepPage({
-        base: 'https://' + url.host,
-        panelCode: myPanel,
-        appSecret: loaderRepSecret(env),
-      }));
     }
 
     // ---------- SERVER ----------

@@ -26,8 +26,6 @@ CREATE TABLE IF NOT EXISTS bcore_key_bindings (id INTEGER PRIMARY KEY AUTOINCREM
 CREATE TABLE IF NOT EXISTS sdk_hash_vault (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', engine TEXT NOT NULL DEFAULT 'MUNDO', hash_type TEXT NOT NULL DEFAULT 'lib_signature', hash_label TEXT NOT NULL, hash_value TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS sdk_server_status (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', engine TEXT NOT NULL, maintenance_mode INTEGER NOT NULL DEFAULT 0, maintenance_message TEXT, updated_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE(panel_code, engine));
 CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS nexon_hits (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', key_value TEXT, device_uuid TEXT, q INTEGER, user_agent TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
-CREATE TABLE IF NOT EXISTS loader_rep_debug (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', method TEXT, path TEXT, query TEXT, action_raw TEXT, action_final TEXT, content_type TEXT, user_agent TEXT, ip TEXT, body_len INTEGER NOT NULL DEFAULT 0, body_prefix TEXT, plain TEXT, http_status INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 `;
 
 export const INDEX_SQL = `

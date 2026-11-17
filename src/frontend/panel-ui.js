@@ -19,7 +19,6 @@ export function panelLayout(o) {
     + sideLabel('System')
     + (isOwner ? '<a href="/aes" class="' + navClass('aes', route) + '"><i class="bi bi-shield-shaded text-lg w-6 text-center"></i><span>API Encryption</span></a>' : '')
     + '<a href="/api-test" class="' + navClass('api-test', route) + '"><i class="bi bi-broadcast text-lg w-6 text-center"></i><span>Live API Tester</span></a>'
-    + '<a href="/loader-rep" class="' + navClass('loader-rep', route) + '"><i class="bi bi-code-square text-lg w-6 text-center"></i><span>Loader-rep</span></a>'
     + '<a href="/loader-manager" class="' + navClass('loader-manager', route) + '"><i class="bi bi-box-seam-fill text-lg w-6 text-center"></i><span>Set Mod/Loader</span></a>'
     + '<a href="/server" class="' + navClass('server', route) + '"><i class="bi bi-hdd-fill text-lg w-6 text-center"></i><span>Server &amp; Mod</span></a>'
     : '';
@@ -33,7 +32,7 @@ export function panelLayout(o) {
     ? '<div class="side-divider"></div><a href="/create-panel" class="' + navClass('create-panel', route) + '"><i class="bi bi-server text-lg w-6 text-center"></i><span>New Tenant</span></a>'
     : '';
   const PGS = [['Dashboard', '/dashboard', 'bi-grid-1x2-fill'], ['Generate keys', '/generate', 'bi-key-fill'], ['Keys', '/keys', 'bi-view-list'], ['Activate panel', '/panel-activate', 'bi-ticket-detailed'], ['Settings', '/settings', 'bi-gear-fill']]
-    .concat(isOA ? [['Users', '/users', 'bi-people-fill'], ['Referrals', '/referral', 'bi-diagram-3-fill'], ['Server & mod', '/server', 'bi-hdd-fill'], ['API tester', '/api-test', 'bi-broadcast'], ['Loader-rep', '/loader-rep', 'bi-code-square'], ['Mod / loader', '/loader-manager', 'bi-box-seam-fill']] : [])
+    .concat(isOA ? [['Users', '/users', 'bi-people-fill'], ['Referrals', '/referral', 'bi-diagram-3-fill'], ['Server & mod', '/server', 'bi-hdd-fill'], ['API tester', '/api-test', 'bi-broadcast'], ['Mod / loader', '/loader-manager', 'bi-box-seam-fill']] : [])
     .concat(isOwner ? [['Encryption', '/enc-api', 'bi-shield-check']] : [])
     .concat(canSeeSdk ? [['SDK panel', '/sdk', 'bi-boxes']] : [])
     .concat(sess.id === 1 ? [['OpenCode app', '/opencode', 'bi-phone']] : [])

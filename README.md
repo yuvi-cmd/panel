@@ -10,10 +10,6 @@
 - `/dashboard` (role stats), `/generate` (pricing + balance + bulk + server type), `/keys` (reset/edit/extend/bulk)
 - `/users`, `/admins`, `/permissions`, `/referral` (OWNER/ADMIN rules PHP jaise)
 - `/server` (maintenance + mod config), `/settings` (password + branding + API URLs), `/aes` (AES rotate + activation keys), `/api-test`, `/loader-manager`, `/create-panel` (id==1)
-- `/loader-rep` — Ztrax-compatible encrypted license endpoint ke docs + admin tester
-  (endpoint, wire format, cipher logic, error table, APK post-body replay).
-  HWID hardcoded nahi hota — APK ki body ke andar se hi aata hai.
-  Live: `https://panel.imranfarhat255.workers.dev/ZTRAXPANEL/api.php?action=validate_license`
 - `/sdk/*` — MUNDO + BCORE dashboard/generate/keys/server/hash (sirf main OWNER id==1)
 - `/opencode` — standalone OpenCode Android control plane with its **own login**
   (`/opencode/login`), global APK ON/OFF, Gmail accounts, device lock, notices and
@@ -23,32 +19,9 @@
 ## API (bina login)
 
 - `POST /connect/:panel` — game=PUBG, user_key, serial
-- `POST /nexon/:panel` — NexonCheat (com.bgmi) encrypted login; same key/device
-  lifecycle as `/connect`, response is AES-256-GCM + HMAC envelope
 - `POST /encrypt/:panel` — same + AES-256-CBC payload (panel active + AES configured hona chahiye)
-- `POST /loader-rep/:panel/api.php?action=validate_license|get_update` — Ztrax-compatible
-  encrypted license API: body `b64(32-byte key)+++b64(ciphertext)`, response same key
-  echo + same cipher. Keys/HWID devices `api_keys`/`key_devices` se aate hain.
-  Drop-in alias: `POST /ZTRAXPANEL/api.php?action=...`
 - `POST /sdk/mundo/:panel` — AES-128-ECB encrypted
 - `POST /sdk/bcore/:panel` — RC4+Base64 encrypted
-
-### `/nexon/:panel` protocol
-
-NexonCheat APK `libshaitaan.so` ka wire format:
-
-```
-request : p1=<b64url(IV12||TAG16||AES-256-GCM(json))>&p2=<hex HMAC-SHA256(p1)>
-json    : {"k":"<key>","d":"<device-uuid>","t":<epoch>,"pkg":"com.bgmi"}
-response: <b64url(IV12||TAG16||AES-256-GCM(json))>.<hex HMAC-SHA256(p1)>
-```
-
-Response JSON `q` = `1` maintenance, `2` expired, `3` max device, `4` invalid,
-`5` wrong app, `6` blocked, `7` success. Success me `x` = `0xB7E15163 XOR
-expiry_epoch`; `x == 0xB7E15163` permanent (2099) hai. Sab outcomes HTTP 200
-par encrypted aate hain. AES/HMAC constants `libshaitaan.so` me embedded hain;
-`NEXON_AES_KEY` / `NEXON_HMAC_KEY` env se override ho sakte hain, aur
-`NEXON_MAX_SKEW` (default 86400 sec, `0` = off) request timestamp window hai.
 
 ## Deploy
 
@@ -84,7 +57,6 @@ src/
 │   ├── security.js          # rate-limit + session cookie build
 │   ├── api.js               # /api/* JSON endpoints
 │   ├── connect.js           # /connect + /encrypt (app-facing)
-│   ├── nexon.js             # /nexon/* NexonCheat encrypted login
 │   ├── mundo.js             # /sdk/mundo/* validation
 │   ├── bcore.js             # /sdk/bcore/* validation
 │   ├── opencode.js          # encrypted OpenCode app API + admin actions
