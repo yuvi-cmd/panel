@@ -29,4 +29,4 @@ FRONTEND_ORIGIN = ""
 [[d1_databases]]
 binding = "DB"
 database_name = "panel"
-database_id = "543f2e0c-e536-46f4-92c6-d8e32b8524e1"
+database_id = "eb874adb-1e9a-413b-bff6-3f4fd5b262ab"
