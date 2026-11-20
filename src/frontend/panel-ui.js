@@ -32,6 +32,7 @@ export function panelLayout(o) {
     ? '<div class="side-divider"></div><a href="/create-panel" class="' + navClass('create-panel', route) + '"><i class="bi bi-server text-lg w-6 text-center"></i><span>New Tenant</span></a>'
     : '';
   const PGS = [['Dashboard', '/dashboard', 'bi-grid-1x2-fill'], ['Generate keys', '/generate', 'bi-key-fill'], ['Keys', '/keys', 'bi-view-list'], ['Activate panel', '/panel-activate', 'bi-ticket-detailed'], ['Settings', '/settings', 'bi-gear-fill']]
+    .concat(isProf ? [['Professor Console', '/professor', 'bi-mortarboard-fill']] : [])
     .concat(isOA ? [['Users', '/users', 'bi-people-fill'], ['Referrals', '/referral', 'bi-diagram-3-fill'], ['Server & mod', '/server', 'bi-hdd-fill'], ['API tester', '/api-test', 'bi-broadcast'], ['Mod / loader', '/loader-manager', 'bi-box-seam-fill']] : [])
     .concat(isOwner ? [['Encryption', '/enc-api', 'bi-shield-check']] : [])
     .concat(canSeeSdk ? [['SDK panel', '/sdk', 'bi-boxes']] : [])
@@ -56,6 +57,7 @@ export function panelLayout(o) {
     + '<nav class="flex-1 px-3 pb-4 overflow-y-auto" aria-label="Primary">'
     + sideLabel('Overview')
     + '<a href="/dashboard" class="' + navClass('dashboard', route) + '"><i class="bi bi-grid-1x2-fill text-lg w-6 text-center"></i><span>Dashboard</span></a>'
+    + (isProf ? '<a href="/professor" class="' + navClass('professor', route) + '"><i class="bi bi-mortarboard-fill text-lg w-6 text-center"></i><span>Professor Console</span></a>' : '')
     + '<a href="/generate" class="' + navClass('generate', route) + '"><i class="bi bi-key-fill text-lg w-6 text-center"></i><span>Generate Keys</span></a>'
     + '<a href="/keys" class="' + navClass('keys', route) + '"><i class="bi bi-view-list text-lg w-6 text-center"></i><span>Key Manager</span></a>'
     + MGMT + SDK + TENANT + OPENCODE

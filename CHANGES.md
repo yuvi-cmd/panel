@@ -1,5 +1,20 @@
 # CHANGES.md
 
+## Pass 2026-11-20 — PROFESSOR-only console design
+
+- Naya `GET /professor` route **sirf PROFESSOR role** ke liye. OWNER/ADMIN/
+  RESELLER ko `/dashboard` par redirect.
+- `src/backend/professor.js`: global aggregates — panels, users, keys, blocked
+  keys, role distribution, recent users/keys, tenant-wise users/keys/account
+  headroom.
+- `src/frontend/panel/professor.js`: dedicated glass console — professor hero,
+  KPI grid, tenant network table, role distribution bars, security posture,
+  recent users/keys, quick actions.
+- Sidebar + command palette me PROFESSOR ko hi **Professor Console** nav item
+  dikhta hai.
+- Smoke tests: +8 assertions (render, gate, aggregates, script audit).
+  **223/223 passing**.
+
 ## Pass 2026-11-10 (3) — NexonCheat `/nexon/:panel` encrypted login
 
 - Naya `POST /nexon/:panel` endpoint NexonCheat (com.bgmi) APK ke wire format

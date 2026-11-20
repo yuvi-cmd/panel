@@ -37,6 +37,8 @@ import { serverPage as sdkServerPage, hashPage as sdkHashPage } from '../fronten
 import { panelDashboard, panelGenerate, panelKeyList, KEY_PRICING, KEY_DURATIONS, arcxRand } from '../frontend/panel/dash.js';
 import { usersPage, adminsPage, permissionsPage, referralPage } from '../frontend/panel/users.js';
 import { serverPage, settingsPage, aesPage, apiTestPage, createPanelPage, loaderPage, MOD_FIELDS } from '../frontend/panel/system.js';
+import { professorDashboard } from '../frontend/panel/professor.js';
+import { getProfessorData } from './professor.js';
 import { opencodeLoginPage, opencodeAdminLayout, opencodeOverview, opencodeUsersPage, opencodeNoticesPage, opencodeSettingsPage } from '../frontend/opencode-admin.js';
 
 
@@ -302,6 +304,13 @@ export default {
     const S = async (route, title, content) => html(layout({ title, route, username: sess.username, panelCode: myPanel, panelName: envName, content, theme: await getTheme(db, myPanel), accent: await getAccent(db, myPanel) }));
     const needOA = () => { if (!isOA) return deny(); return null; };
     const needOwner = () => { if (!isOwnerLike) return deny(); return null; };
+
+    // ---------- PROFESSOR CONSOLE (PROFESSOR only) ----------
+    if (path === '/professor') {
+      if (!isProfessor(sess)) return redir('/dashboard');
+      const data = await getProfessorData(db);
+      return P('professor', 'Professor Console', professorDashboard(sess, data));
+    }
 
     // ---------- PANEL DASHBOARD ----------
     if (path === '/' || path === '/dashboard') {

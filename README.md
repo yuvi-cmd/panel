@@ -7,7 +7,9 @@
 ## Pages
 
 - `/login` (device-lock), `/register` (referral), `/reset-device` (24h limit), `/join-panel` (empty panel claim), `/setup` (pehla admin)
-- `/dashboard` (role stats), `/generate` (pricing + balance + bulk + server type), `/keys` (reset/edit/extend/bulk)
+- `/dashboard` (role stats), `/professor` (PROFESSOR-only global console:
+  tenants, role distribution, recent users/keys, security posture),
+  `/generate` (pricing + balance + bulk + server type), `/keys` (reset/edit/extend/bulk)
 - `/users`, `/admins`, `/permissions`, `/referral` (OWNER/ADMIN rules PHP jaise)
 - `/server` (maintenance + mod config), `/settings` (password + branding + API URLs), `/aes` (AES rotate + activation keys), `/api-test`, `/loader-manager`, `/create-panel` (id==1)
 - `/sdk/*` — MUNDO + BCORE dashboard/generate/keys/server/hash (sirf main OWNER id==1)
@@ -55,6 +57,7 @@ src/
 │   ├── device.js            # device fingerprint (login + /api lock)
 │   ├── crypto.js            # RC4/BCORE/AES/MD5/hashPassword
 │   ├── security.js          # rate-limit + session cookie build
+│   ├── professor.js         # PROFESSOR console data (global aggregates)
 │   ├── api.js               # /api/* JSON endpoints
 │   ├── connect.js           # /connect + /encrypt (app-facing)
 │   ├── mundo.js             # /sdk/mundo/* validation
@@ -69,6 +72,7 @@ src/
     ├── panel/               # panel (admin) pages
     │   ├── dash.js          #   dashboard/generate/key-list
     │   ├── users.js         #   users/admins/permissions/referral
+    │   ├── professor.js     #   PROFESSOR-only global console
     │   └── system.js        #   server/settings/aes/api-test/loader
     └── sdk/                 # SDK user pages
         ├── dash.js          #   dashboard/generate

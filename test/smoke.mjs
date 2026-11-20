@@ -1025,13 +1025,35 @@ console.log('opencode app api key resolution');
   ok(relocked && relocked.status === 'pending', 'marker-gated: admin re-lock is not undone by bootstrap');
 }
 
+// ---------- 7l. PROFESSOR-only console ----------
+console.log('professor console');
+{
+  const page = await call(env, 'GET', '/professor', { cookie: ownerCookie });
+  const html = await page.text();
+  ok(page.status === 200, 'GET /professor renders for PROFESSOR');
+  ok(html.includes('Professor Console') && html.includes('Tenant network') && html.includes('Role distribution'), 'professor console design renders');
+  ok(html.includes('href="/professor"'), 'sidebar exposes Professor Console for PROFESSOR');
+  ok(html.includes('PROFESSOR'), 'professor role badge present');
+
+  const login = await call(env, 'POST', '/api/login', { json: { username: 'adm2', password: 'pass1234', device_info: '{}' } });
+  const adminCookie2 = cookieFrom(login);
+  ok(!!adminCookie2, 'non-professor admin login for gate test');
+  const denied = await call(env, 'GET', '/professor', { cookie: adminCookie2 });
+  ok(denied.status === 302 && denied.headers.get('Location') === '/dashboard', 'ADMIN is redirected away from /professor');
+
+  const { getProfessorData } = await import('../src/backend/professor.js');
+  const data = await getProfessorData(env.DB);
+  ok(data.totals.panels >= 1 && data.totals.users >= 1 && Array.isArray(data.panels), 'professor data aggregates panels/users');
+  ok(Array.isArray(data.recentUsers) && Array.isArray(data.recentKeys), 'professor data includes recent activity');
+}
+
 // ---------- 8. inline-script audit: every rendered page's scripts must parse ----------
 // A single broken <script> kills the whole tag (sidebar toggle, copy buttons,
 // filters). node --check cannot see inside template literals, so audit the
 // actual rendered HTML.
 console.log('inline script audit');
 {
-  const htmlPaths = ['/login', '/register', '/reset-device', '/join-panel', '/dashboard', '/generate', '/keys', '/users', '/admins', '/permissions', '/referral', '/aes', '/api-test', '/server', '/settings', '/loader-manager', '/create-panel', '/sdk', '/sdk/generate', '/sdk/keys', '/sdk/server', '/sdk/hash', '/opencode', '/opencode/users', '/opencode/notices', '/opencode/settings', '/opencode/login'];
+  const htmlPaths = ['/login', '/register', '/reset-device', '/join-panel', '/dashboard', '/professor', '/generate', '/keys', '/users', '/admins', '/permissions', '/referral', '/aes', '/api-test', '/server', '/settings', '/loader-manager', '/create-panel', '/sdk', '/sdk/generate', '/sdk/keys', '/sdk/server', '/sdk/hash', '/opencode', '/opencode/users', '/opencode/notices', '/opencode/settings', '/opencode/login'];
   let checked = 0;
   for (const p of htmlPaths) {
     const r = await call(env, 'GET', p, { cookie: ownerCookie });
