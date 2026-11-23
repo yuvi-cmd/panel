@@ -1,6 +1,6 @@
 # MAK/1 Protocol
 
-This is the wire contract implemented by `src/backend/mak.js`. It is the
+This is the wire contract implemented by `src/mak/protocol.js`. It is the
 authoritative reference for the Android host (`libymudo`) and guest runtime
 (`libRcore`).
 

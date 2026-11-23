@@ -3,7 +3,7 @@
 // frontend page renderers ../frontend/*.
 
 // ---- backend ----
-import { mundoSaltFromEnv, mundoAesKeyHex, hashPassword, verifyPassword, randomHexKey } from './crypto.js';
+import { hashPassword, verifyPassword, randomHexKey } from './crypto.js';
 import { handleApi } from './api.js';
 import { clientIp, hitRate, isProfessor } from './security.js';
 import { handleConnect, handleEncrypt, ensureModVersions, libUrlOk } from './connect.js';
@@ -44,6 +44,7 @@ import { logEvent } from '../mak/events.js';
 import { formAll as readFormAll, sameOrigin } from '../mak/http.js';
 import { defaultExpiryDate, issueMak } from '../mak/issue.js';
 import { getSettings, setSettings } from '../mak/settings.js';
+import { handleMakAdmin } from '../mak/admin.js';
 import { dashboardStats, getLicenseById, licenseCounts, listAllActiveGuests, listLicenses } from '../mak/store.js';
 
 
@@ -903,6 +904,41 @@ export default {
       return S('sdk/keys', 'MAK Keys', keysPage({ licenses, counts, q, status }));
     }
 
+    if (path === '/sdk/keys/new') return redir('/sdk/generate');
+    if (path === '/sdk/dashboard') return redir('/sdk');
+
+    // Full MAK management lives inside the SDK Panel. The MAK admin module is
+    // reused with an internal path mapping so there is no second console at
+    // /mak and no duplicate license detail page.
+    if (path.startsWith('/sdk/keys/')) {
+      const g = sdkGate(); if (g) return g;
+      return handleMakAdmin(request, env, db, {
+        mount: '/sdk',
+        internalPath: '/licenses' + path.slice('/sdk/keys'.length),
+      });
+    }
+
+    if (path === '/sdk/guests' || path.startsWith('/sdk/guests/')
+      || path === '/sdk/hosts' || path.startsWith('/sdk/hosts/')
+      || path === '/sdk/devices' || path.startsWith('/sdk/devices/')
+      || path === '/sdk/sessions' || path.startsWith('/sdk/sessions/')
+      || path === '/sdk/logs' || path.startsWith('/sdk/logs/')
+      || path === '/sdk/settings' || path.startsWith('/sdk/settings/')) {
+      const g = sdkGate(); if (g) return g;
+      return handleMakAdmin(request, env, db, {
+        mount: '/sdk',
+        internalPath: path.slice('/sdk'.length),
+      });
+    }
+
+    if (path === '/sdk/licenses' || path.startsWith('/sdk/licenses/')) {
+      const g = sdkGate(); if (g) return g;
+      const rest = path.slice('/sdk/licenses'.length);
+      return redir('/sdk/keys' + rest + (url.search || ''));
+    }
+
+    if (path === '/sdk/manage') return redir('/sdk');
+
     if (path === '/sdk/server') {
       const g = sdkGate(); if (g) return g;
       const admin = await sdkAdmin();
@@ -975,8 +1011,6 @@ export default {
         .bind(myPanel).all().catch(() => ({ results: [] }))).results || [];
       return S('sdk/hash', 'Hash Vault', hashPage({
         hashes,
-        salt: mundoSaltFromEnv(env),
-        aesHex: mundoAesKeyHex(mundoSaltFromEnv(env)),
         csrf: admin.csrf,
         ok: url.searchParams.get('ok') === '1' ? 'Hash vault updated.' : '',
       }));

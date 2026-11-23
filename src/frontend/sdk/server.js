@@ -44,9 +44,18 @@ export function serverPage(o) {
     + '<div class="glass-card p-5"><h3 class="font-bold text-slate-800 mb-3"><i class="bi bi-shield-lock-fill text-emerald-500"></i> Signing identity</h3>'
     + '<div class="space-y-2 text-xs text-slate-600"><p><b>Algorithm:</b> Ed25519 response signatures</p><p><b>Key ID:</b> ' + esc(signing.keyId || 'not configured') + '</p><p><b>Device proof:</b> ECDSA P-256</p><p><b>Licenses:</b> ' + Number(stats.total || 0) + ' total · ' + Number(stats.active || 0) + ' active</p></div>'
     + '<div class="mt-3"><label class="text-[10px] font-extrabold text-slate-500 uppercase">Status endpoint</label><div class="clay-card p-3 flex gap-2 rounded-2xl mt-1"><code id="status-url" class="flex-1 text-xs font-mono font-bold break-all">https://' + esc(o.host || '') + '/mak/v1/status</code><button type="button" onclick="copyUrl(\'status-url\',this)" class="clay-card w-9 h-9 rounded-xl text-slate-600"><i class="bi bi-clipboard"></i></button></div></div>'
-    + '<a href="/mak/settings" class="inline-block mt-3 text-xs font-bold text-purple-600 hover:underline">Advanced protocol settings →</a></div></div>'
+    + '<a href="/sdk/settings" class="inline-block mt-3 text-xs font-bold text-purple-600 hover:underline">Advanced protocol settings →</a></div></div>'
     + '<div class="glass-card p-5"><h3 class="font-bold text-slate-800 mb-3"><i class="bi bi-terminal text-blue-500"></i> MAK/1 endpoints</h3><div class="space-y-2">' + endpointRows + '</div>'
-    + '<p class="text-[11px] text-slate-400 mt-3">Host + guest traffic is cross-origin JSON. The server never returns a shared secret; every decision is signed with the active Ed25519 key.</p></div>';
+    + '<p class="text-[11px] text-slate-400 mt-3">Host + guest traffic is cross-origin JSON. The server never returns a shared secret; every decision is signed with the active Ed25519 key.</p></div>'
+    + '<div class="glass-card p-5 mt-4"><h3 class="font-bold text-slate-800 mb-2"><i class="bi bi-code-slash text-purple-500"></i> C++ / Android host integration</h3>'
+    + '<div class="bg-amber-50 border border-amber-100 rounded-2xl p-3 text-[11px] text-amber-800"><b>Old SDK endpoint retired.</b> MUNDO called <code>POST /sdk/mundo/:panel</code> (AES-128-ECB) and BCore called <code>POST /sdk/bcore/:panel</code> (RC4+Base64). Both are gone. The native host SDK must now call the MAK/1 base <code>https://' + esc(o.host || '') + '/mak/v1</code> and verify the Ed25519 server signature on every response.</div>'
+    + '<ol class="mt-4 space-y-2 text-xs text-slate-600 pl-5 list-decimal">'
+    + '<li><b>Challenge:</b> <code>POST /mak/v1/challenge</code> with <code>{"protocol":"MAK/1"}</code>.</li>'
+    + '<li><b>Authorize:</b> <code>POST /mak/v1/authorize</code> with the host package/cert, the device ECDSA public key + proof, and the user MAK credential. Keep the returned <code>session_id</code>.</li>'
+    + '<li><b>Guest operation:</b> before every install, launch, update or restart call <code>POST /mak/v1/guest/check</code> with the session and the exact guest APK/cert hashes.</li>'
+    + '<li><b>Keep alive:</b> <code>POST /mak/v1/heartbeat</code> every 300s and <code>POST /mak/v1/renew</code> before the 3600s session expires. A DENY response must stop the protected operation.</li>'
+    + '</ol>'
+    + '<p class="text-[11px] text-slate-400 mt-3">Full wire contract + canonical JSON rules: <code>docs/PROTOCOL.md</code>. C++ integration guide: <code>docs/CPP-INTEGRATION.md</code>.</p></div>';
 }
 
 export function hashPage(o) {
@@ -65,10 +74,8 @@ export function hashPage(o) {
 
   return ok + err
     + '<div class="pagehead"><div class="ph-ic"><i class="bi bi-fingerprint"></i></div><div class="flex-1 min-w-0"><h1 class="truncate">Hash Vault</h1><p class="truncate">Universal lib signature verification (.so SHA-256)</p></div></div>'
-    + '<div class="glass-card p-5 mb-6"><h3 class="font-black">Universal Lib Hash</h3><p class="text-[11px] text-slate-500">One hash for all users — app/package independent.</p>'
-    + '<div class="bg-amber-50 border border-amber-100 rounded-2xl p-3 text-[11px] text-amber-700 mt-3">Run <code>sha256sum lib.so</code> in Termux and paste the 64-hex output.</div>'
-    + '<div class="mt-3"><label class="text-[10px] font-extrabold text-slate-500 uppercase">Client Salt</label><div class="clay-card p-3 flex gap-2 rounded-2xl mt-1"><code id="salt-v" class="flex-1 text-xs font-mono font-bold break-all">' + esc(o.salt || '') + '</code><button type="button" onclick="copyUrl(\'salt-v\',this)" class="clay-card w-9 h-9 rounded-xl text-slate-600"><i class="bi bi-clipboard"></i></button></div></div>'
-    + '<div class="mt-3"><label class="text-[10px] font-extrabold text-slate-500 uppercase">Realtime AES-128 Key (hex)</label><div class="clay-card p-3 flex gap-2 rounded-2xl mt-1"><code id="aes-v" class="flex-1 text-xs font-mono font-bold break-all blur-sm select-none">' + esc(o.aesHex || '') + '</code><button onclick="document.getElementById(\'aes-v\').classList.toggle(\'blur-sm\')" class="clay-card w-9 h-9 rounded-xl"><i class="bi bi-eye"></i></button></div></div></div>'
+    + '<div class="glass-card p-5 mb-6"><h3 class="font-black">Universal Lib Hash</h3><p class="text-[11px] text-slate-500">One hash for all users — app/package independent. Add the SHA-256 of the protected native library and the MAK/1 host verifies it against this vault.</p>'
+    + '<div class="bg-amber-50 border border-amber-100 rounded-2xl p-3 text-[11px] text-amber-700 mt-3">Run <code>sha256sum lib.so</code> in Termux and paste the 64-hex output.</div></div>'
     + '<div class="grid lg:grid-cols-2 gap-4">'
     + '<div class="glass-card p-5"><h3 class="font-bold mb-4"><i class="bi bi-plus-circle"></i> Add lib hash</h3><form method="POST" action="/sdk/hash" class="space-y-3"><input type="hidden" name="_csrf" value="' + esc(o.csrf || '') + '"><input type="hidden" name="action" value="add_hash">'
     + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase mb-2">Label</label><input name="hash_label" placeholder="e.g. lib.so" required maxlength="100" class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'

@@ -34,7 +34,7 @@ export function keysPage(o) {
       + '<p class="text-sm md:text-base font-bold text-slate-800 truncate">' + esc(l.label || l.license_uid) + '</p>'
       + '<p class="text-[10px] font-mono text-slate-400 mt-0.5 break-all">' + esc(l.license_uid) + (l.user_ref ? ' · ' + esc(l.user_ref) : '') + '</p>'
       + '<div class="mt-2">' + hosts + '</div></div>'
-      + '<a href="/mak/licenses/' + Number(l.id) + '" class="btn-premium px-4 py-2 rounded-xl text-xs font-bold">Manage</a></div>'
+      + '<a href="/sdk/keys/' + Number(l.id) + '" class="btn-premium px-4 py-2 rounded-xl text-xs font-bold">Manage</a></div>'
       + '<div class="grid grid-cols-3 gap-2 mt-4">'
       + '<div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">DEVICES</p><p class="text-xs font-black">' + Number(l.device_count || 0) + ' / ' + Number(l.max_devices || 0) + '</p></div>'
       + '<div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">ACTIVATIONS</p><p class="text-xs font-black">' + Number(l.activation_count || 0) + ' / ' + Number(l.max_activations || 0) + '</p></div>'
@@ -48,5 +48,5 @@ export function keysPage(o) {
     + '<button class="btn-premium px-4 py-2 rounded-xl text-xs font-bold">Search</button></form></div>'
     + filterHtml
     + '<div class="space-y-3">' + rows + '</div>'
-    + '<p class="text-[11px] text-slate-400 mt-4"><i class="bi bi-info-circle"></i> Raw MAK values are never stored. Use the MAK console to rotate a credential if a customer loses it.</p>';
+    + '<p class="text-[11px] text-slate-400 mt-4"><i class="bi bi-info-circle"></i> Raw MAK values are never stored. Open a key to rotate a credential if a customer loses it.</p>';
 }

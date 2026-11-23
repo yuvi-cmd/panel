@@ -1,4 +1,4 @@
-// Shared MAK issuance helpers. Both the MAK admin (/mak/licenses/new) and the
+// Shared MAK issuance helpers. Both the SDK Generate MAK page (/sdk/generate) and the
 // SDK Panel's Generate MAK page (/sdk/generate) use this module, so validation
 // and credential handling stay identical.
 

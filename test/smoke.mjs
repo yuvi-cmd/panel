@@ -131,15 +131,17 @@ console.log('mak integration');
   ok(stb.decision === 'INFO' && stb.signing_ready === false, 'status reports missing signing key without crashing');
 
   const anon = await call(env, 'GET', '/mak');
-  ok(anon.status === 302 && String(anon.headers.get('Location') || '').startsWith('/login'), 'anonymous /mak redirects to the panel login');
+  ok(anon.status === 302 && String(anon.headers.get('Location') || '') === '/sdk', 'anonymous /mak is retired and redirects to /sdk');
 
   const page = await call(env, 'GET', '/mak', { cookie: ownerCookie });
-  const body = await page.text();
-  ok(page.status === 200, 'owner can open /mak (got ' + page.status + ')');
-  ok(body.includes('MAK Keys') && body.includes('Back to SDK Panel'), 'MAK pages render inside the existing panel shell');
+  ok(page.status === 302 && String(page.headers.get('Location') || '') === '/sdk', 'legacy /mak admin console redirects to the SDK Panel');
 
   const licenses = await call(env, 'GET', '/mak/licenses', { cookie: ownerCookie });
-  ok(licenses.status === 200, 'owner can open /mak/licenses');
+  ok(licenses.status === 302 && String(licenses.headers.get('Location') || '') === '/sdk/keys', 'legacy /mak/licenses redirects to /sdk/keys');
+
+  const legacyPostForm = new FormData();
+  const legacyPost = await call(env, 'POST', '/mak/settings/server', { cookie: ownerCookie, form: legacyPostForm });
+  ok(legacyPost.status === 308 && String(legacyPost.headers.get('Location') || '') === '/sdk/settings/server', 'legacy MAK form posts redirect with 308 and keep the method');
 
   const sdk = await call(env, 'GET', '/sdk', { cookie: ownerCookie });
   const sdkBody = await sdk.text();
@@ -175,6 +177,18 @@ console.log('mak integration');
   const keys = await call(env, 'GET', '/sdk/keys', { cookie: ownerCookie });
   const keysBody = await keys.text();
   ok(keys.status === 200 && keysBody.includes('SDK issued license'), 'SDK MAK Keys lists the issued license');
+
+  const detail = await call(env, 'GET', '/sdk/keys/' + issuedRow.id, { cookie: ownerCookie });
+  const detailBody = await detail.text();
+  ok(detail.status === 200 && detailBody.includes('SDK issued license') && detailBody.includes('Back to SDK Panel'), 'SDK license detail is served inside the MAK panel');
+
+  const legacyDetail = await call(env, 'GET', '/mak/licenses/' + issuedRow.id, { cookie: ownerCookie });
+  ok(legacyDetail.status === 302 && String(legacyDetail.headers.get('Location') || '') === '/sdk/keys/' + issuedRow.id, 'legacy /mak/licenses/:id redirects to /sdk/keys/:id');
+
+  for (const section of ['guests', 'hosts', 'devices', 'sessions', 'logs', 'settings']) {
+    const r = await call(env, 'GET', '/sdk/' + section, { cookie: ownerCookie });
+    ok(r.status === 200, 'SDK MAK ' + section + ' page renders (got ' + r.status + ')');
+  }
 
   const srv = await call(env, 'GET', '/sdk/server', { cookie: ownerCookie });
   const srvBody = await srv.text();

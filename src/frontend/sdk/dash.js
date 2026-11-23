@@ -42,7 +42,7 @@ export function dashboardPage(d) {
     + '<p class="text-[10px] font-mono text-slate-400 mt-0.5">' + esc(l.license_uid) + (l.host_package ? ' · ' + esc(l.host_package) : '') + '</p></div>'
     + '<div class="flex items-center gap-2">' + statusChip(l.status)
     + '<span class="text-[10px] text-slate-400">' + esc(fmtDate(l.expires_at)) + '</span>'
-    + '<a href="/mak/licenses/' + Number(l.id) + '" class="clay-card px-3 py-1.5 text-xs font-bold text-slate-600 rounded-xl">Open</a></div></div>'
+    + '<a href="/sdk/keys/' + Number(l.id) + '" class="clay-card px-3 py-1.5 text-xs font-bold text-slate-600 rounded-xl">Open</a></div></div>'
   ).join('') : '<div class="text-center py-8 text-slate-400"><i class="bi bi-inbox text-4xl mb-2 opacity-40"></i><p class="text-sm">No MAK issued yet</p><a href="/sdk/generate" class="inline-block mt-2 text-xs font-bold text-purple-600 hover:underline">Generate the first MAK →</a></div>';
 
   return warnings.join('')
@@ -59,8 +59,8 @@ export function dashboardPage(d) {
     + '<div class="space-y-2">'
     + '<a href="/sdk/generate" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-key-fill text-purple-500"></i><span class="text-sm font-bold flex-1">Generate MAK</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
     + '<a href="/sdk/keys" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-view-list text-blue-500"></i><span class="text-sm font-bold flex-1">MAK keys</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
-    + '<a href="/mak" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-cpu-fill text-emerald-500"></i><span class="text-sm font-bold flex-1">MAK console</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
-    + '<a href="/mak/guests" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-app-indicator text-amber-500"></i><span class="text-sm font-bold flex-1">Guest apps</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
+    + '<a href="/sdk/devices" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-phone-fill text-emerald-500"></i><span class="text-sm font-bold flex-1">Devices</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
+    + '<a href="/sdk/guests" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-app-indicator text-amber-500"></i><span class="text-sm font-bold flex-1">Guest apps</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
     + '</div></div></div>'
     + '<div class="grid grid-cols-2 lg:grid-cols-4 gap-3">'
     + '<div class="glass-card p-4"><p class="text-[10px] font-extrabold text-slate-400 uppercase">Guest apps</p><p class="text-xl font-black">' + Number(stats.guests || 0) + '</p></div>'
@@ -84,7 +84,7 @@ export function generatePage(o) {
       + '<div class="clay-card p-3 flex items-center gap-2 mt-3 rounded-2xl"><code id="new-mak" class="flex-1 text-sm md:text-base font-mono font-bold text-slate-800 break-all">' + esc(s.credential) + '</code>'
       + '<button type="button" onclick="copyMak()" class="btn-premium px-3 py-2 rounded-xl text-xs font-bold"><i class="bi bi-clipboard"></i> Copy</button></div>'
       + '<p class="text-[11px] text-amber-700 mt-2"><i class="bi bi-exclamation-triangle-fill"></i> This is the only time the raw MAK is shown. Store it now.</p>'
-      + '<div class="flex flex-wrap gap-2 mt-3"><a href="/mak/licenses/' + Number(s.licenseId) + '" class="clay-card px-3 py-2 text-xs font-bold rounded-xl">Open license</a><a href="/sdk/generate" class="btn-premium px-3 py-2 text-xs font-bold rounded-xl">Issue another</a></div></div>';
+      + '<div class="flex flex-wrap gap-2 mt-3"><a href="/sdk/keys/' + Number(s.licenseId) + '" class="clay-card px-3 py-2 text-xs font-bold rounded-xl">Open license</a><a href="/sdk/generate" class="btn-premium px-3 py-2 text-xs font-bold rounded-xl">Issue another</a></div></div>';
   }
   if (o.error) {
     notice = '<div class="glass-card p-4 mb-6" style="border-left:4px solid #ef4444"><p class="text-xs font-bold text-red-700"><i class="bi bi-exclamation-circle-fill mr-1"></i> ' + esc(o.error) + '</p></div>';
@@ -95,7 +95,7 @@ export function generatePage(o) {
 
   const guestCards = guests.length ? guests.map((g) =>
     '<label class="feature-card' + ((values.guest_ids || []).includes(String(g.id)) ? ' checked' : '') + '"><input type="checkbox" name="guest_ids" value="' + Number(g.id) + '" ' + ((values.guest_ids || []).includes(String(g.id)) ? 'checked' : '') + ' onchange="toggleFeature(this)"><span class="text-sm font-bold text-slate-700">' + esc(g.app_name || g.package_name) + '</span></label>'
-  ).join('') : '<p class="text-xs text-slate-400 italic">No approved guest apps. You can bind them later from the MAK console.</p>';
+  ).join('') : '<p class="text-xs text-slate-400 italic">No approved guest apps. You can bind them later from the MAK settings.</p>';
 
   return notice
     + '<div class="pagehead"><div class="ph-ic"><i class="bi bi-key-fill"></i></div><div class="flex-1 min-w-0"><h1 class="truncate">Generate MAK</h1><p class="truncate">Issue a new activation credential for a host application</p></div></div>'

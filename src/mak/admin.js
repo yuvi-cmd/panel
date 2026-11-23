@@ -1,4 +1,4 @@
-// MAK administration, mounted at /mak inside the existing SDK Panel. The
+// MAK administration, mounted under /sdk inside the existing SDK Panel. The
 // existing panel session (sdk_session -> users) is the only login: this module
 // adds MAK pages to that session rather than replacing the panel's auth.
 
@@ -55,24 +55,51 @@ function redirectWith(location, headers = {}, status = 302) {
   });
 }
 
-function mkFlash(path, ok = '', err = '') {
-  return flashRedirect('/mak' + path, ok, err);
+// Internal MAK pages are rendered with absolute links (/licenses, /settings,
+// ...). They can be mounted at /mak (legacy) or /sdk (the only supported UI
+// now). These helpers translate those internal links to the public SDK paths.
+const MAK_ROOTS = ['/dashboard', '/licenses', '/guests', '/hosts', '/devices', '/sessions', '/logs', '/settings'];
+
+function adminMount(request) {
+  const p = new URL(request.url).pathname;
+  return p === '/sdk' || p.startsWith('/sdk/') ? '/sdk' : '/mak';
 }
 
-// The MAK pages are server-rendered with absolute links (/licenses, /settings,
-// ...). They live under /mak, so prefix every internal link exactly once.
-const MAK_ROOTS = ['/dashboard', '/licenses', '/guests', '/hosts', '/devices', '/sessions', '/logs', '/settings'];
-function mountMakLinks(out) {
+function publicAdminPath(mount, internal) {
+  const p = String(internal || '/dashboard');
+  if (mount === '/mak') return '/mak' + (p === '/' ? '' : p);
+  if (p === '/' || p === '/dashboard') return '/sdk';
+  if (p === '/licenses/new') return '/sdk/generate';
+  if (p === '/licenses') return '/sdk/keys';
+  if (p.startsWith('/licenses/')) return '/sdk/keys' + p.slice('/licenses'.length);
+  return '/sdk' + p;
+}
+
+function mountMakLinks(out, mount = '/mak') {
   let value = String(out);
+  if (mount === '/mak') {
+    for (const p of MAK_ROOTS) {
+      value = value.replaceAll(`href="${p}`, `href="/mak${p}`)
+        .replaceAll(`action="${p}`, `action="/mak${p}`);
+    }
+    return value;
+  }
+  // SDK mounting has one renamed route: licenses -> keys.
+  value = value.replaceAll('href="/licenses/new', 'href="/sdk/generate')
+    .replaceAll('action="/licenses/new', 'action="/sdk/generate');
   for (const p of MAK_ROOTS) {
-    value = value.replaceAll(`href="${p}`, `href="/mak${p}`)
-      .replaceAll(`action="${p}`, `action="/mak${p}`);
+    const target = p === '/dashboard' ? '/sdk'
+      : p === '/licenses' ? '/sdk/keys'
+        : `/sdk${p}`;
+    value = value.replaceAll(`href="${p}`, `href="${target}`)
+      .replaceAll(`action="${p}`, `action="${target}`);
   }
   return value;
 }
 
 function panelResponse(env, request, admin, session, settings, config, opts = {}) {
   const url = new URL(request.url);
+  const mount = adminMount(request);
   return html(mountMakLinks(layout({
     title: opts.title || 'Panel',
     active: opts.active || '',
@@ -85,7 +112,7 @@ function panelResponse(env, request, admin, session, settings, config, opts = {}
     ok: opts.ok ?? clipFlash(url.searchParams.get('ok')),
     err: opts.err ?? clipFlash(url.searchParams.get('err')),
     content: opts.content || '',
-  })), opts.status || 200);
+  }), mount), opts.status || 200);
 }
 
 function notFoundResponse(env, request, admin, session, settings, config, message = 'The page or record you requested does not exist.') {
@@ -133,17 +160,20 @@ function signingView(config) {
   };
 }
 
-export async function handleMakAdmin(request, env, db) {
+export async function handleMakAdmin(request, env, db, options = {}) {
   const fullPath = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
+  const mount = options.mount || adminMount(request);
   const session = await getAdminSession(db, request);
   if (!session) {
     return redirectWith('/login?next=' + encodeURIComponent(fullPath + (new URL(request.url).search || '')));
   }
 
-  // /mak and /mak/ both land on the MAK overview.
-  const path = fullPath === '/mak' ? '/dashboard'
-    : fullPath.startsWith('/mak/') ? (fullPath.slice(4) || '/dashboard')
-      : '/dashboard';
+  // /mak and /mak/ both land on the MAK overview. When the SDK router forwards
+  // /sdk/keys/:id etc. it supplies the internal path explicitly.
+  const path = options.internalPath || (fullPath === mount ? '/dashboard'
+    : fullPath.startsWith(mount + '/') ? (fullPath.slice(mount.length) || '/dashboard')
+      : '/dashboard');
+  const flash = (suffix, ok = '', err = '') => flashRedirect(publicAdminPath(mount, suffix), ok, err);
   const method = request.method.toUpperCase();
   const config = loadSigningConfig(env);
   const settings = await getSettings(db);
@@ -311,8 +341,8 @@ export async function handleMakAdmin(request, env, db) {
       const license = await getLicenseById(db, id);
       if (!license) return notFoundResponse(env, request, session, session, settings, config, 'That license does not exist.');
       const action = String(sp.get('action') || '');
-      const done = (message) => mkFlash(`/licenses/${id}`, message);
-      const fail = (message) => mkFlash(`/licenses/${id}`, '', message);
+      const done = (message) => flash(`/licenses/${id}`, message);
+      const fail = (message) => flash(`/licenses/${id}`, '', message);
 
       if (action === 'update_policy') {
         const parsed = parseLicensePolicy(sp);
@@ -443,7 +473,7 @@ export async function handleMakAdmin(request, env, db) {
     try {
       const id = await createGuest(db, parsed.guest);
       await logEvent(db, { guest_app_id: id, event_type: 'GUEST_REGISTERED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: parsed.guest.package_name + ' v' + parsed.guest.version_code });
-      return mkFlash(`/guests/${id}`, 'Guest app registered.');
+      return flash(`/guests/${id}`, 'Guest app registered.');
     } catch (err) {
       return panelResponse(env, request, session, session, settings, config, {
         title: 'Register guest', active: 'guests', status: 409,
@@ -481,8 +511,8 @@ export async function handleMakAdmin(request, env, db) {
       const guest = await getGuestById(db, id);
       if (!guest) return notFoundResponse(env, request, session, session, settings, config, 'That guest app does not exist.');
       const action = String(sp.get('action') || '');
-      const done = (message) => mkFlash(`/guests/${id}`, message);
-      const fail = (message) => mkFlash(`/guests/${id}`, '', message);
+      const done = (message) => flash(`/guests/${id}`, message);
+      const fail = (message) => flash(`/guests/${id}`, '', message);
 
       if (action === 'suspend' || action === 'reactivate') {
         const status = action === 'suspend' ? 'SUSPENDED' : 'ACTIVE';
@@ -542,24 +572,24 @@ export async function handleMakAdmin(request, env, db) {
     const licenseId = Number(sp.get('license_id') || 0);
     const action = String(sp.get('action') || '');
     const license = await getLicenseById(db, licenseId);
-    if (!license) return mkFlash('/hosts', '', 'Host binding not found.');
+    if (!license) return flash('/hosts', '', 'Host binding not found.');
     const host = await getHostForLicense(db, licenseId);
-    if (!host) return mkFlash('/hosts', '', 'Host binding not found.');
+    if (!host) return flash('/hosts', '', 'Host binding not found.');
 
     if (action === 'suspend' || action === 'activate') {
       const status = action === 'suspend' ? 'SUSPENDED' : 'ACTIVE';
       await setHostStatus(db, licenseId, status);
       if (status !== 'ACTIVE') await revokeSessionsForLicense(db, licenseId);
       await logEvent(db, { license_id: licenseId, host_id: host.id, event_type: action === 'suspend' ? 'HOST_SUSPENDED' : 'HOST_REACTIVATED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Host status changed by administrator' });
-      return mkFlash('/hosts', action === 'suspend' ? 'Host binding suspended. Sessions revoked.' : 'Host binding reactivated.');
+      return flash('/hosts', action === 'suspend' ? 'Host binding suspended. Sessions revoked.' : 'Host binding reactivated.');
     }
     if (action === 'reset') {
       await deleteHost(db, licenseId);
       await revokeSessionsForLicense(db, licenseId);
       await logEvent(db, { license_id: licenseId, host_id: host.id, event_type: 'HOST_RESET', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Host binding reset from hosts page' });
-      return mkFlash('/hosts', 'Host binding reset.');
+      return flash('/hosts', 'Host binding reset.');
     }
-    return mkFlash('/hosts', '', 'Unknown host action.');
+    return flash('/hosts', '', 'Unknown host action.');
   }
 
   // -------------------------------------------------------------------------
@@ -581,19 +611,19 @@ export async function handleMakAdmin(request, env, db) {
     const sp = await formAll(request);
     if (!verifyCsrf(session, sp.get('_csrf'))) return text('CSRF token rejected.', 403);
     const device = await getDeviceById(db, Number(sp.get('device_id') || 0));
-    if (!device) return mkFlash('/devices', '', 'Device not found.');
+    if (!device) return flash('/devices', '', 'Device not found.');
     const action = String(sp.get('action') || '');
     if (action === 'revoke') {
       await revokeDevice(db, device.id, 'Revoked from devices page', session.username);
       await logEvent(db, { license_id: device.license_id, device_id: device.id, event_type: 'DEVICE_REVOKED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Device revoked by administrator' });
-      return mkFlash('/devices', 'Device revoked.');
+      return flash('/devices', 'Device revoked.');
     }
     if (action === 'delete') {
       await deleteDevice(db, device.id, session.username);
       await logEvent(db, { license_id: device.license_id, device_id: device.id, event_type: 'DEVICE_DELETED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Device row deleted by administrator' });
-      return mkFlash('/devices', 'Device record deleted.');
+      return flash('/devices', 'Device record deleted.');
     }
-    return mkFlash('/devices', '', 'Unknown device action.');
+    return flash('/devices', '', 'Unknown device action.');
   }
 
   // -------------------------------------------------------------------------
@@ -618,15 +648,15 @@ export async function handleMakAdmin(request, env, db) {
     if (action === 'revoke_all') {
       await revokeAllSessions(db, session.username);
       await logEvent(db, { event_type: 'SESSION_GROUP_REVOKED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'All MAK sessions revoked by administrator' });
-      return mkFlash('/sessions', 'All sessions revoked.');
+      return flash('/sessions', 'All sessions revoked.');
     }
     if (action === 'revoke') {
       const ok = await revokeSession(db, String(sp.get('session_id') || ''), 'Revoked from sessions page', session.username);
-      if (!ok) return mkFlash('/sessions', '', 'Session not found or already inactive.');
+      if (!ok) return flash('/sessions', '', 'Session not found or already inactive.');
       await logEvent(db, { event_type: 'SESSION_REVOKED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Session revoked by administrator' });
-      return mkFlash('/sessions', 'Session revoked.');
+      return flash('/sessions', 'Session revoked.');
     }
-    return mkFlash('/sessions', '', 'Unknown session action.');
+    return flash('/sessions', '', 'Unknown session action.');
   }
 
   // -------------------------------------------------------------------------
@@ -682,7 +712,7 @@ export async function handleMakAdmin(request, env, db) {
       enabled = sp.get('server_enabled') === '1';
     }
     if (enabled && !config.ok) {
-      return mkFlash(action === 'toggle' ? '/dashboard' : '/settings', '', 'Signing key is not configured. Activation cannot be enabled.');
+      return flash(action === 'toggle' ? '/dashboard' : '/settings', '', 'Signing key is not configured. Activation cannot be enabled.');
     }
     const maintenance = String(sp.get('maintenance_message') || settings.maintenance_message).trim().slice(0, 300)
       || 'Activation server is temporarily offline for maintenance.';
@@ -692,7 +722,7 @@ export async function handleMakAdmin(request, env, db) {
       ...(action === 'toggle' ? {} : { maintenance_message: maintenance, announcement }),
     });
     await logEvent(db, { event_type: enabled ? 'SERVER_ENABLED' : 'SERVER_DISABLED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: enabled ? 'Activation server switched ON' : 'Activation server switched OFF' });
-    return mkFlash(action === 'toggle' ? '/dashboard' : '/settings', enabled ? 'Activation server is ON.' : 'Activation server is OFF. All MAK decisions fail closed.');
+    return flash(action === 'toggle' ? '/dashboard' : '/settings', enabled ? 'Activation server is ON.' : 'Activation server is OFF. All MAK decisions fail closed.');
   }
 
   if (path === '/settings/protocol' && method === 'POST') {
@@ -706,10 +736,10 @@ export async function handleMakAdmin(request, env, db) {
     const authTtl = clampInt(sp.get('authorization_ttl'), 30, 600, 0);
     const version = String(sp.get('server_version') || '').trim();
     if (!sessionTtl || !heartbeat || !challengeTtl || !clockSkew || !authTtl) {
-      return mkFlash('/settings', '', 'A timing value is outside its allowed range.');
+      return flash('/settings', '', 'A timing value is outside its allowed range.');
     }
     if (!/^[A-Za-z0-9._-]{1,32}$/.test(version)) {
-      return mkFlash('/settings', '', 'Server version label is malformed.');
+      return flash('/settings', '', 'Server version label is malformed.');
     }
     await setSettings(db, {
       session_ttl: String(sessionTtl),
@@ -721,7 +751,7 @@ export async function handleMakAdmin(request, env, db) {
       server_version: version,
     });
     await logEvent(db, { event_type: 'SETTINGS_UPDATED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Protocol timings updated' });
-    return mkFlash('/settings', 'Protocol settings saved.');
+    return flash('/settings', 'Protocol settings saved.');
   }
 
   if (path === '/settings/password' && method === 'POST') {
@@ -731,15 +761,15 @@ export async function handleMakAdmin(request, env, db) {
     const current = String(sp.get('current_password') || '');
     const next = String(sp.get('new_password') || '');
     const confirm = String(sp.get('confirm_password') || '');
-    if (next.length < 10 || next.length > 200) return mkFlash('/settings', '', 'New password must be between 10 and 200 characters.');
-    if (next !== confirm) return mkFlash('/settings', '', 'New passwords do not match.');
+    if (next.length < 10 || next.length > 200) return flash('/settings', '', 'New password must be between 10 and 200 characters.');
+    if (next !== confirm) return flash('/settings', '', 'New passwords do not match.');
     const row = await db.prepare('SELECT * FROM users WHERE id=?').bind(session.id).first().catch(() => null);
     if (!row || !(await verifyPanelPassword(current, row.password_hash))) {
-      return mkFlash('/settings', '', 'Current password is incorrect.');
+      return flash('/settings', '', 'Current password is incorrect.');
     }
     await db.prepare('UPDATE users SET password_hash=? WHERE id=?').bind(await hashPanelPassword(next), session.id).run();
     await logEvent(db, { event_type: 'ADMIN_PASSWORD_CHANGED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Panel password updated from MAK settings' });
-    return mkFlash('/settings', 'Password updated.');
+    return flash('/settings', 'Password updated.');
   }
 
   if (path === '/settings/danger' && method === 'POST') {
@@ -750,15 +780,15 @@ export async function handleMakAdmin(request, env, db) {
     if (action === 'revoke_sessions') {
       await revokeAllSessions(db, session.username);
       await logEvent(db, { event_type: 'SESSION_GROUP_REVOKED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'All sessions revoked from settings' });
-      return mkFlash('/settings', 'All MAK sessions revoked.');
+      return flash('/settings', 'All MAK sessions revoked.');
     }
     if (action === 'clear_challenges') {
       const cutoff = nowS();
       await db.prepare('DELETE FROM mak_challenges WHERE expires_at < ? OR consumed_at IS NOT NULL').bind(cutoff).run();
       await logEvent(db, { event_type: 'CHALLENGES_CLEANED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Expired/consumed challenge rows removed' });
-      return mkFlash('/settings', 'Challenge table cleaned.');
+      return flash('/settings', 'Challenge table cleaned.');
     }
-    return mkFlash('/settings', '', 'Unknown settings action.');
+    return flash('/settings', '', 'Unknown settings action.');
   }
 
   return notFoundResponse(env, request, session, session, settings, config);

@@ -23,8 +23,7 @@ export function panelLayout(o) {
     + '<a href="/server" class="' + navClass('server', route) + '"><i class="bi bi-hdd-fill text-lg w-6 text-center"></i><span>Server &amp; Mod</span></a>'
     : '';
   const SDK = canSeeSdk
-    ? '<div class="side-divider"></div><a href="/sdk" class="' + navClass('sdk', route) + '"><i class="bi bi-boxes text-lg w-6 text-center"></i><span>SDK Panel</span><i class="bi bi-arrow-right-short text-xl ml-auto"></i></a>'
-      + '<a href="/mak" class="' + navClass('mak', route) + '"><i class="bi bi-cpu-fill text-lg w-6 text-center"></i><span>MAK Activation</span></a>'
+    ? '<div class="side-divider"></div><a href="/sdk" class="' + navClass('sdk', route) + '"><i class="bi bi-boxes text-lg w-6 text-center"></i><span>SDK / MAK Panel</span><i class="bi bi-arrow-right-short text-xl ml-auto"></i></a>'
     : '';
   const OPENCODE = sess.id === 1
     ? '<a href="/opencode" class="' + navClass('opencode', route) + '"><i class="bi bi-terminal-fill text-lg w-6 text-center"></i><span>OpenCode Control</span></a>'
@@ -36,7 +35,7 @@ export function panelLayout(o) {
     .concat(isProf ? [['Professor Console', '/professor', 'bi-mortarboard-fill']] : [])
     .concat(isOA ? [['Users', '/users', 'bi-people-fill'], ['Referrals', '/referral', 'bi-diagram-3-fill'], ['Server & mod', '/server', 'bi-hdd-fill'], ['API tester', '/api-test', 'bi-broadcast'], ['Mod / loader', '/loader-manager', 'bi-box-seam-fill']] : [])
     .concat(isOwner ? [['Encryption', '/enc-api', 'bi-shield-check']] : [])
-    .concat(canSeeSdk ? [['SDK panel', '/sdk', 'bi-boxes'], ['MAK activation', '/mak', 'bi-cpu']] : [])
+    .concat(canSeeSdk ? [['SDK / MAK panel', '/sdk', 'bi-boxes']] : [])
     .concat(sess.id === 1 ? [['OpenCode app', '/opencode', 'bi-phone']] : [])
     .concat((sess.id === 1 || isProf) ? [['Tenants', '/tenant', 'bi-server']] : []);
   return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'

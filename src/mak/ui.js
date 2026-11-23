@@ -676,6 +676,8 @@ export function layout(o) {
       ${navItem('/logs', active === 'logs', 'activity', 'Security Logs')}
       <div class="nav-label">System</div>
       ${navItem('/settings', active === 'settings', 'settings', 'Settings')}
+      <a href="/sdk/server" class="nav-item">${icon('server', 17)}<span>Server &amp; API</span></a>
+      <a href="/sdk/hash" class="nav-item">${icon('fingerprint', 17)}<span>Hash Vault</span></a>
     </nav>
     <div class="sidebar-foot">
       <div class="user-card">

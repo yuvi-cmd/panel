@@ -6,14 +6,21 @@
 
 ## MAK activation (added to this panel)
 
-The existing SDK Panel is unchanged. MAK/1 lives inside it:
+The existing SDK Panel is unchanged. Every MAK management screen now lives
+inside it under `/sdk`:
 
-- `/mak` — MAK overview, server ON/OFF, recent decisions
-- `/mak/licenses` — issue / replay / suspend / rotate / revoke MAKs
-- `/mak/guests` — approved guest APKs + per-license operation permissions
-- `/mak/hosts` — host package + signing-certificate bindings
-- `/mak/devices`, `/mak/sessions`, `/mak/logs` — device/session control and audit trail
-- `/mak/settings` — protocol timings, signing identity, password
+- `/sdk` — MAK overview, server ON/OFF, recent decisions
+- `/sdk/generate` — issue a new MAK
+- `/sdk/keys` — list MAKs; `/sdk/keys/:id` suspend / rotate / revoke / bind guests / revoke devices and sessions
+- `/sdk/guests` — approved guest APKs + per-license operation permissions
+- `/sdk/hosts` — host package + signing-certificate bindings
+- `/sdk/devices`, `/sdk/sessions`, `/sdk/logs` — device/session control and audit trail
+- `/sdk/settings` — protocol timings, signing identity, password
+- `/sdk/server` — kill switch + MAK/1 endpoint status
+- `/sdk/hash` — universal lib hash vault
+
+Legacy `/mak` and `/mak/licenses` URLs redirect into `/sdk`; there is no second
+MAK console any more. The protocol base `/mak/v1/*` is unchanged.
 
 Public protocol endpoints (no panel login): `/mak/v1/challenge`, `/authorize`,
 `/guest/check`, `/renew`, `/heartbeat`, `/events`, `/status`, plus the
@@ -40,8 +47,8 @@ step is needed after a deploy.
   `/generate` (pricing + balance + bulk + server type), `/keys` (reset/edit/extend/bulk)
 - `/users`, `/admins`, `/permissions`, `/referral` (OWNER/ADMIN rules PHP jaise)
 - `/server` (maintenance + mod config), `/settings` (password + branding + API URLs), `/aes` (AES rotate + activation keys), `/api-test`, `/loader-manager`, `/create-panel` (id==1)
-- `/sdk` — MAK dashboard, `/sdk/generate` issue MAK, `/sdk/keys` MAK licenses,
-  `/sdk/server` MAK/1 endpoints + kill switch, `/sdk/hash` universal lib hash
+- `/sdk/*` — full MAK dashboard, generation, license management, guests,
+  devices, sessions, logs, settings, server and hash vault
   (sirf main OWNER id==1 / PROFESSOR). BCORE/MUNDO flow removed.
 - `/opencode` — standalone OpenCode Android control plane with its **own login**
   (`/opencode/login`), global APK ON/OFF, Gmail accounts, device lock, notices and
@@ -54,6 +61,8 @@ step is needed after a deploy.
 - `POST /encrypt/:panel` — same + AES-256-CBC payload (panel active + AES configured hona chahiye)
 - `POST /mak/v1/challenge`, `/authorize`, `/guest/check`, `/renew`, `/heartbeat`, `/events` — MAK/1 activation
 - `GET /mak/v1/status` — public signing/server status
+- C++/Android host integration (old `/sdk/mundo` + `/sdk/bcore` endpoints retired):
+  [docs/CPP-INTEGRATION.md](docs/CPP-INTEGRATION.md)
 
 ## Deploy
 

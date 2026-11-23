@@ -231,24 +231,26 @@ async function main() {
     assert.equal(sdk.status, 200);
     assert.match(sdkHtml, /MAK Activation/);
 
-    const dash = await call(env, '/mak', { cookie });
+    const dash = await call(env, '/sdk/settings', { cookie });
     assert.equal(dash.status, 200);
     const dashHtml = await dash.text();
     assert.match(dashHtml, /MAK Keys/);
     assert.match(dashHtml, /Back to SDK Panel/);
+    assert.match(dashHtml, /href="\/sdk\/keys"/);
+    assert.doesNotMatch(dashHtml, /href="\/mak(?!\/v1)/);
     const token = csrf(dashHtml);
 
-    const noCsrf = await call(env, '/mak/settings/server', {
+    const noCsrf = await call(env, '/sdk/settings/server', {
       method: 'POST', cookie, body: form({ action: 'save' }),
     });
     assert.equal(noCsrf.status, 403);
 
-    const newPage = await call(env, '/mak/licenses/new', { cookie });
+    const newPage = await call(env, '/sdk/generate', { cookie });
     assert.equal(newPage.status, 200);
     const newHtml = await newPage.text();
     assert.equal(csrf(newHtml), token);
 
-    const issued = await call(env, '/mak/licenses/new', {
+    const issued = await call(env, '/sdk/generate', {
       method: 'POST',
       cookie,
       body: form({
@@ -274,9 +276,12 @@ async function main() {
     assert.notEqual(license.credential_hash, makMatch[0]);
     assert.equal(license.activation_count, 0);
 
-    const detail = await call(env, '/mak/licenses/' + license.id, { cookie });
+    const detail = await call(env, '/sdk/keys/' + license.id, { cookie });
     assert.equal(detail.status, 200);
-    assert.match(await detail.text(), /Test License/);
+    const detailHtml = await detail.text();
+    assert.match(detailHtml, /Test License/);
+    assert.match(detailHtml, new RegExp('/sdk/keys/' + license.id + '/action'));
+    assert.doesNotMatch(detailHtml, /href="\/mak(?!\/v1)/);
 
     env.__test = { cookie, token, license, credential: makMatch[0], device: await makeDevice() };
   });
@@ -322,7 +327,7 @@ async function main() {
 
     // Admin registers and binds the exact guest build.
     const { cookie, token } = env.__test;
-    const guestPost = await call(env, '/mak/guests/new', {
+    const guestPost = await call(env, '/sdk/guests/new', {
       method: 'POST', cookie,
       body: form({ _csrf: token, package_name: guestPackage, app_name: 'Guest', apk_sha256: apkHash, cert_sha256: guestCert, version_code: '1' }),
     });
@@ -330,7 +335,7 @@ async function main() {
     const guest = await env.DB.prepare('SELECT * FROM mak_guest_apps ORDER BY id DESC LIMIT 1').first();
     assert.equal(guest.package_name, guestPackage);
 
-    const bind = await call(env, `/mak/licenses/${license.id}/action`, {
+    const bind = await call(env, `/sdk/keys/${license.id}/action`, {
       method: 'POST', cookie,
       body: form({ _csrf: token, action: 'binding_add', guest_id: guest.id, perm_launch: '1' }),
     });
@@ -431,7 +436,7 @@ async function main() {
     assert.equal(badJson.code, 'INVALID_DEVICE_PROOF');
 
     // Server OFF denies every decision, but /status stays available.
-    const off = await call(env, '/mak/settings/server', {
+    const off = await call(env, '/sdk/settings/server', {
       method: 'POST', cookie,
       body: form({ _csrf: token, action: 'save', maintenance_message: 'Planned maintenance' }),
     });
@@ -449,7 +454,7 @@ async function main() {
     assert.equal(statusJson.server_enabled, false);
     assert.equal(statusJson.signature_alg, 'Ed25519');
 
-    const on = await call(env, '/mak/settings/server', {
+    const on = await call(env, '/sdk/settings/server', {
       method: 'POST', cookie,
       body: form({ _csrf: token, action: 'save', server_enabled: '1', maintenance_message: 'OK', announcement: '' }),
     });
@@ -463,7 +468,7 @@ async function main() {
     const env = globalThis.__lastEnv;
     const { license, credential, device, cookie, token } = env.__test;
 
-    const suspend = await call(env, `/mak/licenses/${license.id}/action`, {
+    const suspend = await call(env, `/sdk/keys/${license.id}/action`, {
       method: 'POST', cookie,
       body: form({ _csrf: token, action: 'suspend' }),
     });
@@ -473,7 +478,7 @@ async function main() {
     assert.equal(suspended.response.decision, 'DENY');
     assert.equal(suspended.response.code, 'LICENSE_SUSPENDED');
 
-    const reactivate = await call(env, `/mak/licenses/${license.id}/action`, {
+    const reactivate = await call(env, `/sdk/keys/${license.id}/action`, {
       method: 'POST', cookie,
       body: form({ _csrf: token, action: 'reactivate' }),
     });
@@ -482,7 +487,7 @@ async function main() {
     assert.equal(activeAgain.status, 200, JSON.stringify(activeAgain.response));
     assert.equal(activeAgain.response.decision, 'ALLOW');
 
-    const revoke = await call(env, `/mak/licenses/${license.id}/action`, {
+    const revoke = await call(env, `/sdk/keys/${license.id}/action`, {
       method: 'POST', cookie,
       body: form({ _csrf: token, action: 'revoke' }),
     });
