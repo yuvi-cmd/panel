@@ -75,7 +75,7 @@ export function keysPage(o) {
         + '<input type="hidden" name="host_id" value="' + Number(h.id) + '"></form>';
     }).join('');
 
-    const details = '<details class="mt-3">'
+    const details = '<details id="mak-details-' + id + '" class="mt-3">'
       + '<summary class="cursor-pointer text-[11px] font-extrabold uppercase tracking-wider text-purple-600 select-none">MAK details &amp; quick actions</summary>'
       + '<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">'
       + infoRow('License ID', '<span class="font-mono">' + esc(l.license_uid) + '</span>')
@@ -118,13 +118,23 @@ export function keysPage(o) {
       ? '<span class="text-[10px] font-mono text-slate-500 break-all">' + esc(l.host_package) + (pkgCount > 1 ? ' +' + (pkgCount - 1) + ' more' : '') + '</span>'
       : '<span class="text-[10px] text-slate-400">' + (String(l.host_bind_mode || 'AUTO') === 'MANUAL' ? 'Manual / unbound' : 'Auto / unbound') + '</span>';
 
+    const secret = String(l.credential_plain || '');
+    const secretBox = secret
+      ? '<div class="clay-card p-2.5 mt-3 flex items-center gap-2 rounded-2xl">'
+        + '<code id="mak-key-' + id + '" data-hidden="1" class="flex-1 text-xs font-mono font-bold text-slate-700 break-all" style="filter:blur(5px);user-select:none">' + esc(secret) + '</code>'
+        + '<button type="button" onclick="toggleMakKey(' + id + ')" class="w-8 h-8 shrink-0 rounded-lg text-slate-500 hover:text-purple-600" title="Show / hide key"><i id="mak-eye-' + id + '" class="bi bi-eye"></i></button>'
+        + '<button type="button" onclick="copyMakKey(' + id + ')" class="w-8 h-8 shrink-0 rounded-lg text-slate-500 hover:text-purple-600" title="Copy key"><i class="bi bi-clipboard"></i></button>'
+        + '</div>'
+      : '<div class="clay-card p-2.5 mt-3 rounded-2xl text-[10px] text-slate-400">Raw key is not stored for this older MAK. Rotate it to get a copyable key here.</div>';
+
     return '<div class="glass-card p-4 md:p-5"><div class="flex flex-wrap items-start justify-between gap-3">'
       + '<div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2 mb-1">' + statusChip(l.status)
       + '<span class="text-[10px] font-extrabold px-2 py-1 rounded-lg bg-purple-50 text-purple-600">' + esc(fmtDate(l.expires_at)) + '</span></div>'
       + '<p class="text-sm md:text-base font-bold text-slate-800 truncate">' + esc(l.label || l.license_uid) + '</p>'
       + '<p class="text-[10px] font-mono text-slate-400 mt-0.5 break-all">' + esc(l.license_uid) + (l.user_ref ? ' · ' + esc(l.user_ref) : '') + '</p>'
       + '<div class="mt-2">' + hostLine + '</div></div>'
-      + '<a href="/sdk/keys/' + id + '" class="btn-premium px-4 py-2 rounded-xl text-xs font-bold">Manage</a></div>'
+      + '<button type="button" onclick="openMakDetails(' + id + ')" class="btn-premium px-4 py-2 rounded-xl text-xs font-bold">Details</button></div>'
+      + secretBox
       + '<div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-4">'
       + '<div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">PACKAGES</p><p class="text-xs font-black">' + pkgCount + ' / ' + maxPackages + '</p></div>'
       + '<div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">APPS / PKG</p><p class="text-xs font-black">' + Number(l.guest_count || 0) + ' / ' + maxApps + '</p></div>'
@@ -140,5 +150,11 @@ export function keysPage(o) {
     + '<button class="btn-premium px-4 py-2 rounded-xl text-xs font-bold">Search</button></form></div>'
     + filterHtml
     + '<div class="space-y-3">' + rows + '</div>'
-    + '<p class="text-[11px] text-slate-400 mt-4"><i class="bi bi-info-circle"></i> Raw MAK values are never stored. Open a key to rotate a credential if a customer loses it.</p>';
+    + '<p class="text-[11px] text-slate-400 mt-4"><i class="bi bi-info-circle"></i> Raw MAK values are stored in D1 so the owner can reveal them here. Keep panel access restricted.</p>'
+    + '<script>'
+    + 'function toggleMakKey(id){var el=document.getElementById("mak-key-"+id);var eye=document.getElementById("mak-eye-"+id);if(!el)return;var hidden=el.getAttribute("data-hidden")==="1";el.style.filter=hidden?"none":"blur(5px)";el.style.userSelect=hidden?"text":"none";el.setAttribute("data-hidden",hidden?"0":"1");if(eye)eye.className=hidden?"bi bi-eye-slash":"bi bi-eye";}'
+    + 'function copyMakKey(id){var el=document.getElementById("mak-key-"+id);if(!el)return;var text=el.textContent.trim();var done=function(){var old=el.style.filter;el.style.filter="none";setTimeout(function(){if(el.getAttribute("data-hidden")==="1")el.style.filter=old||"blur(5px)";},900);};if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(done,function(){fallbackMakCopy(text);done();});}else{fallbackMakCopy(text);done();}}'
+    + 'function fallbackMakCopy(text){var t=document.createElement("textarea");t.value=text;t.style.position="fixed";t.style.opacity="0";document.body.appendChild(t);t.select();try{document.execCommand("copy");}catch(e){}document.body.removeChild(t);}'
+    + 'function openMakDetails(id){var d=document.getElementById("mak-details-"+id);if(!d)return;d.open=true;d.scrollIntoView({behavior:"smooth",block:"start"});}'
+    + '</script>';
 }

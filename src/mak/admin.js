@@ -420,7 +420,7 @@ export async function handleMakAdmin(request, env, db, options = {}) {
       if (action === 'rotate') {
         const credential = generateMak();
         const canonical = canonicalMak(credential);
-        await rotateLicenseCredential(db, id, await makHash(canonical));
+        await rotateLicenseCredential(db, id, await makHash(canonical), canonical);
         const refreshed = await getLicenseById(db, id);
         await logEvent(db, { license_id: id, event_type: 'CREDENTIAL_ROTATED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'MAK credential rotated; sessions revoked' });
         return panelResponse(env, request, session, session, settings, config, {

@@ -10,11 +10,9 @@ import {
   b64decode,
   b64encode,
   canonicalJson,
-  canonicalMak,
   generateGrantId,
   generateTicketId,
   hashIp,
-  makHash,
   normalizeHex64,
   nowS,
   randomId,
@@ -30,8 +28,8 @@ import {
   bindGuestAtomic,
   createHostAtomic,
   findHostForLicensePackage,
+  findLicenseByCredential,
   getBinding,
-  getLicenseByHash,
   touchHost,
   touchLicense,
 } from './store.js';
@@ -295,9 +293,7 @@ export async function handleMakV2(request, env, db) {
       const body = read.payload;
       const requestId = cleanRequestId(body.request_id);
 
-      const canonicalCredential = canonicalMak(body.mak);
-      if (!canonicalCredential) throw new HttpError(403, 'INVALID_LICENSE', 'Invalid MAK credential');
-      const license = await getLicenseByHash(db, await makHash(canonicalCredential));
+      const license = await findLicenseByCredential(db, body.mak);
       if (!license) throw new HttpError(403, 'INVALID_LICENSE', 'Invalid MAK credential');
       const licProblem = licenseProblem(license);
       if (licProblem) throw new HttpError(403, licProblem, 'License is not active');
@@ -397,9 +393,7 @@ export async function handleMakV2(request, env, db) {
       const body = read.payload;
       const requestId = cleanRequestId(body.request_id);
 
-      const canonicalCredential = canonicalMak(body.mak);
-      if (!canonicalCredential) throw new HttpError(403, 'INVALID_LICENSE', 'Invalid MAK credential');
-      const license = await getLicenseByHash(db, await makHash(canonicalCredential));
+      const license = await findLicenseByCredential(db, body.mak);
       if (!license) throw new HttpError(403, 'INVALID_LICENSE', 'Invalid MAK credential');
       const grant = await getGrantById(db, body.grant_id);
       const problem = grantProblem(grant);
@@ -456,9 +450,7 @@ export async function handleMakV2(request, env, db) {
       const operation = String(body.operation || '').toUpperCase();
       if (!OPS.includes(operation)) throw new HttpError(400, 'UNKNOWN_ERROR', 'Unsupported operation');
 
-      const canonicalCredential = canonicalMak(body.mak);
-      if (!canonicalCredential) throw new HttpError(403, 'INVALID_LICENSE', 'Invalid MAK credential');
-      const license = await getLicenseByHash(db, await makHash(canonicalCredential));
+      const license = await findLicenseByCredential(db, body.mak);
       if (!license) throw new HttpError(403, 'INVALID_LICENSE', 'Invalid MAK credential');
       const grant = await getGrantById(db, body.grant_id);
       const problem = grantProblem(grant);
@@ -589,9 +581,7 @@ export async function handleMakV2(request, env, db) {
       ctx = read.ctx;
       const body = read.payload;
       const requestId = cleanRequestId(body.request_id);
-      const canonicalCredential = canonicalMak(body.mak);
-      if (!canonicalCredential) throw new HttpError(403, 'INVALID_LICENSE', 'Invalid MAK credential');
-      const license = await getLicenseByHash(db, await makHash(canonicalCredential));
+      const license = await findLicenseByCredential(db, body.mak);
       if (!license) throw new HttpError(403, 'INVALID_LICENSE', 'Invalid MAK credential');
       const grant = await getGrantById(db, body.grant_id);
       if (!grant || Number(grant.license_id) !== Number(license.id)) {
@@ -618,9 +608,7 @@ export async function handleMakV2(request, env, db) {
       ctx = read.ctx;
       const body = read.payload;
       const requestId = cleanRequestId(body.request_id);
-      const canonicalCredential = canonicalMak(body.mak);
-      if (!canonicalCredential) throw new HttpError(403, 'INVALID_LICENSE', 'Invalid MAK credential');
-      const license = await getLicenseByHash(db, await makHash(canonicalCredential));
+      const license = await findLicenseByCredential(db, body.mak);
       if (!license) throw new HttpError(403, 'INVALID_LICENSE', 'Invalid MAK credential');
       const grant = await getGrantById(db, body.grant_id);
       if (!grant || Number(grant.license_id) !== Number(license.id)) {

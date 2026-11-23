@@ -523,6 +523,32 @@ async function main() {
     assert.match(second.html, /already in use/i);
   });
 
+  await test('any-length custom MAK works and is revealed blurred on MAK Keys', async () => {
+    const env = globalThis.__lastEnv;
+    const { cookie, token } = env.__test;
+    const custom = 'rahul-ki-key';
+    const issued = await issueLicense(env, cookie, token, {
+      label: 'Short custom', custom_key: custom, signature_bind: '0', max_installs: '1',
+    });
+    assert.equal(issued.res.status, 200, issued.html.slice(0, 300));
+    assert.ok(issued.html.includes(custom), 'custom key is shown verbatim');
+
+    const row = await env.DB.prepare('SELECT * FROM mak_licenses ORDER BY id DESC LIMIT 1').first();
+    assert.equal(row.credential_plain, custom);
+    assert.notEqual(row.credential_hash, custom);
+
+    const activated = await activate(env, custom, { hostPackage: 'com.custom.host' });
+    assert.equal(activated.body.decision, 'ALLOW', JSON.stringify(activated.body));
+
+    const page = await call(env, '/sdk/keys', { cookie });
+    const html = await page.text();
+    assert.equal(page.status, 200);
+    assert.ok(html.includes(custom), 'raw MAK is available on the keys page');
+    assert.match(html, /toggleMakKey/);
+    assert.match(html, /copyMakKey/);
+    assert.match(html, /blur\(5px\)/);
+  });
+
   await test('server-side expiry rejects an expired license', async () => {
     const env = globalThis.__lastEnv;
     const { cookie, token } = env.__test;

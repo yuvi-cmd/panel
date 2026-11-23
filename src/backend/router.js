@@ -31,6 +31,7 @@ import { panelLayout } from '../frontend/panel-ui.js';
 import { loginPage, registerPage, resetPage, joinPage } from '../frontend/auth.js';
 import { dashboardPage, generatePage } from '../frontend/sdk/dash.js';
 import { keysPage } from '../frontend/sdk/keys.js';
+import { settingsPage as sdkSettingsPage } from '../frontend/sdk/settings.js';
 import { serverPage as sdkServerPage, hashPage } from '../frontend/sdk/server.js';
 import { panelDashboard, panelGenerate, panelKeyList, KEY_PRICING, KEY_DURATIONS, arcxRand } from '../frontend/panel/dash.js';
 import { usersPage, adminsPage, permissionsPage, referralPage } from '../frontend/panel/users.js';
@@ -929,6 +930,36 @@ export default {
 
     if (path === '/sdk/keys/new') return redir('/sdk/generate');
     if (path === '/sdk/dashboard') return redir('/sdk');
+
+    if (path === '/sdk/settings' && method === 'GET') {
+      const g = sdkGate(); if (g) return g;
+      const admin = await sdkAdmin();
+      if (!admin) return redir('/login?next=' + encodeURIComponent('/sdk/settings'));
+      const [settings, keys] = await Promise.all([getSettings(db), loadKeyConfig(db, env)]);
+      const signing = keys.signing;
+      const encryption = keys.encryption;
+      const signingPublic = signing.ok ? signing.active.public_key : '';
+      const encryptionPublic = encryption.ok ? encryption.public_key : '';
+      return S('sdk/settings', 'MAK Settings', sdkSettingsPage({
+        csrf: admin.csrf,
+        admin,
+        settings,
+        signing: {
+          ok: signing.ok,
+          reason: signing.reason,
+          keyId: signing.ok ? signing.active.key_id : '',
+          fingerprint: signingPublic ? await publicKeyFingerprint(signingPublic) : '',
+        },
+        encryption: {
+          ok: encryption.ok,
+          reason: encryption.reason,
+          keyId: encryption.key_id,
+          fingerprint: encryptionPublic ? await publicKeyFingerprint(encryptionPublic) : '',
+        },
+        ok: String(url.searchParams.get('ok') || '').slice(0, 200),
+        err: String(url.searchParams.get('err') || '').slice(0, 200),
+      }));
+    }
 
     // Full MAK management lives inside the SDK Panel. The MAK admin module is
     // reused with an internal path mapping so there is no second console at

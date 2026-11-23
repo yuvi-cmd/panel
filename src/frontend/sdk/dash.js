@@ -42,7 +42,7 @@ export function dashboardPage(d) {
     + '<p class="text-[10px] font-mono text-slate-400 mt-0.5">' + esc(l.license_uid) + (l.host_package ? ' · ' + esc(l.host_package) : '') + '</p></div>'
     + '<div class="flex items-center gap-2">' + statusChip(l.status)
     + '<span class="text-[10px] text-slate-400">' + esc(fmtDate(l.expires_at)) + '</span>'
-    + '<a href="/sdk/keys/' + Number(l.id) + '" class="clay-card px-3 py-1.5 text-xs font-bold text-slate-600 rounded-xl">Open</a></div></div>'
+    + '<a href="/sdk/keys?q=' + encodeURIComponent(l.license_uid) + '" class="clay-card px-3 py-1.5 text-xs font-bold text-slate-600 rounded-xl">Open</a></div></div>'
   ).join('') : '<div class="text-center py-8 text-slate-400"><i class="bi bi-inbox text-4xl mb-2 opacity-40"></i><p class="text-sm">No MAK issued yet</p><a href="/sdk/generate" class="inline-block mt-2 text-xs font-bold text-purple-600 hover:underline">Generate the first MAK →</a></div>';
 
   return warnings.join('')
@@ -86,7 +86,7 @@ export function generatePage(o) {
       + '<div class="clay-card p-3 flex items-center gap-2 mt-3 rounded-2xl"><code id="new-mak" class="flex-1 text-sm md:text-base font-mono font-bold text-slate-800 break-all">' + esc(s.credential) + '</code>'
       + '<button type="button" onclick="copyMak()" class="btn-premium px-3 py-2 rounded-xl text-xs font-bold"><i class="bi bi-clipboard"></i> Copy</button></div>'
       + '<p class="text-[11px] text-amber-700 mt-2"><i class="bi bi-exclamation-triangle-fill"></i> This is the only time the raw MAK is shown. Store it now.</p>'
-      + '<div class="flex flex-wrap gap-2 mt-3"><a href="/sdk/keys/' + Number(s.licenseId) + '" class="clay-card px-3 py-2 text-xs font-bold rounded-xl">Open license</a><a href="/sdk/generate" class="btn-premium px-3 py-2 text-xs font-bold rounded-xl">Issue another</a></div></div>';
+      + '<div class="flex flex-wrap gap-2 mt-3"><a href="/sdk/keys?q=' + encodeURIComponent((s.license && s.license.license_uid) || '') + '" class="clay-card px-3 py-2 text-xs font-bold rounded-xl">Open license</a><a href="/sdk/generate" class="btn-premium px-3 py-2 text-xs font-bold rounded-xl">Issue another</a></div></div>';
   }
   if (o.error) {
     notice = '<div class="glass-card p-4 mb-6" style="border-left:4px solid #ef4444"><p class="text-xs font-bold text-red-700"><i class="bi bi-exclamation-circle-fill mr-1"></i> ' + esc(o.error) + '</p></div>';
@@ -148,10 +148,10 @@ export function generatePage(o) {
     + '<div class="pagehead"><div class="ph-ic"><i class="bi bi-key-fill"></i></div><div class="flex-1 min-w-0"><h1 class="truncate">Generate MAK</h1><p class="truncate">Clean app-locked license for MUNDO</p></div></div>'
     + '<form method="POST" action="/sdk/generate" class="glass-card p-5 md:p-7" id="mak-form">'
     + '<input type="hidden" name="_csrf" value="' + esc(o.csrf || '') + '">'
-    + '<div class="flex items-center gap-3 mb-6 pb-4 border-b border-slate-200"><div class="w-12 h-12 rounded-2xl avatar-premium flex items-center justify-center text-white shadow-lg"><i class="bi bi-cpu-fill text-xl"></i></div><div><h3 class="font-black text-slate-800">MAK /2 License</h3><p class="text-xs text-slate-500">App-locked grant. Raw key shown once; server stores only a SHA-256 verifier.</p></div></div>'
+    + '<div class="flex items-center gap-3 mb-6 pb-4 border-b border-slate-200"><div class="w-12 h-12 rounded-2xl avatar-premium flex items-center justify-center text-white shadow-lg"><i class="bi bi-cpu-fill text-xl"></i></div><div><h3 class="font-black text-slate-800">MAK /2 License</h3><p class="text-xs text-slate-500">App-locked grant. Raw key stays in D1 and can be revealed from MAK Keys.</p></div></div>'
     + '<div class="grid lg:grid-cols-2 gap-5">'
     + '<div class="space-y-4">'
-    + field('Custom MAK key', input('custom_key', values.custom_key, 'maxlength="32" placeholder="Blank = random key"'), 'Blank chhodo to random `MAK-XXXXX-...` generate hoga.')
+    + field('Custom MAK key', input('custom_key', values.custom_key, 'maxlength="120" placeholder="Koi bhi key — blank = random"'), 'Koi fixed length nahi. Jo likhoge bilkul wahi key chalegi (case-sensitive).')
     + field('Label <span class="text-red-500">*</span>', input('label', values.label, 'required maxlength="80" placeholder="e.g. Rahul monthly"'))
     + field('Duration <span class="text-red-500">*</span>', durationSelect, 'Expiry grant me signed hoti hai; AAR device clock se check karega.')
     + '<div id="mak-custom-expiry" style="display:' + (String(values.duration || '30') === 'custom' ? 'block' : 'none') + '"><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Custom expiry date</label><input type="date" name="expires_on" value="' + esc(values.expires_on || o.defaultExpiry || '') + '" class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'

@@ -130,6 +130,18 @@ export async function makHash(canonical) {
   return sha256Hex('MAK-VERIFIER-V1|' + canonical);
 }
 
+// Incoming MAKs can be a generated canonical key or any custom secret the
+// operator chose. Try the canonical form first so lowercase/missing-dash
+// variants of generated keys still resolve, then the exact trimmed string.
+export function makCredentialVariants(value) {
+  const raw = String(value || '').trim().slice(0, 120);
+  const out = [];
+  const canonical = canonicalMak(raw);
+  if (canonical) out.push(canonical);
+  if (raw && !out.includes(raw)) out.push(raw);
+  return out;
+}
+
 export function generateLicenseUid() {
   const bytes = randomBytes(10);
   let raw = '';

@@ -72,7 +72,7 @@ export function newLicensePage({ csrf, guests = [], error = '', values = {}, def
     ${pageHeader({
       eyebrow: 'Issue credential',
       title: 'Issue a MAK',
-      subtitle: 'The raw credential is shown once. Only its verifier is stored in D1.',
+      subtitle: 'The raw credential is stored in D1 and can be revealed from MAK Keys.',
       actions: `<a class="btn" href="/licenses">${icon('chevron-left', 16)} Back</a>`,
     })}
     ${error ? `<div class="alert alert-bad"><span class="alert-ic">${icon('alert', 18)}</span><div class="alert-body">${esc(error)}</div></div>` : ''}
@@ -120,7 +120,7 @@ export function newLicensePage({ csrf, guests = [], error = '', values = {}, def
             ${sectionHead('What happens next')}
             <div class="timeline">
               <div class="timeline-item"><span class="timeline-dot"></span><div class="timeline-main"><b>Credential generated</b><p>100-bit random MAK, formatted and hashed with SHA-256.</p></div></div>
-              <div class="timeline-item"><span class="timeline-dot"></span><div class="timeline-main"><b>One-time reveal</b><p>The raw key is shown once and never stored in plaintext.</p></div></div>
+              <div class="timeline-item"><span class="timeline-dot"></span><div class="timeline-main"><b>Revealable key</b><p>The raw key stays in D1 and is shown blurred on MAK Keys with eye/copy controls.</p></div></div>
               <div class="timeline-item"><span class="timeline-dot ok"></span><div class="timeline-main"><b>Silent host auth</b><p>Your host APK calls /challenge then /authorize automatically.</p></div></div>
               <div class="timeline-item"><span class="timeline-dot ok"></span><div class="timeline-main"><b>Native guest gate</b><p>Each install / launch receives a signed guest authorization.</p></div></div>
             </div>
@@ -156,7 +156,7 @@ export function revealLicensePage({ license, credential, csrf, server }) {
       ${codeValue('new-mak', credential, { tall: true })}
       <div class="row" style="margin-top:12px">
         <button class="btn" type="button" onclick="downloadText('new-mak','mak-${esc(license.license_uid)}.txt',this)">${icon('download', 15)} Download .txt</button>
-        <span class="muted" style="font-size:10.5px">Raw key is never stored. Only its SHA-256 verifier remains in D1.</span>
+        <span class="muted" style="font-size:10.5px">Raw key is stored in D1 so you can reveal or copy it later from MAK Keys.</span>
       </div>
       <div class="divider"></div>
       <dl class="kv">

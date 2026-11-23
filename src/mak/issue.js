@@ -9,7 +9,7 @@
 //   - optional host + guest app rows, each with its own signature
 
 import {
-  canonicalMak, clampInt, generateLicenseUid, generateMak, makHash,
+  clampInt, generateLicenseUid, generateMak, makHash,
   normalizeHex64, nowS, validPackageName,
 } from './crypto.js';
 import {
@@ -148,11 +148,10 @@ export async function issueMak(db, sp, createdBy) {
   const parsed = parseLicensePolicy(sp);
   if (parsed.error) return { error: parsed.error };
 
-  const customRaw = String(sp.get('custom_key') || '').trim();
+  const customRaw = String(sp.get('custom_key') || '').trim().slice(0, 120);
   let credential;
   if (customRaw) {
-    credential = canonicalMak(customRaw);
-    if (!credential) return { error: 'Custom MAK must be 20 Crockford characters (MAK-XXXXX-XXXXX-XXXXX-XXXXX).' };
+    credential = customRaw;
   } else {
     credential = generateMak();
   }
@@ -172,6 +171,7 @@ export async function issueMak(db, sp, createdBy) {
     licenseId = await createLicenseRecord(db, {
       license_uid: licenseUid,
       credential_hash: credentialHash,
+      credential_plain: credential,
       ...parsed.policy,
       host: parsed.host,
       guest_ids: guestIds,

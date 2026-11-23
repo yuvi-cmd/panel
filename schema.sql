@@ -292,6 +292,7 @@ CREATE TABLE IF NOT EXISTS mak_licenses (
   label            TEXT NOT NULL DEFAULT '',
   user_ref         TEXT NOT NULL DEFAULT '',
   credential_hash  TEXT NOT NULL UNIQUE,
+  credential_plain TEXT NOT NULL DEFAULT '',
   status           TEXT NOT NULL DEFAULT 'ACTIVE', -- ACTIVE | SUSPENDED | REVOKED
   created_at       INTEGER NOT NULL,
   updated_at       INTEGER NOT NULL,

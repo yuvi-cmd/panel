@@ -1,6 +1,6 @@
 // D1 repository. Every query is prepared; no user-controlled SQL fragments.
 
-import { nowS, randomId } from './crypto.js';
+import { makCredentialVariants, makHash, nowS, randomId } from './crypto.js';
 import { bumpLicenseEpoch, revokeGrantsForLicense } from './store-v2.js';
 
 const LICENSE_POLICY_KEYS = new Set([
@@ -22,6 +22,14 @@ export async function getLicenseByUid(db, uid) {
 
 export async function getLicenseByHash(db, hash) {
   return db.prepare('SELECT * FROM mak_licenses WHERE credential_hash=?').bind(String(hash || '')).first().catch(() => null);
+}
+
+export async function findLicenseByCredential(db, value) {
+  for (const variant of makCredentialVariants(value)) {
+    const license = await getLicenseByHash(db, await makHash(variant));
+    if (license) return license;
+  }
+  return null;
 }
 
 export async function licenseCounts(db) {
@@ -75,16 +83,17 @@ export async function createLicenseRecord(db, input) {
   const now = nowS();
   const inserted = await db.prepare(
     `INSERT INTO mak_licenses
-      (license_uid,label,user_ref,credential_hash,status,created_at,updated_at,expires_at,
+      (license_uid,label,user_ref,credential_hash,credential_plain,status,created_at,updated_at,expires_at,
        max_devices,max_activations,activation_count,session_ttl,max_packages,max_apps,
        max_installs,signature_bind,host_bind_mode,epoch,notes,created_by)
-     VALUES (?,?,?,?, 'ACTIVE', ?,?,?,?,?,0,?,?,?,?,?,?,1,?,?)
+     VALUES (?,?,?,?,?, 'ACTIVE', ?,?,?,?,?,0,?,?,?,?,?,?,1,?,?)
      RETURNING id`,
   ).bind(
     input.license_uid,
     input.label || '',
     input.user_ref || '',
     input.credential_hash,
+    String(input.credential_plain || '').slice(0, 120),
     now, now, input.expires_at || null,
     input.max_devices || 1, input.max_activations || 1,
     input.session_ttl || 3600,
@@ -162,9 +171,9 @@ export async function revokeLicense(db, id, reason, actor = 'ADMIN') {
   await recordRevocation(db, 'LICENSE', String(id), reason, actor);
 }
 
-export async function rotateLicenseCredential(db, id, hash) {
-  await db.prepare('UPDATE mak_licenses SET credential_hash=?,rotated_at=?,updated_at=? WHERE id=?')
-    .bind(hash, nowS(), nowS(), Number(id)).run();
+export async function rotateLicenseCredential(db, id, hash, plain = '') {
+  await db.prepare('UPDATE mak_licenses SET credential_hash=?,credential_plain=?,rotated_at=?,updated_at=? WHERE id=?')
+    .bind(hash, String(plain || '').slice(0, 120), nowS(), nowS(), Number(id)).run();
   await revokeSessionsForLicense(db, id);
   await revokeGrantsForLicense(db, id, 'credential rotated', 'ADMIN');
   await bumpLicenseEpoch(db, id);
