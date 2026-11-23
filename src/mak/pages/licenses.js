@@ -2,7 +2,7 @@ import {
   codeValue, emptyState, field, icon, licenseExpiry, licenseHostText, licenseStatusBadge,
   pageHeader, resultBadge, sectionHead, segmented, statusBadge, timeCell,
 } from '../ui.js';
-import { esc, fmtDate, fmtDateTime, relTime, truncate } from '../../backend/http.js';
+import { esc, fmtDate, fmtDateTime, relTime, truncate } from '../http.js';
 
 function csrfInput(csrf) { return `<input type="hidden" name="_csrf" value="${esc(csrf)}">`; }
 

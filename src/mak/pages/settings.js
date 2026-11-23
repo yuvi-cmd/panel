@@ -1,5 +1,5 @@
 import { codeValue, field, icon, pageHeader, sectionHead, statusBadge } from '../ui.js';
-import { esc, fmtDateTime } from '../../backend/http.js';
+import { esc, fmtDateTime } from '../http.js';
 
 function csrfInput(csrf) { return `<input type="hidden" name="_csrf" value="${esc(csrf)}">`; }
 

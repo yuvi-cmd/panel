@@ -23,7 +23,7 @@ import {
   validPackageName,
   verifyDeviceProof,
 } from './crypto.js';
-import { getSettings } from './db.js';
+import { getSettings } from './settings.js';
 import { logEvent } from './events.js';
 import {
   bindGuest,

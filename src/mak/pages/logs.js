@@ -1,5 +1,5 @@
 import { emptyState, icon, pageHeader, resultBadge, sectionHead, segmented, statusBadge, timeCell } from '../ui.js';
-import { esc, truncate } from '../../backend/http.js';
+import { esc, truncate } from '../http.js';
 
 export function logsPage({ events = [], resultCounts = {}, q = '', result = 'ALL', type = '', types = [], csrf }) {
   const rows = events.length ? events.map((e) => `

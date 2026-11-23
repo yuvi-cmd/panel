@@ -1,7 +1,7 @@
 import {
   icon, pageHeader, resultBadge, sectionHead, statusBadge, timeCell,
 } from '../ui.js';
-import { esc, fmtDate, relTime, truncate } from '../../backend/http.js';
+import { esc, fmtDate, relTime, truncate } from '../http.js';
 
 export function dashboardPage({
   admin, csrf, server, signingReady, signingReason, announcement = '',

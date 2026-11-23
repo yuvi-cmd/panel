@@ -8,8 +8,8 @@ import {
   b64encode, canonicalJson, canonicalMak, deviceProofMessage, generateMak,
   loadSigningConfig, makHash, normalizeDevicePublicKey, nowS, signPayload,
   verifyDeviceProof, verifyPassword, verifySignedPayload, hashPassword,
-} from '../src/backend/crypto.js';
-import { handleRequest } from '../src/backend/router.js';
+} from '../src/mak/crypto.js';
+import app from '../src/index.js';
 
 const results = [];
 
@@ -34,7 +34,8 @@ function makeEnv(overrides = {}) {
   for (let i = 0; i < seed.length; i++) seed[i] = (i * 7 + 11) & 255;
   return {
     DB: new MemoryD1(),
-    PANEL_NAME: 'Test MAK',
+    PANEL_CODE: 'YUVI_001',
+    PANEL_NAME: 'Test Panel',
     MAK_SERVER_NAME: 'Test Activation',
     MAK_SIGNING_KEY: b64(seed),
     MAK_SIGNING_KEY_ID: 'TEST-ED25519-01',
@@ -70,7 +71,7 @@ function request(env, path, { method = 'GET', cookie = '', body = '', json = nul
 }
 
 async function call(env, path, opts) {
-  return handleRequest(request(env, path, opts), env);
+  return app.fetch(request(env, path, opts), env, {});
 }
 
 function setCookie(response) {
@@ -206,43 +207,48 @@ async function main() {
     assert.equal(rawNorm.storage, device.norm.storage);
   });
 
-  await test('panel setup, dashboard, license issuance and CSRF rejection', async () => {
+  await test('existing panel setup, MAK pages, license issuance and CSRF rejection', async () => {
     const env = globalThis.__lastEnv;
     const root = await call(env, '/');
-    assert.equal(root.status, 303);
-    assert.equal(root.headers.get('Location'), '/login');
+    assert.equal(root.status, 302);
+    assert.equal(root.headers.get('Location'), '/setup');
 
     const setupPage = await call(env, '/setup');
     assert.equal(setupPage.status, 200);
-    assert.match(await setupPage.text(), /First-run setup/);
+    assert.match(await setupPage.text(), /Create|setup|Owner/i);
 
     const setup = await call(env, '/setup', {
       method: 'POST',
-      body: form({ username: 'owner', password: 'supersecret123', confirm_password: 'supersecret123' }),
+      body: form({ username: 'owner', password: 'supersecret123' }),
     });
-    assert.equal(setup.status, 303, await setup.clone().text());
+    assert.equal(setup.status, 302, await setup.clone().text());
     assert.equal(setup.headers.get('Location'), '/dashboard');
     const cookie = setCookie(setup);
-    assert.match(cookie, /mak_admin=/);
+    assert.match(cookie, /sdk_session=/);
 
-    const dash = await call(env, '/dashboard', { cookie });
+    const sdk = await call(env, '/sdk', { cookie });
+    const sdkHtml = await sdk.text();
+    assert.equal(sdk.status, 200);
+    assert.match(sdkHtml, /MAK Activation/);
+
+    const dash = await call(env, '/mak', { cookie });
     assert.equal(dash.status, 200);
     const dashHtml = await dash.text();
-    assert.match(dashHtml, /Activation overview/);
-    assert.match(dashHtml, /Activation server is/);
+    assert.match(dashHtml, /MAK Keys/);
+    assert.match(dashHtml, /Back to SDK Panel/);
     const token = csrf(dashHtml);
 
-    const noCsrf = await call(env, '/settings/server', {
+    const noCsrf = await call(env, '/mak/settings/server', {
       method: 'POST', cookie, body: form({ action: 'save' }),
     });
     assert.equal(noCsrf.status, 403);
 
-    const newPage = await call(env, '/licenses/new', { cookie });
+    const newPage = await call(env, '/mak/licenses/new', { cookie });
     assert.equal(newPage.status, 200);
     const newHtml = await newPage.text();
     assert.equal(csrf(newHtml), token);
 
-    const issued = await call(env, '/licenses/new', {
+    const issued = await call(env, '/mak/licenses/new', {
       method: 'POST',
       cookie,
       body: form({
@@ -268,7 +274,7 @@ async function main() {
     assert.notEqual(license.credential_hash, makMatch[0]);
     assert.equal(license.activation_count, 0);
 
-    const detail = await call(env, '/licenses/' + license.id, { cookie });
+    const detail = await call(env, '/mak/licenses/' + license.id, { cookie });
     assert.equal(detail.status, 200);
     assert.match(await detail.text(), /Test License/);
 
@@ -316,7 +322,7 @@ async function main() {
 
     // Admin registers and binds the exact guest build.
     const { cookie, token } = env.__test;
-    const guestPost = await call(env, '/guests/new', {
+    const guestPost = await call(env, '/mak/guests/new', {
       method: 'POST', cookie,
       body: form({ _csrf: token, package_name: guestPackage, app_name: 'Guest', apk_sha256: apkHash, cert_sha256: guestCert, version_code: '1' }),
     });
@@ -324,7 +330,7 @@ async function main() {
     const guest = await env.DB.prepare('SELECT * FROM mak_guest_apps ORDER BY id DESC LIMIT 1').first();
     assert.equal(guest.package_name, guestPackage);
 
-    const bind = await call(env, `/licenses/${license.id}/action`, {
+    const bind = await call(env, `/mak/licenses/${license.id}/action`, {
       method: 'POST', cookie,
       body: form({ _csrf: token, action: 'binding_add', guest_id: guest.id, perm_launch: '1' }),
     });
@@ -425,7 +431,7 @@ async function main() {
     assert.equal(badJson.code, 'INVALID_DEVICE_PROOF');
 
     // Server OFF denies every decision, but /status stays available.
-    const off = await call(env, '/settings/server', {
+    const off = await call(env, '/mak/settings/server', {
       method: 'POST', cookie,
       body: form({ _csrf: token, action: 'save', maintenance_message: 'Planned maintenance' }),
     });
@@ -443,7 +449,7 @@ async function main() {
     assert.equal(statusJson.server_enabled, false);
     assert.equal(statusJson.signature_alg, 'Ed25519');
 
-    const on = await call(env, '/settings/server', {
+    const on = await call(env, '/mak/settings/server', {
       method: 'POST', cookie,
       body: form({ _csrf: token, action: 'save', server_enabled: '1', maintenance_message: 'OK', announcement: '' }),
     });
@@ -457,7 +463,7 @@ async function main() {
     const env = globalThis.__lastEnv;
     const { license, credential, device, cookie, token } = env.__test;
 
-    const suspend = await call(env, `/licenses/${license.id}/action`, {
+    const suspend = await call(env, `/mak/licenses/${license.id}/action`, {
       method: 'POST', cookie,
       body: form({ _csrf: token, action: 'suspend' }),
     });
@@ -467,7 +473,7 @@ async function main() {
     assert.equal(suspended.response.decision, 'DENY');
     assert.equal(suspended.response.code, 'LICENSE_SUSPENDED');
 
-    const reactivate = await call(env, `/licenses/${license.id}/action`, {
+    const reactivate = await call(env, `/mak/licenses/${license.id}/action`, {
       method: 'POST', cookie,
       body: form({ _csrf: token, action: 'reactivate' }),
     });
@@ -476,7 +482,7 @@ async function main() {
     assert.equal(activeAgain.status, 200, JSON.stringify(activeAgain.response));
     assert.equal(activeAgain.response.decision, 'ALLOW');
 
-    const revoke = await call(env, `/licenses/${license.id}/action`, {
+    const revoke = await call(env, `/mak/licenses/${license.id}/action`, {
       method: 'POST', cookie,
       body: form({ _csrf: token, action: 'revoke' }),
     });
@@ -487,30 +493,30 @@ async function main() {
     assert.equal(revoked.response.code, 'LICENSE_REVOKED');
   });
 
-  await test('logout + login + wrong password', async () => {
+  await test('panel logout + login + wrong password still work', async () => {
     const env = globalThis.__lastEnv;
-    const { cookie, token } = env.__test;
+    const { cookie } = env.__test;
 
-    const logout = await call(env, '/logout', { method: 'POST', cookie, body: form({ _csrf: token }) });
-    assert.equal(logout.status, 303);
-    const cleared = setCookie(logout);
-    assert.match(cleared, /mak_admin=($|;)/);
+    const logout = await call(env, '/logout', { cookie });
+    assert.equal(logout.status, 302);
+    assert.match(logout.headers.get('Location'), /^\/login/);
 
-    const afterLogout = await call(env, '/dashboard', { cookie: cleared });
-    assert.equal(afterLogout.status, 303);
+    const afterLogout = await call(env, '/dashboard', { cookie });
+    assert.equal(afterLogout.status, 302);
     assert.match(afterLogout.headers.get('Location'), /^\/login/);
 
     const bad = await call(env, '/login', {
       method: 'POST', body: form({ username: 'owner', password: 'wrong-password' }),
     });
-    assert.equal(bad.status, 401);
+    assert.equal(bad.status, 200);
+    assert.match(await bad.text(), /Invalid username or password/i);
 
     const login = await call(env, '/login', {
       method: 'POST', body: form({ username: 'owner', password: 'supersecret123' }),
     });
-    assert.equal(login.status, 303);
-    assert.match(login.headers.get('Location'), /^\/dashboard|^\//);
-    assert.match(setCookie(login), /mak_admin=/);
+    assert.equal(login.status, 302);
+    assert.match(login.headers.get('Location'), /^\/dashboard/);
+    assert.match(setCookie(login), /sdk_session=/);
   });
 
   const failed = results.filter((r) => !r.ok);

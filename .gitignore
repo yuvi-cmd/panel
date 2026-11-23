@@ -1,7 +1,10 @@
+# Dependencies
 node_modules/
+
+# Wrangler local state and local dev secrets (NEVER commit)
 .wrangler/
 .dev.vars
 .dev.vars.*
-.env
-.DS_Store
+
+# Build/log debris
 *.log

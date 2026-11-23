@@ -1,129 +1,78 @@
-# Security Policy
+# SECURITY.md — audit findings for ARC Auth (this pass)
 
-## Reporting
+Status: findings below are **fixed and covered by `worker/test/smoke.mjs`
+(39 tests)** unless marked OPEN. Nothing here is a claim of a completed
+security audit. Re-test before production.
 
-Do not open a public issue for a vulnerability. Use GitHub's **private
-vulnerability reporting** (Security → Advisories → Report a vulnerability) on
-this repository. Include:
+## Fixed (with tests)
 
-- affected endpoint or component
-- reproduction steps or a proof of concept
-- impact assessment
-- whether a MAK, device key or admin session was exposed
+1. **`ReferenceError: allowed` crashed every `/users` POST** (`worker/src/index.js`).
+   A leftover `if (allowed === false …)` referenced an undeclared variable, so
+   all balance/block actions returned 500. Removed; role checks kept.
+   Test: `toggle_block works (no ReferenceError)`.
+2. **Referral privilege escalation.** OWNER could mint `OWNER` referrals
+   (HTML select + API), and `/register` honored any stored role — a leaked
+   code could create a panel OWNER. Now: generation coerces to
+   ADMIN/RESELLER, registration coerces legacy OWNER codes to ADMIN.
+   Tests: `OWNER referral coerced`, `legacy OWNER referral coerced`.
+3. **BCORE tenant-squatting.** `handleBcore` ran
+   `INSERT OR IGNORE INTO panels` for any path panel code, letting
+   unauthenticated callers create panel rows. Removed; unknown/inactive
+   panels get 404 like `/connect` and `/mundo`.
+   Tests: `bcore unknown panel rejected`, `does not auto-create panels`.
+4. **Reflected-XSS surface.** `alerts()` injected `error` unescaped (the
+   device-lock message carried raw HTML), and `esc()` ignored single quotes,
+   so `custom_key` values could break `onclick="doCopy('…')"` handlers.
+   Now: `esc()` covers `'`, error text is escaped, the reset link is a static
+   allowlisted constant. Test: `esc() escapes quotes + tags`.
+5. **DB error text leaked to clients.** `errDetail()` appended exception
+   messages for logged-in users (`SERVER ERROR :: …`). Now: generic message
+   + server-side `console.error`. (No test asserts message text; verified by
+   code inspection — errors return `SERVER ERROR`.)
+6. **Schema migration on every request.** `ensureDB()` ran full `SCHEMA` +
+   ~19 `ALTER TABLE`s per request (D1 cost/latency). Now: once per isolate
+   (`globalThis.__arcDbReady`). Fresh deploys still migrate on cold start.
+7. **Missing `Secure` cookie flag.** Session cookie now adds `Secure` on
+   `https://` (kept `HttpOnly`, `SameSite=Lax`). No CSRF tokens yet — see OPEN.
+8. **Role hierarchy.** Added `PROFESSOR` (rank 4 > OWNER 3 > ADMIN 2 >
+   RESELLER 1): owner-like panel powers + SDK/panel-management access;
+   non-professors cannot mutate PROFESSOR accounts. Tenant data stays scoped
+   to the session's `panel_code` (Professor global reads only via explicit,
+   validated `?panel=` on the dashboard API).
+9. **Balance TOCTOU tightened (API).** `/api/generate` uses atomic
+   `UPDATE … WHERE balance>=?` and checks `meta.changes`. (HTML route keeps
+   its check-then-update; the guarded UPDATE is the enforcement.)
 
-You will get an acknowledgement, a triage decision and a coordinated disclosure
-timeline. Do not test against licenses, devices or infrastructure you do not
-own.
+## Deliberately NOT changed (compat)
 
-## Supported versions
+- **RC4 (BCORE), AES-128-ECB (MUNDO), MD5 tokens, single-round
+  SHA-256(salt+password), `Vm8Lk7…` token salt.** These are client-visible
+  protocols: rotating them breaks installed clients. Hardcoded values are now
+  documented **legacy fallbacks** overridable without redeploy via encrypted
+  secrets (`BCORE_SECRET`, `MUNDO_SALT`, `ARCX_TOKEN_SALT`); `SECURITY.md`
+  migration plan:
+  1. Ship dual-verify (accept old + new) for one client release cycle.
+  2. Migrate password hashes to PBKDF2/scrypt/bcrypt on next login
+     (rehash-and-upgrade column), keeping SHA-256 verify as fallback.
+  3. Replace ECB with an authenticated mode and MD5 tokens with CSPRNG
+     tokens behind a versioned endpoint (`/v1/…`), keeping old routes until
+     clients migrate. Never rotate silently.
+- **`/encrypt` timestamps** stay `YYYY-MM-DD HH:MM:SS` UTC (native clients
+  parse them). IST conversion is display-only (`formatIST`, `_ist` fields).
+- **Activation vouchers are intentionally global** (main owner sells time to
+  other panels); single-use + `used_by` recorded. Documented, not a leak.
 
-Only the current `main` branch is supported. There are no maintained release
-branches.
+## OPEN (do before production)
 
-## Security model
-
-### Server-authoritative decisions
-
-Every activation, guest operation, renewal and heartbeat decision is made by
-the Worker. Responses are signed with Ed25519 and covered by canonical JSON:
-
-```
-MAK/1\nRESPONSE\n<canonical JSON without "signature">
-```
-
-A client must reject:
-
-- a missing or malformed signature
-- an unknown `key_id`
-- a signature that does not verify against a pinned public key
-- a protocol other than `MAK/1`
-- any unknown error code
-- any transport failure
-
-This is fail-closed by design. The Android native layer (`libymudo`,
-`libRcore`) is the enforcement point; Java/Kotlin only bootstraps the MAK.
-
-### Credentials and keys
-
-| Secret | Where it lives | Notes |
-| --- | --- | --- |
-| MAK credential | Host APK engine bootstrap | Shown once at issuance; server stores only SHA-256 verifier |
-| Ed25519 signing seed | Worker secret `MAK_SIGNING_KEY` / `MAK_SIGNING_KEYS` | Never in git, `wrangler.toml`, APK or AAR |
-| Admin password | D1, PBKDF2-SHA256 | Never logged |
-| Admin session token | HttpOnly cookie, SHA-256 in D1 | `SameSite=Strict`, `Secure` on HTTPS |
-| Device private key | Android Keystore / app-private storage | ECDSA P-256; never leaves the device |
-| IP hash salt | Worker secret `IP_HASH_SALT` | Optional; hashes client IPs in audit logs |
-
-The AAR must not contain a static AES key, master secret or server signing key.
-The MAK is a credential, not the security system.
-
-### Replay and freshness
-
-- Challenges are random, short-lived, single-use, and stored only as
-  `SHA256("MAK-CHALLENGE|" + nonce)`.
-- Device proofs bind the challenge, host identity, device key and timestamp.
-- Session proofs bind the session, operation, guest identity, device key and
-  timestamp; timestamps outside `clock_skew` are rejected.
-- Challenges are consumed before authorization continues, so a failed proof
-  cannot be retried with the same nonce.
-
-### Host and guest binding
-
-- Host binding is `FIRST_USE` (pin on first valid device proof) or `STRICT`
-  (must match a pre-registered package + certificate).
-- Device proof is verified **before** host/device state is pinned, so a leaked
-  MAK alone cannot steal first use.
-- Guest apps must be registered by exact package, APK SHA-256, signing
-  certificate SHA-256 and version code, then explicitly bound to the license.
-- Every guest operation (`INSTALL`, `LAUNCH`, `UPDATE`, `RESTART`) has its own
-  permission flag.
-
-### Global kill switch
-
-Setting the server OFF immediately makes `/challenge`, `/authorize`,
-`/guest/check`, `/renew`, `/heartbeat` and `/events` fail closed with
-`SERVER_DISABLED` (HTTP 503). `/status` and the admin panel remain available.
-Enabling requires a valid signing key.
-
-## Operational guidance
-
-- Use a custom domain with Cloudflare TLS; do not rely on `workers.dev` for
-  production.
-- Set `SETUP_CODE` before the first deploy, then remove or rotate it after the
-  owner account exists.
-- Store all secrets with `wrangler secret put`; never commit `.dev.vars`.
-- Rotate the signing key with a key ring: add `MAK-ED25519-02`, ship its public
-  key to clients, switch `MAK_SIGNING_KEY_ID`, then retire the old key.
-- Rotate `IP_HASH_SALT` only if you accept losing IP correlation in old logs.
-- Export D1 backups before schema changes.
-- Review `/logs` for `AUTH_FAIL`, `INVALID_DEVICE_PROOF`, `NONCE_REPLAY`,
-  `HOST_CERT_MISMATCH` and `GUEST_HASH_MISMATCH` spikes.
-- Run `MAK_BASE_URL=... MAK_PUBLIC_KEY=... npm run check` after every deploy.
-
-## Known limitations
-
-- **Transport encryption:** TLS 1.3 protects the wire. An HPKE
-  (X25519 + HKDF-SHA256 + AEAD) application-layer envelope is planned for the
-  Android integration phase; it is not part of the current Worker protocol.
-- **Rate limiting** is in-memory per Worker isolate. It is a brake, not a
-  distributed quota. Put Cloudflare WAF/rate-limiting rules in front of
-  `/mak/v1/*` and `/login` for production.
-- **Panel authentication** is single-role (owner). There is no multi-admin UI
-  yet; use Cloudflare Access in front of the panel if you need SSO or IP
-  allow-listing.
-- **Legacy D1 tables:** an existing database may still contain old
-  `bcore_*` / `mundo_*` tables. The panel never reads or writes them. Drop them
-  manually after taking a backup if you want a clean database.
-- **No client code in this repository.** Native enforcement, certificate
-  pinning and MAK bootstrap live in the separate MUNDO Android project.
-
-## Incident response
-
-1. Set **Server OFF** in the panel (fail closed immediately).
-2. Revoke the affected license, device and/or all sessions.
-3. Rotate the affected MAK; revoke the old credential.
-4. If the signing key may be exposed, rotate the key ring and ship the new
-   public key before re-enabling the server.
-5. Preserve `/logs` output and D1 backups for analysis.
-6. Review admin sessions, change the admin password, and rotate `SETUP_CODE`.
-7. Re-enable the server only after the root cause is fixed and verified.
+- [ ] No CSRF tokens on HTML form POSTs; no Turnstile/rate-limit infra beyond
+      best-effort per-isolate throttling (`hitRate`) on login. Enable
+      Cloudflare Rate Limiting + WAF on `/login`, `/register`, `/connect/*`.
+- [ ] Password hashing is still fast SHA-256 (see migration plan above).
+- [ ] `activation_keys.recent` global list visible to super-admin by design.
+- [ ] `wrangler.toml` `database_id` must be replaced with your D1 id (the old
+      README quoted a different id — fixed to the file's value; verify).
+- [ ] The `id === 1` super-admin concept predates multi-tenancy; Professor is
+      the forward path. Audit any `id === 1` assumptions before onboarding.
+- [ ] **Rotate any secret/token pasted into chat or logs** (including the
+      GitHub PAT shared during this task — it must be revoked in GitHub
+      settings; it was never written to the repo).

@@ -1,5 +1,5 @@
 import { authLayout } from '../ui.js';
-import { esc } from '../../backend/http.js';
+import { esc } from '../http.js';
 
 export function authPage({ mode = 'login', panelName = 'MUNDO MAK', error = '', ok = '', setupCodeRequired = false, next = '' } = {}) {
   const isSetup = mode === 'setup';

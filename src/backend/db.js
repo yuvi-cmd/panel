@@ -1,26 +1,73 @@
-// D1 bootstrap. The first request per isolate installs the idempotent schema
-// and default settings. schema.sql and src/backend/schema.js are kept in sync
-// by scripts/sync-schema.mjs.
+// Database layer — full schema + idempotent migrations.
+// SCHEMA uses CREATE TABLE IF NOT EXISTS and MIGRATE_COLS are no-op ALTERs
+// on current databases, so this is safe to run per isolate (see ensureDB).
 
-import { SCHEMA } from './schema.js';
-import { nowS } from './crypto.js';
+import { SCHEMA as MAK_SCHEMA } from '../mak/schema.js';
+import { installDefaultSettings } from '../mak/settings.js';
 
-export const DEFAULT_SETTINGS = {
-  server_enabled: '1',
-  maintenance_message: 'Activation server is temporarily offline for maintenance.',
-  session_ttl: '3600',
-  heartbeat_interval: '300',
-  challenge_ttl: '60',
-  clock_skew: '300',
-  authorization_ttl: '120',
-  guest_proof_required: '1',
-  announcement: '',
-  server_version: '1.0.0',
-};
+export const SCHEMA = `
+CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL DEFAULT '', username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'RESELLER', invited_by INTEGER, balance INTEGER NOT NULL DEFAULT 0, referral_limit INTEGER NOT NULL DEFAULT 0, can_generate_referral INTEGER NOT NULL DEFAULT 1, validity TEXT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', is_blocked INTEGER NOT NULL DEFAULT 0, panel_expiry TEXT, device_fingerprint TEXT, last_login TEXT, last_reset TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE INDEX IF NOT EXISTS idx_users_panel ON users(panel_code);
+CREATE TABLE IF NOT EXISTS panels (panel_code TEXT PRIMARY KEY, duration INTEGER NOT NULL DEFAULT 30, expires_at TEXT, is_active INTEGER NOT NULL DEFAULT 1, encryption_subscription INTEGER NOT NULL DEFAULT 0, tg_subscription INTEGER NOT NULL DEFAULT 0, mundo_service INTEGER NOT NULL DEFAULT 0, admin_role INTEGER NOT NULL DEFAULT 0, reseller_role INTEGER NOT NULL DEFAULT 0, account_limit INTEGER NOT NULL DEFAULT 0, auto_join INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS api_keys (id INTEGER PRIMARY KEY AUTOINCREMENT, key_value TEXT NOT NULL, duration TEXT NOT NULL DEFAULT '30D', device_limit INTEGER NOT NULL DEFAULT 1, uses INTEGER NOT NULL DEFAULT 0, expires_at TEXT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', is_active INTEGER NOT NULL DEFAULT 1, is_blocked INTEGER NOT NULL DEFAULT 0, created_by INTEGER NOT NULL DEFAULT 1, server_type TEXT NOT NULL DEFAULT 'PRIVATE', UNIQUE(key_value, panel_code));
+CREATE INDEX IF NOT EXISTS idx_api_panel ON api_keys(panel_code);
+CREATE INDEX IF NOT EXISTS idx_api_created ON api_keys(created_by);
+CREATE TABLE IF NOT EXISTS key_devices (key_id INTEGER NOT NULL, device_uuid TEXT NOT NULL, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', last_seen TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (key_id, device_uuid));
+CREATE TABLE IF NOT EXISTS mod_settings (setting_name TEXT NOT NULL, setting_value TEXT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', PRIMARY KEY (setting_name, panel_code));
+CREATE TABLE IF NOT EXISTS mod_maintenance (panel_code TEXT PRIMARY KEY, is_active INTEGER NOT NULL DEFAULT 0, reason TEXT);
+CREATE TABLE IF NOT EXISTS loader_config (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL UNIQUE, version REAL NOT NULL DEFAULT 1.0, updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS loader_files (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL, file_name TEXT NOT NULL, file_path TEXT NOT NULL, server_type TEXT NOT NULL DEFAULT 'PRIVATE', uploaded_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS mod_versions (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL, name TEXT NOT NULL, tag TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '', sort INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE(panel_code, name));
+CREATE TABLE IF NOT EXISTS mod_tags (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL, name TEXT NOT NULL, sort INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE(panel_code, name));
+CREATE TABLE IF NOT EXISTS referrals (code TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'RESELLER', duration INTEGER NOT NULL DEFAULT 30, balance INTEGER NOT NULL DEFAULT 0, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', created_by INTEGER, used INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS activation_keys (id INTEGER PRIMARY KEY AUTOINCREMENT, activation_key TEXT NOT NULL UNIQUE, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', name TEXT, duration_months INTEGER NOT NULL DEFAULT 1, expires_at TEXT NOT NULL, is_used INTEGER NOT NULL DEFAULT 0, used_by TEXT, used_at TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS mod_loaders (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', app_name TEXT NOT NULL DEFAULT '', package_name TEXT NOT NULL DEFAULT '', sha256 TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '', is_blocked INTEGER NOT NULL DEFAULT 0, expires_at TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), request_count INTEGER NOT NULL DEFAULT 0, last_ping TEXT, is_binded INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS mundo_keys (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', sdk_key TEXT NOT NULL UNIQUE, duration_days INTEGER NOT NULL DEFAULT 30, pkg_limit INTEGER NOT NULL DEFAULT 1, app_limit INTEGER NOT NULL DEFAULT 1, feature1 INTEGER NOT NULL DEFAULT 0, feature2 INTEGER NOT NULL DEFAULT 0, is_blocked INTEGER NOT NULL DEFAULT 0, created_by INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS mundo_key_bindings (id INTEGER PRIMARY KEY AUTOINCREMENT, sdk_key_id INTEGER NOT NULL, pkg_name TEXT NOT NULL, app_name TEXT NOT NULL, is_blocked INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS bcore_keys (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', sdk_key TEXT NOT NULL UNIQUE, duration_days INTEGER NOT NULL DEFAULT 30, pkg_limit INTEGER NOT NULL DEFAULT 1, app_limit INTEGER NOT NULL DEFAULT 1, feature1 INTEGER NOT NULL DEFAULT 0, feature2 INTEGER NOT NULL DEFAULT 0, is_blocked INTEGER NOT NULL DEFAULT 0, created_by INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS bcore_key_bindings (id INTEGER PRIMARY KEY AUTOINCREMENT, sdk_key_id INTEGER NOT NULL, pkg_name TEXT NOT NULL, app_name TEXT NOT NULL, is_blocked INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS sdk_hash_vault (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', engine TEXT NOT NULL DEFAULT 'MUNDO', hash_type TEXT NOT NULL DEFAULT 'lib_signature', hash_label TEXT NOT NULL, hash_value TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS sdk_server_status (id INTEGER PRIMARY KEY AUTOINCREMENT, panel_code TEXT NOT NULL DEFAULT 'YUVI_001', engine TEXT NOT NULL, maintenance_mode INTEGER NOT NULL DEFAULT 0, maintenance_message TEXT, updated_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE(panel_code, engine));
+CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+`;
 
-// Split a SQL script into complete statements. Handles -- line comments and
-// single/double quoted strings; the project schema does not use block comments
-// or statement-level delimiters beyond semicolons.
+export const INDEX_SQL = `
+CREATE INDEX IF NOT EXISTS idx_dev_panel ON key_devices(panel_code);
+CREATE INDEX IF NOT EXISTS idx_loader_panel ON loader_files(panel_code);
+CREATE INDEX IF NOT EXISTS idx_mundo_panel ON mundo_keys(panel_code);
+CREATE INDEX IF NOT EXISTS idx_bcore_panel ON bcore_keys(panel_code);
+CREATE INDEX IF NOT EXISTS idx_sess_user ON sessions(user_id);
+`;
+
+export const MIGRATE_COLS = [
+  ['users', 'full_name', "TEXT NOT NULL DEFAULT ''"], ['users', 'invited_by', 'INTEGER'],
+  ['users', 'balance', 'INTEGER NOT NULL DEFAULT 0'], ['users', 'referral_limit', 'INTEGER NOT NULL DEFAULT 0'],
+  ['users', 'can_generate_referral', 'INTEGER NOT NULL DEFAULT 1'], ['users', 'validity', 'TEXT'],
+  ['users', 'is_blocked', 'INTEGER NOT NULL DEFAULT 0'], ['users', 'panel_expiry', 'TEXT'],
+  ['users', 'device_fingerprint', 'TEXT'], ['users', 'last_login', 'TEXT'], ['users', 'last_reset', 'TEXT'],
+  ['panels', 'duration', 'INTEGER NOT NULL DEFAULT 30'], ['panels', 'expires_at', 'TEXT'],
+  ['panels', 'encryption_subscription', 'INTEGER NOT NULL DEFAULT 0'], ['panels', 'tg_subscription', 'INTEGER NOT NULL DEFAULT 0'],
+  ['panels', 'mundo_service', 'INTEGER NOT NULL DEFAULT 0'], ['panels', 'admin_role', 'INTEGER NOT NULL DEFAULT 0'], ['panels', 'reseller_role', 'INTEGER NOT NULL DEFAULT 0'],
+  ['api_keys', 'server_type', "TEXT NOT NULL DEFAULT 'PRIVATE'"],
+  // Full hot-path coverage: old databases (pre-column) otherwise throw on
+  // device-bind writes AFTER a real key is found -> HTTP 500 SERVER ERROR.
+  // Each ALTER is a no-op when the column already exists.
+  ['users', 'username', 'TEXT'], ['users', 'password_hash', 'TEXT'], ['users', 'role', 'TEXT'],
+  ['users', 'panel_code', 'TEXT'], ['users', 'created_at', 'TEXT'],
+  ['panels', 'is_active', 'INTEGER NOT NULL DEFAULT 1'],
+  ['panels', 'account_limit', 'INTEGER NOT NULL DEFAULT 0'], ['panels', 'auto_join', 'INTEGER NOT NULL DEFAULT 0'],
+  ['api_keys', 'key_value', 'TEXT'], ['api_keys', 'duration', 'TEXT'],
+  ['api_keys', 'device_limit', 'INTEGER NOT NULL DEFAULT 1'], ['api_keys', 'uses', 'INTEGER NOT NULL DEFAULT 0'],
+  ['api_keys', 'expires_at', 'TEXT'], ['api_keys', 'panel_code', 'TEXT'],
+  ['api_keys', 'is_active', 'INTEGER NOT NULL DEFAULT 1'], ['api_keys', 'is_blocked', 'INTEGER NOT NULL DEFAULT 0'],
+  ['api_keys', 'created_by', 'INTEGER NOT NULL DEFAULT 1'],
+  ['key_devices', 'key_id', 'INTEGER'], ['key_devices', 'device_uuid', 'TEXT'],
+  ['key_devices', 'panel_code', 'TEXT'], ['key_devices', 'last_seen', 'TEXT'],
+];
+
+// Split a SQL script into complete statements. D1's exec() treats input as
+// newline-separated statements, which breaks multi-line DDL; batching complete
+// statements avoids that. Handles -- comments and single/double quoted strings.
 export function splitSqlStatements(sql) {
   const out = [];
   let current = '';
@@ -34,20 +81,12 @@ export function splitSqlStatements(sql) {
       continue;
     }
     if (ch === "'" && !double) {
-      if (single && sql[i + 1] === "'") {
-        current += "''";
-        i++;
-        continue;
-      }
+      if (single && sql[i + 1] === "'") { current += "''"; i++; continue; }
       single = !single;
       current += ch;
       continue;
     }
-    if (ch === '"' && !single) {
-      double = !double;
-      current += ch;
-      continue;
-    }
+    if (ch === '"' && !single) { double = !double; current += ch; continue; }
     if (ch === ';' && !single && !double) {
       if (current.trim()) out.push(current.trim());
       current = '';
@@ -59,76 +98,44 @@ export function splitSqlStatements(sql) {
   return out;
 }
 
-export async function ensureDB(db) {
-  if (globalThis.__makDbReady) return;
-  // D1's exec() splits input by newline, which breaks multi-line DDL. Split
-  // the schema into complete statements and run them as one batch instead.
-  const statements = splitSqlStatements(SCHEMA);
-  if (statements.length) {
+async function runStatements(db, sql) {
+  const statements = splitSqlStatements(sql);
+  if (!statements.length) return;
+  if (typeof db.batch === 'function') {
     try {
-      await db.batch(statements.map((sql) => db.prepare(sql)));
-    } catch (batchError) {
-      // Some D1 deployments reject DDL inside a batch transaction. Fall back
-      // to sequential execution; every statement is idempotent.
-      console.error('mak_schema_batch_failed', String(batchError));
-      for (const sql of statements) await db.prepare(sql).run();
+      await db.batch(statements.map((statement) => db.prepare(statement)));
+      return;
+    } catch (err) {
+      console.error('schema_batch_failed', String(err));
     }
   }
-  const now = nowS();
-  const stmts = Object.entries(DEFAULT_SETTINGS).map(([key, value]) =>
-    db.prepare('INSERT OR IGNORE INTO mak_settings (key,value,updated_at) VALUES (?,?,?)').bind(key, value, now),
-  );
-  if (stmts.length) await db.batch(stmts);
-  // Opportunistic cleanup. Cheap, bounded, and never touches live licenses.
-  try {
-    await db.prepare('DELETE FROM mak_challenges WHERE expires_at < ?').bind(now - 3600).run();
-    await db.prepare('DELETE FROM mak_admin_sessions WHERE expires_at < ?').bind(now - 86400).run();
-  } catch {
-    // Cleanup is best-effort only.
+  for (const statement of statements) {
+    try { await db.prepare(statement).run(); } catch { /* idempotent schema: keep going */ }
   }
-  globalThis.__makDbReady = true;
 }
 
-export async function getSettings(db) {
-  const rows = await db.prepare('SELECT key,value FROM mak_settings').all()
-    .then((r) => r.results || [])
-    .catch(() => []);
-  const values = { ...DEFAULT_SETTINGS };
-  for (const row of rows) values[row.key] = row.value;
-  return {
-    server_enabled: values.server_enabled === '1',
-    maintenance_message: values.maintenance_message || DEFAULT_SETTINGS.maintenance_message,
-    session_ttl: parseInt(values.session_ttl, 10) || 3600,
-    heartbeat_interval: parseInt(values.heartbeat_interval, 10) || 300,
-    challenge_ttl: parseInt(values.challenge_ttl, 10) || 60,
-    clock_skew: parseInt(values.clock_skew, 10) || 300,
-    authorization_ttl: parseInt(values.authorization_ttl, 10) || 120,
-    guest_proof_required: values.guest_proof_required === '1',
-    announcement: values.announcement || '',
-    server_version: values.server_version || '1.0.0',
-    raw: values,
-  };
-}
+export async function ensureDB(db, panelCode) {
+  // Don't run the full schema + ALTER migration on every request. D1 persists;
+  // one successful ensure per isolate is enough until redeploy.
+  if (globalThis.__arcDbReady === panelCode) return;
 
-export async function setSetting(db, key, value) {
-  await db.prepare(
-    'INSERT INTO mak_settings (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at',
-  ).bind(key, String(value), nowS()).run();
-}
+  // Core panel schema plus the MAK control-plane tables. Both are idempotent.
+  await runStatements(db, SCHEMA);
+  await runStatements(db, MAK_SCHEMA);
+  await installDefaultSettings(db).catch((err) => console.error('mak_settings_failed', String(err)));
 
-export async function setSettings(db, entries) {
-  const now = nowS();
-  const stmts = Object.entries(entries).map(([key, value]) =>
-    db.prepare(
-      'INSERT INTO mak_settings (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at',
-    ).bind(key, String(value), now),
-  );
-  if (stmts.length) await db.batch(stmts);
+  for (const [t, c, def] of MIGRATE_COLS) {
+    try { await db.prepare('ALTER TABLE ' + t + ' ADD COLUMN ' + c + ' ' + def).run(); } catch {}
+  }
+  // Indexes last: they reference columns that legacy DBs only gain above.
+  await runStatements(db, INDEX_SQL);
+  try { await db.prepare('INSERT OR IGNORE INTO panels (panel_code, is_active) VALUES (?,1)').bind(panelCode).run(); } catch {}
+  // v1.3: main owner (id 1) is THE single PROFESSOR. Legacy installs that
+  // created id 1 as OWNER are upgraded in place (idempotent).
+  try { await db.prepare("UPDATE users SET role='PROFESSOR' WHERE id=1 AND role='OWNER'").run(); } catch {}
+  // Expired/consumed MAK challenges are safe to drop; live licenses untouched.
+  try {
+    await db.prepare('DELETE FROM mak_challenges WHERE expires_at < ?').bind(Math.floor(Date.now() / 1000) - 3600).run();
+  } catch {}
+  globalThis.__arcDbReady = panelCode;
 }
-
-export async function tableExists(db, name) {
-  const row = await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").bind(name).first().catch(() => null);
-  return !!row;
-}
-
-export { SCHEMA };

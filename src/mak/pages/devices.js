@@ -1,5 +1,5 @@
 import { emptyState, icon, pageHeader, sectionHead, segmented, statusBadge, timeCell } from '../ui.js';
-import { esc, fmtDate, fmtDateTime, truncate } from '../../backend/http.js';
+import { esc, fmtDate, fmtDateTime, truncate } from '../http.js';
 
 function csrfInput(csrf) { return `<input type="hidden" name="_csrf" value="${esc(csrf)}">`; }
 
