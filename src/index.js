@@ -9,7 +9,7 @@ import { handleMakAdmin } from './mak/admin.js';
 import { json } from './mak/http.js';
 import { PROTOCOL, nowS, randomId } from './mak/crypto.js';
 
-const BUILD = '2026-11-23.4';
+const BUILD = '2026-11-23.5';
 
 function makFailure(error) {
   console.error('mak_request_failed', String(error && error.stack ? error.stack : error));
