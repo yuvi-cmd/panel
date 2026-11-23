@@ -1,245 +1,214 @@
-# C++ / Android host integration (MAK/1)
+# C++ / Android host integration (MAK/2)
 
-This guide replaces the retired MUNDO and BCore client endpoints.
+MAK/2 replaces MAK/1 and the retired MUNDO/BCore endpoints.
 
-| Old endpoint | Old transport | Status |
+| Endpoint | Transport | Status |
 | --- | --- | --- |
 | `POST /sdk/mundo/:panel` | AES-128-ECB body | **Removed** |
 | `POST /sdk/bcore/:panel` | RC4 + Base64 body | **Removed** |
-| `POST /mak/v1/challenge` | JSON over TLS 1.3 | Current |
-| `POST /mak/v1/authorize` | JSON over TLS 1.3 | Current |
-| `POST /mak/v1/guest/check` | JSON over TLS 1.3 | Current |
-| `POST /mak/v1/renew` | JSON over TLS 1.3 | Current |
-| `POST /mak/v1/heartbeat` | JSON over TLS 1.3 | Current |
-| `POST /mak/v1/events` | JSON over TLS 1.3 | Current |
+| `/mak/v1/*` | JSON over TLS | **Removed — 410 `PROTOCOL_REMOVED`** |
+| `GET /mak/v2/status` | JSON over TLS (public keys) | Current |
+| `POST /mak/v2/activate` | NaCl box envelope | Current |
+| `POST /mak/v2/host/verify` | NaCl box envelope | Current |
+| `POST /mak/v2/guest/check` | NaCl box envelope | Current |
+| `POST /mak/v2/status` | NaCl box envelope | Current |
+| `POST /mak/v2/deactivate` | NaCl box envelope | Current |
 
 Base URL:
 
 ```
-https://panel.itsalihasan75.workers.dev/mak/v1
+https://panel.itsalihasan75.workers.dev/mak/v2
 ```
 
-There is no manual activation screen and no key-entry UI. The native host
-performs the flow below automatically. Every security decision is signed with
-the server Ed25519 key and must be verified by the client. A missing or invalid
-signature means **DENY**.
+The AAR integrates everything internally. The host app does not change its
+Java code or manifest, and there is no manual activation screen.
 
-The full canonical-JSON and signature rules are in
-[PROTOCOL.md](PROTOCOL.md).
+**No server key is compiled into the AAR.** The panel generates the Ed25519
+signing key and the X25519 envelope key from `/sdk/server` →
+**Generate MAK/2 keys**. The native client learns the public halves from
+`GET /mak/v2/status`, pins them on first contact (TOFU) and accepts later
+rotations only through the signed rotation chain. Rotating keys therefore does
+not require an APK rebuild.
 
-## 1. Get the server identity
+Full byte-level details: [PROTOCOL.md](PROTOCOL.md).
 
-```
-GET /status
-```
+## 1. Bootstrap the server keys
 
-Pin at least one Ed25519 public key from a trusted build/update channel. Treat
-`signing_ready:false` as `SERVER_ERROR`.
-
-## 2. Challenge
-
-```
-POST /challenge
-Content-Type: application/json
-
-{"protocol":"MAK/1","request_id":"REQ_BOOT_001"}
+```cpp
+// GET /mak/v2/status
+MakStatus st = mak.status_keys();      // native: https_get_json()
+if (!st.signing_ready || !st.encryption_ready) return DENY; // SERVER_NOT_READY
+mak.pin_or_rotate(st);                 // TOFU + rotation-chain verification
 ```
 
-Response:
+Rules enforced by native code:
+
+- First run: pin active Ed25519 + X25519 public keys.
+- Later runs: if the active key changed, verify `rotations[]` from the pinned
+  key to the active key; each link must be signed by its previous key.
+- No chain / bad signature / key id reuse with different bytes → **DENY**
+  (`SERVER_KEY_CHANGED`).
+
+## 2. Encrypted request envelope
+
+Every POST body is exactly:
 
 ```json
 {
-  "protocol": "MAK/1",
-  "challenge_id": "CH_...",
-  "nonce": "...",
-  "expires_at": 1795430060,
-  "server_time": 1795430000,
-  "heartbeat_interval": 300,
-  "session_ttl": 3600,
-  "challenge_ttl": 60,
-  "signature": "BASE64"
+  "v": 2,
+  "e": "BASE64 ephemeral X25519 public key",
+  "n": "BASE64 24-byte nonce",
+  "c": "BASE64 secretbox ciphertext"
 }
 ```
 
-The nonce is single use. Do not cache or retry it after a failed authorize.
+Native flow:
 
-## 3. Device proof + authorize
-
-Generate an ECDSA P-256 key in Android Keystore. Build the proof message with
-newline separators and no trailing newline:
-
-```
-MAK/1
-AUTHORIZE
-<challenge_id>
-<nonce>
-<host_package_name>
-<host_cert_sha256 lower-case hex>
-<device_public_key exactly as sent>
-<timestamp unix seconds>
+```cpp
+client = x25519_keypair();                                  // fresh per call
+shared = x25519_shared(client.secret, server_enc_public);
+reqKey = hkdf_sha256(shared, nonce, "MAK/2-REQ");           // 32 bytes
+inner  = canonical_json({ "protocol":"MAK/2", "endpoint":"activate", ... });
+cipher = secretbox_seal(inner, nonce, reqKey);              // XSalsa20-Poly1305
+post   = { "v":2, "e":b64(client.public), "n":b64(nonce), "c":b64(cipher) };
 ```
 
-Sign the UTF-8 bytes with ECDSA-SHA256 and send the signature as base64.
-Public keys may be sent as `spki:<base64>` (preferred) or `raw:<base64>`.
-Signatures may be raw `r||s` (64 bytes) or ASN.1 DER.
+The response is exactly:
 
+```json
+{ "v": 2, "c": "BASE64 ciphertext", "sig": "BASE64 Ed25519" }
 ```
-POST /authorize
-Content-Type: application/json
 
+Native flow:
+
+```cpp
+respKey = hkdf_sha256(shared, nonce, "MAK/2-RESP");
+plain   = secretbox_open(resp.c, nonce, respKey);
+json    = parse(plain);
+if (!ed25519_verify(keyring[json.key_id], "MAK/2\nENVELOPE\n" + plain, resp.sig)) return DENY;
+if (!verify_signed(json, json.decision == "DENY" ? "ERROR" : expected_domain)) return DENY;
+```
+
+The outer envelope carries no `key_id`, protocol or decision — everything is
+inside the ciphertext. Envelope nonces are single-use; a replay is
+`409 NONCE_REPLAY`.
+
+## 3. Activate
+
+Inner request:
+
+```json
 {
-  "protocol": "MAK/1",
-  "request_id": "REQ_AUTH_001",
-  "challenge_id": "CH_...",
-  "nonce": "...",
-  "timestamp": 1795430000,
-  "license": { "credential": "MAK-XXXXX-XXXXX-XXXXX-XXXXX" },
-  "host": {
-    "package_name": "com.example.host",
-    "version_code": 1,
-    "signing_cert_sha256": "64-lowercase-hex"
-  },
-  "device": {
-    "public_key": "spki:BASE64",
-    "proof": "BASE64"
-  }
+  "protocol": "MAK/2",
+  "endpoint": "activate",
+  "request_id": "REQ_BOOT_001",
+  "mak": "MAK-XXXXX-XXXXX-XXXXX-XXXXX",
+  "package_name": "com.example.host",
+  "app_name": "My Host App",
+  "cert_sha256": "64-lowercase-hex"
 }
 ```
 
-Success returns a signed `ALLOW` with `session.session_id`. Host-level
-`permissions` are always false; guest operations are authorized separately.
+Only `package_name`, `app_name`, `cert_sha256` and `MAK`. No `device_id`.
 
-## 4. Authorize each guest operation
+The decrypted response contains a signed `grant` (`expires_at`, `epoch`,
+`max_apps`, `max_installs`, `signature_bind`) and an outer `RESPONSE`
+signature. Persist the grant; it is required for later calls.
 
-Call this before every `INSTALL`, `LAUNCH`, `UPDATE` and `RESTART`:
+## 4. Host verify
 
-```
-POST /guest/check
-Content-Type: application/json
+Call before the host UI opens:
 
+```json
 {
-  "protocol": "MAK/1",
+  "protocol": "MAK/2",
+  "endpoint": "host/verify",
+  "request_id": "REQ_HOST_001",
+  "mak": "MAK-...",
+  "grant_id": "GRT-...",
+  "package_name": "com.example.host",
+  "cert_sha256": "64-hex",
+  "nonce": "BASE64 24-byte single-use"
+}
+```
+
+Returns a signed `HOST-TICKET`. Native code must verify it before showing any
+protected UI.
+
+## 5. Guest check (INSTALL / LAUNCH / UPDATE / RESTART)
+
+Call before **every** operation:
+
+```json
+{
+  "protocol": "MAK/2",
+  "endpoint": "guest/check",
   "request_id": "REQ_GUEST_001",
-  "session_id": "SES_...",
+  "mak": "MAK-...",
+  "grant_id": "GRT-...",
+  "package_name": "com.example.host",
+  "cert_sha256": "64-hex",
   "operation": "LAUNCH",
+  "nonce": "BASE64 24-byte single-use",
   "guest": {
     "package_name": "com.example.guest",
-    "app_name": "Guest Application",
-    "apk_sha256": "64-lowercase-hex",
-    "signing_cert_sha256": "64-lowercase-hex",
-    "version_code": 1
-  },
-  "device": {
-    "public_key": "spki:BASE64",
-    "proof": "BASE64",
-    "timestamp": 1795430000
+    "app_name": "Guest App",
+    "apk_sha256": "64-hex",
+    "cert_sha256": "64-hex",
+    "version_code": 42
   }
 }
 ```
 
-Device proof message for guest checks:
+`signature_bind=1` requires the guest certificate; `0` ignores certificates.
+AUTO binds on first use; MANUAL needs pre-registration.
 
-```
-MAK/1
-GUEST_CHECK
-<session_id>
-<operation>
-<guest_package_name>
-<guest_apk_sha256 lower-case hex>
-<guest_cert_sha256 lower-case hex>
-<version_code>
-<device_public_key exactly as sent>
-<timestamp>
-```
+Returns `code: "AUTHORIZED"` with a signed ticket (`LAUNCH-TICKET`,
+`INSTALL-TICKET` or `OP`) and a `permissions` object. Native code verifies the
+ticket domain, operation, guest identity, host identity, expiry and permissions
+before doing anything.
 
-The response contains exactly one allowed permission, for example:
-
-```json
-{
-  "protocol": "MAK/1",
-  "decision": "ALLOW",
-  "code": "AUTHORIZED",
-  "operation": "LAUNCH",
-  "guest": { "...": "..." },
-  "permissions": { "install": false, "launch": true, "update": false, "restart": false },
-  "issued_at": 1795430000,
-  "expires_at": 1795430300,
-  "server_time": 1795430000,
-  "signature": "BASE64"
-}
-```
-
-If the decision is `DENY`, the native engine must refuse the operation.
-
-## 5. Renew and heartbeat
-
-```
-POST /renew
-POST /heartbeat
-```
-
-Both require a valid device proof. `renew` returns a new session expiry;
-`heartbeat` updates liveness. A revoked license, device or session fails closed
-immediately.
-
-Device proof message:
-
-```
-MAK/1
-<renew|heartbeat>
-<session_id>
-<device_public_key exactly as sent>
-<timestamp>
-```
+`LAUNCH` and `RESTART` are denied with `INSTALL_REQUIRED` unless the native
+install record exists (`<data>/files/mak/installed/<package>.json`), i.e. the
+app was installed through MUNDO.
 
 ## 6. C++ pseudo-code
 
 ```cpp
-MakClient mak(baseUrl, pinnedEd25519Keys);
+MakClient mak(dataDir, serverUrl);          // keys learned at runtime
 
-auto ch = mak.post("/challenge", {{"protocol", "MAK/1"}});
-if (!mak.verifySigned(ch)) return DENY;
+// 1. Pin/rotate server keys
+if (!mak.refresh_server_keys(err)) return DENY;
 
-auto proof = keystore.sign(deviceProofMessage(
-    "AUTHORIZE", ch.challenge_id, ch.nonce, hostPackage,
-    hostCertSha256, devicePublicKey, now()));
+MakResult a = mak.activate(makCredential);
+if (a.decision != "ALLOW") return DENY;
 
-auto auth = mak.post("/authorize", {
-  {"protocol", "MAK/1"},
-  {"request_id", requestId()},
-  {"challenge_id", ch.challenge_id},
-  {"nonce", ch.nonce},
-  {"timestamp", now()},
-  {"license", {{"credential", makCredential}}},
-  {"host", {{"package_name", hostPackage},
-            {"signing_cert_sha256", hostCertSha256}}},
-  {"device", {{"public_key", devicePublicKey}, {"proof", proof}}}
-});
-if (!mak.verifySigned(auth) || auth.decision != "ALLOW") return DENY;
+MakResult h = mak.host_verify();
+if (h.decision != "ALLOW") return DENY;
 
-auto session = auth.session.session_id;
+MakResult g = mak.guest_check("LAUNCH", guest);
+if (g.decision != "ALLOW" ||
+    !g.permissions.launch) return DENY;
 
-auto guestDecision = mak.guestCheck(session, "LAUNCH", guest);
-if (!mak.verifySigned(guestDecision) ||
-    guestDecision.decision != "ALLOW" ||
-    !guestDecision.permissions.launch) {
-  return DENY;
-}
-// Proceed with the protected install/launch.
+// 2. Verify ticket + install record, then launch
 ```
 
-## 7. Required client checks
+## 7. Required native checks
 
-Verify all of the following before acting:
+1. `signing_ready` and `encryption_ready` are true.
+2. Envelope decrypts with `MAK/2-RESP` and the per-request nonce.
+3. Envelope Ed25519 signature verifies over the exact plaintext.
+4. Inner signature (`RESPONSE`/`ERROR`/ticket domain) verifies with a key in the
+   TOFU/rotation keyring.
+5. Key id matches the key used for verification.
+6. `protocol == "MAK/2"`, decision, code and operation match the request.
+7. Grant `expires_at` / `epoch` are current; server time did not move backwards
+   beyond `MAK_CLOCK_SKEW_SECONDS`.
+8. Host package + certificate match the grant.
+9. Guest package + certificate match the ticket; `version_code` matches.
+10. The exact permission for the operation is true.
+11. Ticket `nonce` matches the request nonce and the ticket is fresh.
+12. `LAUNCH`/`RESTART` has a native install record.
 
-1. Ed25519 server signature.
-2. Pinned key ID.
-3. Protocol string `MAK/1`.
-4. Decision and operation.
-5. Request ID and challenge (authorize).
-6. Host package + signing certificate.
-7. Guest package + APK hash + signing certificate (guest check).
-8. Permission for the exact operation.
-9. Issue/expiry timestamps and session ID.
-
-Any mismatch is a hard deny.
+Any mismatch is a hard deny. Server down or airplane mode is also a deny; there
+is no offline cached launch path.

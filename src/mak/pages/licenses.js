@@ -132,7 +132,7 @@ export function newLicensePage({ csrf, guests = [], error = '', values = {}, def
             <dl class="kv">
               <dt>Activation API</dt><dd>${statusBadge(server.enabled ? 'ONLINE' : 'OFFLINE')}</dd>
               <dt>Response signing</dt><dd>${statusBadge(server.signingReady ? 'ACTIVE' : 'SUSPENDED')}</dd>
-              <dt>Protocol</dt><dd><span class="mono">MAK/1</span></dd>
+              <dt>Protocol</dt><dd><span class="mono">MAK/2</span></dd>
             </dl>
             ${!server.signingReady ? `<div class="notice" style="margin:14px 0 0">${icon('shield-alert', 17)}<div>You can issue the key now, but authorization stays closed until the signing secret is configured.</div></div>` : ''}
           </div>

@@ -332,7 +332,7 @@ export function layout(o) {
     + sideLabel('System')
     + '<a href="/sdk/server" class="' + navClass('sdk/server', route) + '"><i class="bi bi-hdd-network-fill text-lg w-6 text-center"></i> Server</a>'
     + '<a href="/sdk/hash" class="' + navClass('sdk/hash', route) + '"><i class="bi bi-fingerprint text-lg w-6 text-center"></i> Hash</a>'
-    + '</nav><div class="p-3"><div class="clay-card rounded-xl p-3 flex items-center gap-2.5"><span class="status-dot"></span><div class="min-w-0"><p class="text-xs font-bold" style="color:var(--ink)">MAK activation</p><p class="text-[11px] truncate" style="color:var(--muted)">Protocol MAK/1</p></div></div></div></aside>'
+    + '</nav><div class="p-3"><div class="clay-card rounded-xl p-3 flex items-center gap-2.5"><span class="status-dot"></span><div class="min-w-0"><p class="text-xs font-bold" style="color:var(--ink)">MAK activation</p><p class="text-[11px] truncate" style="color:var(--muted)">Protocol MAK/2</p></div></div></div></aside>'
     + '<div class="flex-1 flex flex-col h-screen overflow-y-auto relative w-full z-10">'
     + '<header class="glass-header sticky top-0 z-30"><div class="flex items-center gap-3 px-4 lg:px-8 h-16">'
     + '<button onclick="toggleSidebar()" class="md:hidden mode-btn" aria-label="Open menu"><i class="bi bi-list text-xl"></i></button>'

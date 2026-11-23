@@ -1,0 +1,65 @@
+name: Deploy panel
+
+# Manual only. Production secrets are never printed, and a fork cannot read
+# repository secrets. Set these repo secrets before running:
+#   CLOUDFLARE_API_TOKEN  (Workers Scripts:Edit + Account Settings:Read)
+#   CLOUDFLARE_ACCOUNT_ID
+on:
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: Skip the panel test suite
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: panel-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Preflight secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Set the CLOUDFLARE_API_TOKEN repository secret."; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Set the CLOUDFLARE_ACCOUNT_ID repository secret."; exit 1; }
+
+      - name: Install
+        run: npm ci
+
+      - name: Test
+        if: ${{ !inputs.skip_tests }}
+        run: npm test
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '3.114.15'
+          command: deploy
+
+      - name: Verify MAK/2 status
+        env:
+          MAK_VERIFY_RETRIES: '8'
+        # The first deploy legitimately has no keys until someone presses
+        # Generate on /sdk/server. This flag only accepts a completely
+        # unconfigured deployment; a configured key loss still fails.
+        run: node scripts/verify-mak-status.mjs --allow-unconfigured

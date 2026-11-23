@@ -504,3 +504,28 @@ CREATE INDEX IF NOT EXISTS idx_mak_events_license ON mak_events(license_id);
 CREATE INDEX IF NOT EXISTS idx_mak_events_type ON mak_events(event_type);
 CREATE INDEX IF NOT EXISTS idx_mak_events_result ON mak_events(result);
 CREATE INDEX IF NOT EXISTS idx_mak_events_created ON mak_events(created_at);
+
+-- ---------------------------------------------------------------------------
+-- MAK/2 panel keyring. Keys are generated from /sdk/server and stored here;
+-- only the public halves are published by GET /mak/v2/status.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS mak_server_keys (
+  key_id     TEXT PRIMARY KEY,
+  algorithm  TEXT NOT NULL,                -- ED25519 | X25519
+  public_key TEXT NOT NULL,
+  secret_key TEXT NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'ACTIVE', -- ACTIVE | RETIRED
+  created_at INTEGER NOT NULL,
+  retired_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_mak_server_keys_algo ON mak_server_keys(algorithm, status);
+
+CREATE TABLE IF NOT EXISTS mak_server_key_rotations (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  previous_key_id   TEXT NOT NULL,
+  new_key_id        TEXT NOT NULL,
+  statement         TEXT NOT NULL,
+  signature         TEXT NOT NULL,
+  created_at        INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mak_key_rotations_created ON mak_server_key_rotations(created_at);

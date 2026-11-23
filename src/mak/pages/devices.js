@@ -30,7 +30,7 @@ export function devicesPage({ devices = [], counts = {}, q = '', status = 'ALL',
         </form>`}
       </td>
     </tr>`;
-  }).join('') : `<tr><td colspan="7">${emptyState('smartphone', 'No devices', q || status !== 'ALL' ? 'No device matches this filter.' : 'The first successful /mak/v1/authorize registers an ECDSA P-256 public key here.')}</td></tr>`;
+  }).join('') : `<tr><td colspan="7">${emptyState('smartphone', 'No devices', q || status !== 'ALL' ? 'No device matches this filter.' : 'MAK/2 does not collect a device_id. Hosts are bound by package name + certificate fingerprint on first successful /mak/v2/activate.')}</td></tr>`;
 
   return `
     ${pageHeader({

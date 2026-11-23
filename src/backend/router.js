@@ -39,7 +39,9 @@ import { professorDashboard } from '../frontend/panel/professor.js';
 import { getProfessorData } from './professor.js';
 import { opencodeLoginPage, opencodeAdminLayout, opencodeOverview, opencodeUsersPage, opencodeNoticesPage, opencodeSettingsPage } from '../frontend/opencode-admin.js';
 import { getAdminSession, verifyCsrf } from '../mak/auth.js';
-import { loadSigningConfig } from '../mak/crypto.js';
+import {
+  generateServerKeys, loadKeyConfig, publicKeyFingerprint, publicKeysView,
+} from '../mak/keystore.js';
 import { logEvent } from '../mak/events.js';
 import { formAll as readFormAll, sameOrigin } from '../mak/http.js';
 import { defaultExpiryDate, issueMak } from '../mak/issue.js';
@@ -815,12 +817,13 @@ export default {
 
     if (path === '/sdk') {
       const g = sdkGate(); if (g) return g;
-      const [stats, licenses, settings, config] = await Promise.all([
+      const [stats, licenses, settings, keys] = await Promise.all([
         dashboardStats(db),
         listLicenses(db, { q: '', status: 'ALL' }),
         getSettings(db),
-        Promise.resolve(loadSigningConfig(env)),
+        loadKeyConfig(db, env),
       ]);
+      const config = keys.signing;
       return S('sdk', 'MAK Dashboard', dashboardPage({
         stats,
         recent: licenses.slice(0, 5),
@@ -837,8 +840,8 @@ export default {
       const admin = await sdkAdmin();
       if (!admin) return redir('/login?next=' + encodeURIComponent('/sdk/generate'));
       const settings = await getSettings(db);
-      const config = loadSigningConfig(env);
-      const server = { enabled: settings.server_enabled, signingReady: config.ok };
+      const keys = await loadKeyConfig(db, env);
+      const server = { enabled: settings.server_enabled, signingReady: keys.signing.ok };
       const guests = await listAllActiveGuests(db);
 
       if (method === 'GET') {
@@ -966,18 +969,37 @@ export default {
         if (!sameOrigin(request)) return new Response('Cross-site request blocked.', { status: 403 });
         const sp = await readFormAll(request);
         if (!verifyCsrf(admin, sp.get('_csrf'))) return new Response('CSRF token rejected.', { status: 403 });
-        if (String(sp.get('action') || '') === 'save') {
+        const action = String(sp.get('action') || '');
+        if (action === 'save') {
           await setSettings(db, {
             server_enabled: sp.has('server_enabled') ? '1' : '0',
             maintenance_message: String(sp.get('maintenance_message') || '').slice(0, 300),
           });
           return redir('/sdk/server?ok=1');
         }
+        if (action === 'generate_keys') {
+          const generated = await generateServerKeys(db, { actor: admin.username || ('ADMIN-' + admin.id) });
+          await logEvent(db, {
+            event_type: 'SERVER_KEYS_GENERATED',
+            result: 'SUCCESS',
+            actor: 'ADMIN',
+            detail: 'Rotated MAK/2 keys: ' + generated.signing_key_id
+              + ' / ' + generated.encryption_key_id
+              + (generated.rotated_from ? ' (from ' + generated.rotated_from + ')' : ' (initial)'),
+          }).catch(() => {});
+          return redir('/sdk/server?ok=keys');
+        }
         return redir('/sdk/server');
       }
 
-      const [settings, stats] = await Promise.all([getSettings(db), dashboardStats(db)]);
-      const config = loadSigningConfig(env);
+      const [settings, stats, keys] = await Promise.all([
+        getSettings(db), dashboardStats(db), loadKeyConfig(db, env),
+      ]);
+      const config = keys.signing;
+      const encryption = keys.encryption;
+      const activeSigning = config.ok ? config.active : null;
+      const signingPublic = activeSigning ? activeSigning.public_key : '';
+      const encryptionPublic = encryption.ok ? encryption.public_key : '';
       return S('sdk/server', 'Server & API', sdkServerPage({
         enabled: settings.server_enabled,
         settings,
@@ -986,10 +1008,21 @@ export default {
           ok: config.ok,
           reason: config.reason,
           keyId: config.ok ? config.active.key_id : '',
+          fingerprint: signingPublic ? await publicKeyFingerprint(signingPublic) : '',
+          keys: publicKeysView(config),
         },
+        encryption: {
+          ok: encryption.ok,
+          reason: encryption.reason,
+          keyId: encryption.key_id,
+          fingerprint: encryptionPublic ? await publicKeyFingerprint(encryptionPublic) : '',
+        },
+        keySource: keys.source,
+        rotations: keys.rotations.length,
         host: url.host,
         csrf: admin.csrf,
         ok: url.searchParams.get('ok') === '1',
+        keysGenerated: url.searchParams.get('ok') === 'keys',
       }));
     }
 

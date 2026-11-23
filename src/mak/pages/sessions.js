@@ -74,7 +74,7 @@ export function sessionsPage({ sessions = [], counts = {}, q = '', status = 'ALL
     <div class="grid-2" style="margin-top:16px">
       <div class="card">
         ${sectionHead('Why short-lived?')}
-        <p class="muted small" style="margin:0">A signed session does not replace live checks. Every guest install, launch, update or restart calls /mak/v1/guest/check and receives a fresh signed decision. Revocation applies immediately.</p>
+        <p class="muted small" style="margin:0">A signed session does not replace live checks. Every guest install, launch, update or restart calls /mak/v2/guest/check and receives a fresh encrypted, signed ticket. Revocation applies immediately.</p>
       </div>
       <div class="card">
         ${sectionHead('Heartbeat')}

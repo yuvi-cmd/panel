@@ -8,6 +8,10 @@
     "deploy": "wrangler deploy",
     "db:migrate": "wrangler d1 execute panel --file=schema.sql",
     "keys": "node scripts/generate-keys.mjs",
+    "mak:keys": "node scripts/mak-keys.mjs",
+    "mak:check": "node scripts/check-mak-secrets.mjs",
+    "mak:secrets": "node scripts/set-worker-secrets.mjs",
+    "mak:verify": "node scripts/verify-mak-status.mjs",
     "test": "node test/smoke.mjs && node test/mak.mjs"
   },
   "dependencies": {

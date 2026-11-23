@@ -26,13 +26,13 @@ export function settingsPage({
       eyebrow: 'Configuration',
       title: 'Settings',
       subtitle: 'Global server switch, protocol timings, signing identity and administrator security.',
-      actions: `<a class="btn" href="/mak/v1/status" target="_blank" rel="noopener">${icon('external', 16)} Protocol status</a>`,
+      actions: `<a class="btn" href="/mak/v2/status" target="_blank" rel="noopener">${icon('external', 16)} Protocol status</a>`,
     })}
     ${error ? `<div class="alert alert-bad"><span class="alert-ic">${icon('alert', 18)}</span><div class="alert-body">${esc(error)}</div></div>` : ''}
     <div class="detail-grid">
       <div class="stack">
         <div class="card">
-          ${sectionHead('Activation server', 'The global kill switch applies before every MAK/1 decision.', statusBadge(on ? 'ONLINE' : 'OFFLINE'))}
+          ${sectionHead('Activation server', 'The global kill switch applies before every MAK/2 decision.', statusBadge(on ? 'ONLINE' : 'OFFLINE'))}
           ${!on ? `<div class="notice" style="margin:0 0 12px">${icon('ban', 17)}<div><b>All activation endpoints are failing closed.</b> Hosts receive a signed SERVER_DISABLED denial. The panel stays available.</div></div>` : ''}
           <form method="post" action="/settings/server">
             ${csrfInput(csrf)}
@@ -73,21 +73,21 @@ export function settingsPage({
         </div>
 
         <div class="card">
-          ${sectionHead('Signing identity', 'Ed25519 keys sign every MAK/1 response. Private seeds live only in Worker secrets.')}
+          ${sectionHead('Signing identity', 'Ed25519 keys sign every MAK/2 grant, ticket and envelope. Panel-generated keys live in D1.')}
           <div class="spread" style="margin-bottom:12px">
             <span class="muted small">Signing status</span>
             ${signing.ok ? statusBadge('ACTIVE') : statusBadge('SUSPENDED')}
           </div>
           ${keyRows}
-          ${!signing.ok ? `<div class="notice" style="margin:0">${icon('terminal', 17)}<div>Set the key, then redeploy the Worker:<div class="mono-block" style="margin-top:8px">openssl rand -base64 32 | npx wrangler secret put MAK_SIGNING_KEY</div></div></div>` : ''}
+          ${!signing.ok ? `<div class="notice" style="margin:0">${icon('terminal', 17)}<div><b>No signing key yet.</b> Open <span class="mono">/sdk/server</span> and press <b>Generate MAK/2 keys</b>. Keys are created in the panel and stored in D1 — nothing has to be pasted.</div></div>` : ''}
           <div class="divider"></div>
           <dl class="kv">
             <dt>Active key</dt><dd>${signing.ok ? esc(signing.active?.key_id || '—') : '—'}</dd>
             <dt>Key ring</dt><dd>${keys.length} public key${keys.length === 1 ? '' : 's'}</dd>
             <dt>Algorithm</dt><dd>Ed25519 (TweetNaCl)</dd>
-            <dt>Domain separation</dt><dd class="mono">MAK/1 · RESPONSE</dd>
+            <dt>Domain separation</dt><dd class="mono">MAK/2 · GRANT / TICKET / ENVELOPE / STATUS / ROTATION</dd>
           </dl>
-          <div class="notice" style="margin:14px 0 0">${icon('lock', 17)}<div><b>Rotation:</b> set MAK_SIGNING_KEYS as a JSON array of <span class="mono">{ key_id, seed }</span> entries and point MAK_SIGNING_KEY_ID at the new active key. Old public keys remain published at /mak/v1/status.</div></div>
+          <div class="notice" style="margin:14px 0 0">${icon('lock', 17)}<div><b>Rotation:</b> press <b>Rotate MAK/2 keys</b> on <span class="mono">/sdk/server</span>. The previous Ed25519 key signs the new signing + envelope keys, so installed clients rotate automatically. No APK rebuild.</div></div>
         </div>
 
         <div class="card">
@@ -113,7 +113,7 @@ export function settingsPage({
             <dt>Guest proof</dt><dd>${settings.guest_proof_required ? statusBadge('ACTIVE') : statusBadge('SUSPENDED')}</dd>
             <dt>Admin</dt><dd>${esc(admin.username)} · ${esc(admin.role)}</dd>
             <dt>Panel</dt><dd>${esc(panelName)}</dd>
-            <dt>Protocol</dt><dd class="mono">MAK/1</dd>
+            <dt>Protocol</dt><dd class="mono">MAK/2</dd>
             <dt>Signed at</dt><dd>${esc(fmtDateTime(Math.floor(Date.now() / 1000)))}</dd>
           </dl>
         </div>
@@ -131,15 +131,13 @@ export function settingsPage({
         </div>
 
         <div class="card">
-          ${sectionHead('Endpoints', 'Public base URL is this Worker origin.')}
-          <div class="endpoint"><span class="method">POST</span><code>/mak/v1/challenge</code></div>
-          <div class="endpoint"><span class="method">POST</span><code>/mak/v1/authorize</code></div>
-          <div class="endpoint"><span class="method">POST</span><code>/mak/v1/guest/check</code></div>
-          <div class="endpoint"><span class="method">POST</span><code>/mak/v1/renew</code></div>
-          <div class="endpoint"><span class="method">POST</span><code>/mak/v1/heartbeat</code></div>
-          <div class="endpoint"><span class="method">POST</span><code>/mak/v1/events</code></div>
-          <div class="endpoint"><span class="method">POST</span><code>/mak/v1/revoke</code></div>
-          <div class="endpoint"><span class="method">GET</span><code>/mak/v1/status</code></div>
+          ${sectionHead('Endpoints', 'Public base URL is this Worker origin. Bodies are encrypted; /mak/v1/* is removed (410).')}
+          <div class="endpoint"><span class="method">POST</span><code>/mak/v2/activate</code></div>
+          <div class="endpoint"><span class="method">POST</span><code>/mak/v2/host/verify</code></div>
+          <div class="endpoint"><span class="method">POST</span><code>/mak/v2/guest/check</code></div>
+          <div class="endpoint"><span class="method">POST</span><code>/mak/v2/status</code></div>
+          <div class="endpoint"><span class="method">POST</span><code>/mak/v2/deactivate</code></div>
+          <div class="endpoint"><span class="method">GET</span><code>/mak/v2/status</code></div>
         </div>
 
         <div class="card">

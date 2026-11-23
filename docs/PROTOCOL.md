@@ -1,391 +1,325 @@
-# MAK/1 Protocol
+# MAK/2 protocol
 
-This is the wire contract implemented by `src/mak/protocol.js`. It is the
-authoritative reference for the Android host (`libymudo`) and guest runtime
-(`libRcore`).
+MAK/2 is the only public protocol, implemented by
+`src/mak/protocol-v2.js` + `src/mak/secure.js` + `src/mak/keystore.js`.
+`/mak/v1/*` always returns **410 `PROTOCOL_REMOVED`**.
 
-- Base URL: `https://YOUR-DOMAIN/mak/v1`
+There is **no device_id** and **no client timestamp** in MAK/2. Every request
+is encrypted and every decision is signed. The server public keys are
+generated from the panel (`/sdk/server` → **Generate MAK/2 keys**), stored in
+D1, and published at `GET /mak/v2/status`; they are never compiled into the
+APK.
+
+- Base URL: `https://YOUR-DOMAIN/mak/v2`
 - Content type: `application/json`
-- Transport: TLS 1.3
-- Protocol string: `MAK/1`
-- Server signatures: Ed25519
-- Device keys and proofs: ECDSA P-256 + SHA-256
+- Transport: TLS 1.3 + NaCl box (X25519 + XSalsa20-Poly1305) + HKDF-SHA256
+- Encryption: **not AES**
+- Signatures: Ed25519
+- Protocol string: `MAK/2`
 
 ## 1. Canonical JSON
 
-All signatures cover **canonical JSON**:
+Every signed message covers canonical JSON:
 
-- object keys sorted by UTF-16 code unit order, ascending
+- object keys sorted ascending (UTF-16 code unit order)
 - no insignificant whitespace
-- strings escaped as JSON
-- numbers must be finite
-- `undefined` object values omitted
-- arrays keep their order
 - UTF-8 bytes on the wire
+- arrays keep their order
+- numbers must be finite
 
-Server signature message:
-
-```
-MAK/1\nRESPONSE\n<canonical JSON of the payload without "signature">
-```
-
-`key_id` **is** part of the signed payload. `signature` is standard base64.
-Clients must verify the signature against a pinned Ed25519 public key before
-acting on any decision. The public keys are also published by `/status`, but
-publication alone is not a trust anchor — pin at least one key in the app or
-deliver it through a trusted update channel.
-
-## 2. Server status
+Signature messages:
 
 ```
-GET /status
+MAK/2\nSTATUS\n<canonical JSON without "signature">
+MAK/2\nGRANT\n<canonical JSON without "signature">
+MAK/2\nHOST-TICKET\n<canonical JSON without "signature">
+MAK/2\nLAUNCH-TICKET\n<canonical JSON without "signature">
+MAK/2\nINSTALL-TICKET\n<canonical JSON without "signature">
+MAK/2\nOP\n<canonical JSON without "signature">
+MAK/2\nRESPONSE\n<canonical JSON without "signature">
+MAK/2\nERROR\n<canonical JSON without "signature">
+MAK/2\nROTATION\n<canonical JSON without "signature">
+MAK/2\nENVELOPE\n<exact plaintext response bytes>
 ```
 
-Always available, even when the server is OFF and even when signing is not
-configured (in that case the response is unsigned and
-`"signing_ready": false`).
+`key_id` **is** part of the signed inner payload. `signature` is standard
+base64. The outer response envelope has no `key_id`; the client takes it from
+the decrypted payload, then verifies the envelope signature over the exact
+plaintext.
+
+## 2. Server status (key bootstrap)
+
+```
+GET /mak/v2/status
+```
+
+Readable without an envelope; it only publishes public data.
 
 ```json
 {
-  "protocol": "MAK/1",
+  "protocol": "MAK/2",
   "service": "MAK Activation",
-  "version": "1.0.0",
-  "server_enabled": true,
   "signing_ready": true,
-  "key_id": "MAK-ED25519-01",
+  "key_id": "MAK-ED-1A2B3C4D5E6F",
   "public_keys": [
-    { "key_id": "MAK-ED25519-01", "public_key": "BASE64", "active": true }
+    { "key_id": "MAK-ED-1A2B3C4D5E6F", "public_key": "BASE64", "active": true },
+    { "key_id": "MAK-ED-0A1B2C3D4E5F", "public_key": "BASE64", "active": false }
   ],
-  "signature_alg": "Ed25519",
-  "device_key_alg": "ECDSA-P256",
-  "transport": "TLS 1.3",
-  "heartbeat_interval": 300,
-  "session_ttl": 3600,
-  "challenge_ttl": 60,
+  "key_source": "PANEL",
+  "rotations": [
+    {
+      "v": 2,
+      "previous_key_id": "MAK-ED-0A1B2C3D4E5F",
+      "new_key_id": "MAK-ED-1A2B3C4D5E6F",
+      "new_signing_public_key": "BASE64",
+      "new_encryption_key_id": "MAK-ENC-1A2B3C4D5E6F",
+      "new_encryption_public_key": "BASE64",
+      "signed_at": 1795430000,
+      "signature": "BASE64"
+    }
+  ],
+  "encryption_ready": true,
+  "encryption_key_id": "MAK-ENC-1A2B3C4D5E6F",
+  "encryption_public_key": "BASE64",
+  "transport": "TLS 1.3 + NaCl box",
   "server_time": 1795430000,
   "signature": "BASE64"
 }
 ```
 
-A client must treat `signing_ready: false` or a missing/invalid signature as
-`SERVER_ERROR` / deny.
+Trust rules:
 
-## 3. Challenge
+1. First contact: pin the active Ed25519 key + X25519 key (TOFU). This is the
+   only time no previous key exists.
+2. Later: if the active key differs from the pinned one, the client must find a
+   `rotations[]` chain from the pinned key to the active key. Each link must be
+   Ed25519-verified with the previous link's key and must name the active
+   signing + encryption keys.
+3. Any key change without a valid chain is a hard DENY
+   (`SERVER_KEY_CHANGED`). The client never downgrades to an unauthenticated
+   key.
 
-```
-POST /challenge
-```
+## 3. Request / response envelope
 
-Request:
-
-```json
-{ "protocol": "MAK/1", "request_id": "REQ_1234" }
-```
-
-Response (signed):
+Request (POST body, exact outer shape):
 
 ```json
 {
-  "protocol": "MAK/1",
-  "challenge_id": "CH_...",
-  "nonce": "...",
-  "expires_at": 1795430060,
-  "server_time": 1795430000,
-  "heartbeat_interval": 300,
-  "session_ttl": 3600,
-  "challenge_ttl": 60
+  "v": 2,
+  "e": "BASE64 32-byte client ephemeral X25519 public key",
+  "n": "BASE64 24-byte random nonce",
+  "c": "BASE64 NaCl secretbox ciphertext"
 }
 ```
 
-Rules:
-
-- nonce is cryptographically random and single use
-- only `SHA256("MAK-CHALLENGE|" + nonce)` is stored server-side
-- expired or consumed challenges fail with `CHALLENGE_EXPIRED` / `NONCE_REPLAY`
-- authorization is denied while the server is OFF (`SERVER_DISABLED`, HTTP 503)
-
-## 4. Authorize
-
-```
-POST /authorize
-```
-
-Request:
+Response (exact outer shape):
 
 ```json
 {
-  "protocol": "MAK/1",
-  "request_id": "REQ_1234",
-  "challenge_id": "CH_...",
-  "nonce": "...",
-  "timestamp": 1795430000,
-  "license": { "credential": "MAK-XXXXX-XXXXX-XXXXX-XXXXX" },
-  "host": {
+  "v": 2,
+  "c": "BASE64 NaCl secretbox ciphertext",
+  "sig": "BASE64 Ed25519 signature"
+}
+```
+
+Nothing else is exposed. Decision, `key_id`, `protocol` and all data live
+inside the ciphertext.
+
+Client-side steps for every request:
+
+1. `client = X25519 keypair` (fresh per request).
+2. `shared = X25519(client_secret, server_encryption_public_key)`.
+3. `reqKey = HKDF-SHA256(ikm=shared, salt=nonce, info="MAK/2-REQ", 32 bytes)`.
+4. Plaintext = canonical JSON of the inner request.
+5. `c = NaCl secretbox(plaintext, nonce, reqKey)`.
+6. POST `{v:2,e,n,c}`.
+
+Response handling:
+
+1. `respKey = HKDF-SHA256(ikm=shared, salt=nonce, info="MAK/2-RESP", 32 bytes)`.
+2. `plaintext = secretbox_open(c, nonce, respKey)`.
+3. Parse JSON. Take `key_id` from the parsed payload.
+4. Verify `Ed25519(public_key_of(key_id), "MAK/2\nENVELOPE\n" + plaintext)` against `sig`.
+5. Verify the inner payload signature (`RESPONSE` or `ERROR` domain).
+6. Only then act on the decision.
+
+Envelope nonces are single-use server-side; a replayed envelope returns
+`409 NONCE_REPLAY`.
+
+## 4. `POST /mak/v2/activate`
+
+Inner request (`endpoint` must be `activate`):
+
+```json
+{
+  "protocol": "MAK/2",
+  "endpoint": "activate",
+  "request_id": "REQ_ACTIVATE_001",
+  "mak": "MAK-XXXXX-XXXXX-XXXXX-XXXXX",
+  "package_name": "com.example.host",
+  "app_name": "My Host App",
+  "cert_sha256": "64-lowercase-hex"
+}
+```
+
+- `package_name`, `app_name`, `cert_sha256`, `mak` only. No device id.
+- `cert_sha256` is required when the license has Signature Bind ON; ignored
+  when it is OFF.
+- AUTO licenses bind the host package on first use. MANUAL licenses require the
+  package to be pre-registered.
+
+Decrypted response:
+
+```json
+{
+  "protocol": "MAK/2",
+  "decision": "ALLOW",
+  "code": "ACTIVATED",
+  "request_id": "REQ_ACTIVATE_001",
+  "grant": {
+    "v": 2,
+    "grant_id": "GRT-...",
+    "license_uid": "...",
     "package_name": "com.example.host",
-    "version_code": 1,
-    "signing_cert_sha256": "64-lowercase-hex"
-  },
-  "device": {
-    "public_key": "spki:BASE64",
-    "proof": "BASE64"
-  }
-}
-```
-
-Device proof message (UTF-8, newline separated, no trailing newline):
-
-```
-MAK/1
-AUTHORIZE
-<challenge_id>
-<nonce>
-<host package name>
-<host signing cert sha256, lowercase hex>
-<device public key exactly as sent>
-<timestamp>
-```
-
-`proof` is ECDSA-SHA256 over that message using the device private key. The
-server accepts:
-
-- SPKI DER public keys as `spki:<base64>` (canonical storage form)
-- raw P-256 points as `raw:<base64>`, internally converted to SPKI
-- signatures in raw `r||s` (64 bytes) or ASN.1 DER form
-
-Order of checks:
-
-1. Protocol, challenge and nonce (single use, expires)
-2. Timestamp within `clock_skew`
-3. License lookup by SHA-256 verifier
-4. License status, expiry and revocation
-5. Device proof — **before** any host/device state is pinned
-6. Host binding (`FIRST_USE` or `STRICT`) and host status
-7. Device limit, device status, activation limit
-8. Session issuance
-
-Success (signed):
-
-```json
-{
-  "protocol": "MAK/1",
-  "decision": "ALLOW",
-  "code": "AUTHORIZED",
-  "request_id": "REQ_1234",
-  "license": { "license_uid": "LIC-XXXXX-XXXXX", "expires_at": 1798022000 },
-  "session": {
-    "session_id": "SES_...",
+    "app_name": "My Host App",
+    "cert_sha256": "64-hex or empty",
+    "signature_bind": true,
+    "features": ["INSTALL", "LAUNCH", "UPDATE", "RESTART"],
+    "max_apps": 2,
+    "max_installs": 3,
+    "expires_at": 1798022000,
+    "epoch": 1,
     "issued_at": 1795430000,
-    "expires_at": 1795433600
+    "key_id": "MAK-ED-...",
+    "signature": "BASE64"
   },
-  "host": { "package_name": "com.example.host", "signing_cert_sha256": "..." },
-  "permissions": { "install": false, "launch": false, "update": false, "restart": false },
-  "challenge": "...",
   "server_time": 1795430000,
-  "heartbeat_interval": 300
+  "key_id": "MAK-ED-...",
+  "signature": "BASE64"
 }
 ```
 
-`permissions` at this stage is host-scoped and always `false`; guest operations
-are authorized separately by `/guest/check`.
+Store the grant locally. The client enforces `expires_at` against the server
+clock (`server_time`) and detects clock rollback; the server re-checks expiry
+on every later call.
 
-Failures return HTTP 200/4xx/503 with a signed deny payload:
+## 5. `POST /mak/v2/host/verify`
+
+Call before the host opens its own UI or grants any guest operation.
 
 ```json
 {
-  "protocol": "MAK/1",
-  "decision": "DENY",
-  "code": "HOST_CERT_MISMATCH",
-  "request_id": "REQ_1234",
-  "permissions": { "install": false, "launch": false, "update": false, "restart": false },
-  "message": "Host certificate mismatch",
-  "server_time": 1795430000
+  "protocol": "MAK/2",
+  "endpoint": "host/verify",
+  "request_id": "REQ_HOST_001",
+  "mak": "MAK-...",
+  "grant_id": "GRT-...",
+  "package_name": "com.example.host",
+  "cert_sha256": "64-hex",
+  "nonce": "BASE64 24-byte single-use"
 }
 ```
 
-## 5. Guest check
+Returns `code: "HOST_VERIFIED"` and a signed `ticket` with domain
+`HOST-TICKET`, `ticket_id` prefix `HT`.
 
-```
-POST /guest/check
-```
+## 6. `POST /mak/v2/guest/check`
 
-Request:
+Call before **every** INSTALL / LAUNCH / UPDATE / RESTART.
 
 ```json
 {
-  "protocol": "MAK/1",
-  "request_id": "REQ_1234",
-  "session_id": "SES_...",
+  "protocol": "MAK/2",
+  "endpoint": "guest/check",
+  "request_id": "REQ_GUEST_001",
+  "mak": "MAK-...",
+  "grant_id": "GRT-...",
+  "package_name": "com.example.host",
+  "cert_sha256": "64-hex",
   "operation": "LAUNCH",
+  "nonce": "BASE64 24-byte single-use",
   "guest": {
     "package_name": "com.example.guest",
-    "app_name": "Guest",
-    "apk_sha256": "64-lowercase-hex",
-    "signing_cert_sha256": "64-lowercase-hex",
-    "version_code": 3
-  },
-  "device": {
-    "public_key": "spki:BASE64",
-    "proof": "BASE64",
-    "timestamp": 1795430000
+    "app_name": "Guest App",
+    "apk_sha256": "64-hex",
+    "cert_sha256": "64-hex",
+    "version_code": 42
   }
 }
 ```
 
-`operation` is one of `INSTALL`, `LAUNCH`, `UPDATE`, `RESTART`.
+- `operation` is one of `INSTALL`, `LAUNCH`, `UPDATE`, `RESTART`.
+- Signature Bind ON: guest `cert_sha256` is mandatory and apps are matched by
+  package + certificate.
+- Signature Bind OFF: certificates are ignored; apps are matched by package.
+- AUTO binds the guest on first use; MANUAL requires pre-registration.
 
-Device proof message:
-
-```
-MAK/1
-GUEST_CHECK
-<session_id>
-<OPERATION>
-<guest package name>
-<apk sha256, lowercase hex>
-<signing cert sha256, lowercase hex>
-<version_code as decimal integer>
-<device public key exactly as sent>
-<timestamp>
-```
-
-The proof timestamp must be within `clock_skew` of server time.
-
-Server checks, in order: session (exists, active, not expired, license usable,
-device active), guest identity (package, APK hash, cert hash, version), guest
-app status, binding to the license, then the requested operation permission.
-The guest must be registered in the panel and explicitly bound to the license
-before any operation can succeed.
-
-Success (signed):
+Decrypted response:
 
 ```json
 {
-  "protocol": "MAK/1",
+  "protocol": "MAK/2",
   "decision": "ALLOW",
   "code": "AUTHORIZED",
-  "request_id": "REQ_1234",
-  "operation": "LAUNCH",
-  "session": { "session_id": "SES_...", "issued_at": 1795430000, "expires_at": 1795433600 },
-  "host": { "package_name": "com.example.host", "signing_cert_sha256": "..." },
-  "guest": {
-    "package_name": "com.example.guest",
-    "app_name": "Guest",
-    "apk_sha256": "...",
-    "signing_cert_sha256": "...",
-    "version_code": 3
+  "request_id": "REQ_GUEST_001",
+  "ticket": {
+    "v": 2,
+    "ticket_id": "LT-...",
+    "grant_id": "GRT-...",
+    "operation": "LAUNCH",
+    "host": { "package_name": "...", "app_name": "...", "cert_sha256": "..." },
+    "guest": { "package_name": "...", "app_name": "...", "apk_sha256": "...", "cert_sha256": "...", "version_code": 42 },
+    "expires_at": 1798022000,
+    "issued_at": 1795430000,
+    "nonce": "BASE64",
+    "epoch": 1,
+    "key_id": "MAK-ED-...",
+    "signature": "BASE64"
   },
-  "permissions": { "install": false, "launch": true, "update": false, "restart": false },
-  "issued_at": 1795430000,
-  "expires_at": 1795430120,
-  "server_time": 1795430000
+  "permissions": { "launch": true, "install": true, "update": true, "restart": true },
+  "server_time": 1795430000,
+  "key_id": "MAK-ED-...",
+  "signature": "BASE64"
 }
 ```
 
-Native code must enforce the signed operation result; it must not rely on
-Java/Kotlin checks.
+Ticket domains: `LAUNCH-TICKET`, `INSTALL-TICKET`, `OP` (UPDATE/RESTART).
+The native gate must verify the ticket domain, operation, guest identity and
+expiry before launching.
 
-## 6. Renew and heartbeat
+## 7. `POST /mak/v2/status`
 
-Both require device proof.
+Authenticated license/grant status. Same envelope, inner request
+`{protocol, endpoint:"status", request_id, mak, grant_id}`. Response is an
+`ALLOW`/`DENY` with `status: ACTIVE|EXPIRED|REVOKED`.
 
-`POST /renew`
+## 8. `POST /mak/v2/deactivate`
+
+Revokes the grant and bumps the license epoch. Inner request
+`{protocol, endpoint:"deactivate", request_id, mak, grant_id}`.
+
+## 9. Error responses
+
+Errors are sealed in the same envelope and signed with domain `ERROR`:
 
 ```json
 {
-  "protocol": "MAK/1",
-  "request_id": "REQ_1234",
-  "session_id": "SES_...",
-  "device": { "public_key": "spki:BASE64", "proof": "BASE64", "timestamp": 1795430000 }
+  "protocol": "MAK/2",
+  "decision": "DENY",
+  "code": "LICENSE_EXPIRED",
+  "message": "License is not active",
+  "server_time": 1795430000,
+  "key_id": "MAK-ED-...",
+  "signature": "BASE64"
 }
 ```
 
-Proof message:
+Common codes: `INVALID_LICENSE`, `LICENSE_EXPIRED`, `LICENSE_REVOKED`,
+`LICENSE_SUSPENDED`, `HOST_PACKAGE_MISMATCH`, `HOST_CERT_MISMATCH`,
+`PACKAGE_LIMIT_REACHED`, `INSTALL_LIMIT_REACHED`, `APP_LIMIT_REACHED`,
+`GUEST_CERT_MISMATCH`, `OPERATION_NOT_ALLOWED`, `NONCE_REPLAY`,
+`ENVELOPE_INVALID`, `SERVER_DISABLED`, `SERVER_ERROR`.
 
-```
-MAK/1
-RENEW
-<session_id>
-<device public key exactly as sent>
-<timestamp>
-```
-
-`POST /heartbeat` is identical with `HEARTBEAT` as the second line. Success
-codes are `RENEWED` and `ALIVE`; both return the current session and
-`heartbeat_interval`. Renewal never extends past the license expiry.
-
-## 7. Client events
-
-```
-POST /events
-```
-
-```json
-{
-  "protocol": "MAK/1",
-  "request_id": "REQ_1234",
-  "session_id": "SES_...",
-  "event_type": "INTEGRITY_FAILED",
-  "error_code": "APK_INVALID",
-  "detail": "signature check failed"
-}
-```
-
-Recorded as `NATIVE_<EVENT_TYPE>` in the panel audit log. The response code is
-`EVENT_RECORDED`. Event ingestion is informational only and never changes an
-authorization decision.
-
-## 8. Admin revoke
-
-```
-POST /revoke
-```
-
-Requires a panel admin session cookie and the `X-CSRF-Token` header. This
-endpoint is not used by the Android client.
-
-## 9. Error codes
-
-| Code | Meaning |
-| --- | --- |
-| `INVALID_LICENSE` | Unknown MAK |
-| `LICENSE_EXPIRED` | License past expiry |
-| `LICENSE_SUSPENDED` | License suspended |
-| `LICENSE_REVOKED` | License permanently revoked |
-| `DEVICE_LIMIT_REACHED` | Device cap reached |
-| `ACTIVATION_LIMIT_REACHED` | Activation cap reached |
-| `HOST_PACKAGE_MISMATCH` | Wrong host package or suspended host |
-| `HOST_CERT_MISMATCH` | Wrong host signing certificate |
-| `GUEST_PACKAGE_MISMATCH` | Guest package not approved |
-| `GUEST_HASH_MISMATCH` | Guest APK hash mismatch |
-| `GUEST_CERT_MISMATCH` | Guest signer mismatch |
-| `DEVICE_MISMATCH` | Proof key does not own this session |
-| `INVALID_DEVICE_PROOF` | Bad or missing device signature |
-| `CHALLENGE_EXPIRED` | Challenge missing or expired |
-| `NONCE_REPLAY` | Challenge already consumed |
-| `SESSION_EXPIRED` | Session missing or expired |
-| `SESSION_REVOKED` | Session revoked |
-| `INVALID_SIGNATURE` | Server signature rejected |
-| `RESPONSE_EXPIRED` | Response/request outside validity window |
-| `SERVER_ERROR` | Internal or rate-limit failure |
-| `SERVER_DISABLED` | Global kill switch is OFF |
-| `OPERATION_NOT_ALLOWED` | Guest permission not granted |
-| `APK_INVALID` | Malformed guest identity |
-| `UNKNOWN_ERROR` | Unrecognized request |
-
-Native clients must deny on any unknown code, any missing signature, any
-signature failure, any transport failure, and any response whose `protocol` is
-not `MAK/1`.
-
-## 10. Native enforcement notes
-
-- `libymudo` (host main process) owns the MAK bootstrap, TLS transport,
-  challenge/authorize lifecycle, signature verification and host policy.
-- `libRcore` (guest-only) must verify the signed `/guest/check` result before
-  install, launch, update or restart.
-- `libclient.so` is untouched by this protocol.
-- The MAK is read from the host engine bootstrap and lives only as long as
-  needed to obtain a session. Do not persist it in world-readable storage.
-- Never log raw MAK values, proofs, session tokens or private keys. Use the
-  app-private log directory only.
-- Treat root, hooking and debugger signals as risk indicators, not as a
-  replacement for server decisions.
+Any malformed envelope, bad signature, unknown key, expired grant or missing
+ticket is a hard deny. Server down / airplane mode also means deny: there is no
+offline cached launch path.

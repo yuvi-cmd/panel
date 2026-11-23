@@ -1,9 +1,9 @@
 // Generated from schema.sql — keep both in sync.
-export const SCHEMA = `-- MAK ACTIVATION KEY (MAK/1) — Cloudflare D1 schema
+export const SCHEMA = `-- MAK ACTIVATION KEY (MAK/2) — Cloudflare D1 schema
 -- Fresh install:
 --   npx wrangler d1 execute panel --file=schema.sql
 -- The Worker also runs this idempotently on first request per isolate.
--- Timestamps are Unix seconds (INTEGER), matching the MAK/1 wire protocol.
+-- Timestamps are Unix seconds (INTEGER), matching the MAK/2 wire protocol.
 
 -- ---------------------------------------------------------------------------
 -- Panel administrators + sessions
@@ -129,6 +129,36 @@ CREATE TABLE IF NOT EXISTS mak_bindings (
 CREATE INDEX IF NOT EXISTS idx_mak_bindings_license ON mak_bindings(license_id);
 CREATE INDEX IF NOT EXISTS idx_mak_bindings_host ON mak_bindings(license_id, host_id);
 CREATE INDEX IF NOT EXISTS idx_mak_bindings_guest ON mak_bindings(guest_app_id);
+
+-- ---------------------------------------------------------------------------
+-- MAK/2 server keyring. Generated from /sdk/server ("Generate keys"), never
+-- compiled into the app and never returned by any API except the public halves
+-- in /mak/v2/status. D1 encrypts storage at rest; only the keystore reads the
+-- secret_key column.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS mak_server_keys (
+  key_id     TEXT PRIMARY KEY,
+  algorithm  TEXT NOT NULL,                -- ED25519 | X25519
+  public_key TEXT NOT NULL,
+  secret_key TEXT NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'ACTIVE', -- ACTIVE | RETIRED
+  created_at INTEGER NOT NULL,
+  retired_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_mak_server_keys_algo ON mak_server_keys(algorithm, status);
+
+-- Signed rotation chain. An existing client that still trusts the previous
+-- Ed25519 key verifies the new key from here before using it. This is what
+-- lets the panel rotate keys without rebuilding the AAR.
+CREATE TABLE IF NOT EXISTS mak_server_key_rotations (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  previous_key_id   TEXT NOT NULL,
+  new_key_id        TEXT NOT NULL,
+  statement         TEXT NOT NULL,          -- canonical JSON, signed by previous key
+  signature         TEXT NOT NULL,          -- base64 Ed25519
+  created_at        INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mak_key_rotations_created ON mak_server_key_rotations(created_at);
 
 -- ---------------------------------------------------------------------------
 -- Grants (MAK/2 seats). A grant is a random installation/seat token, not a

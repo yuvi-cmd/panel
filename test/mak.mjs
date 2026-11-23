@@ -11,6 +11,7 @@ import {
   signWithProtocol, verifyWithProtocol, verifyPassword, hashPassword,
   fromUtf8, utf8,
 } from '../src/mak/crypto.js';
+import { loadKeyConfig } from '../src/mak/keystore.js';
 import app from '../src/index.js';
 
 const results = [];
@@ -140,6 +141,63 @@ async function envelopeCall(env, endpoint, payload) {
   );
   assert.equal(sigOk, true, 'envelope Ed25519 signature');
   return { status: res.status, body: JSON.parse(responseText), text: responseText, config };
+}
+
+// Same wire helper, but resolves the encryption/signing keys exactly like a
+// real client: from /mak/v2/status (panel keyring), not from env secrets.
+async function panelEnvelopeCall(env, endpoint, payload) {
+  const keys = await loadKeyConfig(env.DB, env, { force: true });
+  assert.equal(keys.encryption.ok, true, 'panel encryption key');
+  assert.equal(keys.signing.ok, true, 'panel signing key');
+  const serverPub = b64decode(keys.encryption.public_key);
+  const client = nacl.box.keyPair();
+  const nonce = crypto.getRandomValues(new Uint8Array(24));
+  const shared = nacl.box.before(serverPub, client.secretKey);
+  const reqKey = await hkdfSha256(shared, nonce, 'MAK/2-REQ');
+  const inner = { protocol: 'MAK/2', endpoint, ...payload };
+  const plaintext = canonicalJson(inner);
+  const cipher = nacl.secretbox(utf8(plaintext), nonce, reqKey);
+  const res = await call(env, '/mak/v2/' + endpoint, {
+    method: 'POST',
+    json: {
+      v: 2,
+      e: b64encode(client.publicKey),
+      n: b64encode(nonce),
+      c: b64encode(cipher),
+    },
+  });
+  const text = await res.text();
+  const body = jsonBody(text);
+  assert.equal(body.v, 2, 'response is an envelope');
+  assert.equal(body.key_id, undefined, 'response envelope leaks no key id');
+  const respKey = await hkdfSha256(shared, nonce, 'MAK/2-RESP');
+  const opened = nacl.secretbox.open(b64decode(body.c), nonce, respKey);
+  assert.ok(opened, 'response decrypts');
+  const responseText = fromUtf8(opened);
+  assert.equal(nacl.sign.detached.verify(
+    utf8('MAK/2\nENVELOPE\n' + responseText),
+    b64decode(body.sig),
+    b64decode(keys.signing.active.public_key),
+  ), true, 'envelope Ed25519 signature');
+  return { status: res.status, body: JSON.parse(responseText), keys };
+}
+
+async function readStatus(env) {
+  const res = await call(env, '/mak/v2/status');
+  const status = await res.json();
+  assert.equal(status.protocol, 'MAK/2');
+  if (status.signing_ready) {
+    const body = { ...status };
+    delete body.signature;
+    const activeKey = (status.public_keys || []).find((key) => key.active);
+    assert.ok(activeKey, 'status publishes an active signing key');
+    assert.equal(nacl.sign.detached.verify(
+      utf8('MAK/2\nSTATUS\n' + canonicalJson(body)),
+      b64decode(status.signature),
+      b64decode(activeKey.public_key),
+    ), true, 'status signature verifies with the published key');
+  }
+  return status;
 }
 
 async function activate(env, credential, { hostPackage = 'com.test.host', hostCert = 'c'.repeat(64), appName = 'Test Host' } = {}) {
@@ -484,6 +542,100 @@ async function main() {
     assert.equal(res.status, 410);
     const body = jsonBody(await res.text());
     assert.equal(body.code, 'PROTOCOL_REMOVED');
+  });
+
+  await test('panel generates MAK/2 keys from /sdk/server without Worker secrets', async () => {
+    const env = makeEnv({ MAK_SIGNING_KEY: '', MAK_ENC_KEY: '' });
+    globalThis.__panelKeyEnv = env;
+    // A fresh D1 needs the schema even though ensureDB already ran once for
+    // the first test database in this isolate.
+    delete globalThis.__arcDbReady;
+
+    const setup = await call(env, '/setup', {
+      method: 'POST', body: form({ username: 'keyowner', password: 'supersecret123' }),
+    });
+    assert.equal(setup.status, 302, await setup.clone().text());
+    const cookie = setCookie(setup);
+    const settings = await call(env, '/sdk/settings', { cookie });
+    const token = csrf(await settings.text());
+
+    const before = await readStatus(env);
+    assert.equal(before.signing_ready, false);
+    assert.equal(before.encryption_ready, false);
+
+    const page = await call(env, '/sdk/server', { cookie });
+    const pageHtml = await page.text();
+    assert.equal(page.status, 200);
+    assert.match(pageHtml, /Generate MAK\/2 keys/);
+
+    const generated = await call(env, '/sdk/server', {
+      method: 'POST', cookie,
+      body: form({ _csrf: token, action: 'generate_keys' }),
+    });
+    assert.equal(generated.status, 302);
+    assert.match(String(generated.headers.get('Location') || ''), /ok=keys/);
+
+    const after = await readStatus(env);
+    assert.equal(after.signing_ready, true);
+    assert.equal(after.encryption_ready, true);
+    assert.equal(after.key_source, 'PANEL');
+    assert.match(after.key_id, /^MAK-ED-[0-9A-F]{12}$/);
+    assert.match(after.encryption_key_id, /^MAK-ENC-[0-9A-F]{12}$/);
+    assert.equal(after.rotations.length, 0);
+
+    const keys = await loadKeyConfig(env.DB, env, { force: true });
+    assert.equal(keys.source, 'PANEL');
+    assert.equal(keys.signing.active.key_id, after.key_id);
+    assert.equal(keys.encryption.key_id, after.encryption_key_id);
+    const rotatedPage = await call(env, '/sdk/server', { cookie });
+    assert.match(await rotatedPage.text(), /Rotate MAK\/2 keys/);
+
+    const issued = await issueLicense(env, cookie, token, { label: 'Panel Key License', signature_bind: '0' });
+    const res = await panelEnvelopeCall(env, 'activate', {
+      mak: issued.mak, package_name: 'com.panel.key', app_name: 'Panel Key Host',
+      cert_sha256: 'd'.repeat(64),
+    });
+    assert.equal(res.body.decision, 'ALLOW');
+    assert.equal(verifyWithProtocol(res.body.grant, res.keys.signing, 'MAK/2', 'GRANT'), true);
+    env.__test = { cookie, token, oldKeyId: after.key_id, oldPublicKey: after.public_keys.find((k) => k.active).public_key };
+  });
+
+  await test('rotating panel keys publishes a signed chain that old installs can verify', async () => {
+    const env = globalThis.__panelKeyEnv;
+    const { cookie, token, oldKeyId, oldPublicKey } = env.__test;
+
+    const rotated = await call(env, '/sdk/server', {
+      method: 'POST', cookie,
+      body: form({ _csrf: token, action: 'generate_keys' }),
+    });
+    assert.equal(rotated.status, 302);
+
+    const status = await readStatus(env);
+    assert.notEqual(status.key_id, oldKeyId);
+    assert.equal(status.rotations.length, 1);
+    const link = status.rotations[0];
+    assert.equal(link.previous_key_id, oldKeyId);
+    const statement = { ...link };
+    delete statement.signature;
+    assert.equal(nacl.sign.detached.verify(
+      utf8('MAK/2\nROTATION\n' + canonicalJson(statement)),
+      b64decode(link.signature),
+      b64decode(oldPublicKey),
+    ), true, 'rotation is signed by the previous key');
+    const active = status.public_keys.find((key) => key.active);
+    assert.equal(link.new_key_id, active.key_id);
+    assert.equal(link.new_signing_public_key, active.public_key);
+    assert.equal(link.new_encryption_key_id, status.encryption_key_id);
+    assert.equal(link.new_encryption_public_key, status.encryption_public_key);
+
+    const issued = await issueLicense(env, cookie, token, { label: 'Rotated Key License', signature_bind: '0' });
+    const res = await panelEnvelopeCall(env, 'activate', {
+      mak: issued.mak, package_name: 'com.rotated.key', app_name: 'Rotated Key Host',
+      cert_sha256: 'e'.repeat(64),
+    });
+    assert.equal(res.body.decision, 'ALLOW');
+    assert.equal(res.keys.signing.active.key_id, status.key_id);
+    assert.equal(verifyWithProtocol(res.body.grant, res.keys.signing, 'MAK/2', 'GRANT'), true);
   });
 
   const failed = results.filter((r) => !r.ok);

@@ -1,0 +1,8 @@
+{
+  "mode": "panel-managed",
+  "note": "Keys are generated and rotated from /sdk/server. Leave these null. Fill them only if you intentionally want to pin a specific deployment for CI verification.",
+  "ed25519_key_id": null,
+  "ed25519_public_key": null,
+  "x25519_key_id": null,
+  "x25519_public_key": null
+}

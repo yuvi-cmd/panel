@@ -7,7 +7,10 @@ compatibility_flags = ["nodejs_compat"]
 PANEL_CODE = "YUVI_001"
 PANEL_NAME = "YUVI PANEL"
 MAK_SERVER_NAME = "MAK Activation"
+# Legacy fallback ids only. Normal MAK/2 keys are generated from /sdk/server
+# and carry their own random ids (MAK-ED-*, MAK-ENC-*).
 MAK_SIGNING_KEY_ID = "MAK-ED25519-01"
+MAK_ENC_KEY_ID = "MAK-ENC-01"
 # Origin of the frontend app (e.g. "https://panel.example.com") — only
 # needed when it is cross-origin to this Worker.
 # Required for cross-origin /api/* calls with credentials. Same-origin
@@ -20,7 +23,9 @@ FRONTEND_ORIGIN = ""
 #   wrangler secret put ARCX_TOKEN_SALT
 #   wrangler secret put OPENCODE_ENC_KEY   # 64 hex chars, from OpenCodeAndroid/.panel-secret
 #   wrangler secret put OPENCODE_ADMIN_PASSWORD  # standalone /opencode admin login
-#   wrangler secret put MAK_SIGNING_KEY    # base64 32-byte Ed25519 seed
+#   wrangler secret put MAK_SIGNING_KEY    # OPTIONAL legacy fallback
+#   wrangler secret put MAK_ENC_KEY        # OPTIONAL legacy fallback
+# Normal MAK/2 keys are generated from /sdk/server; no secret is required.
 #   wrangler secret put IP_HASH_SALT       # optional, hashes client IPs in logs
 # Legacy fallbacks in src/crypto.js / src/p-connect.js keep old clients
 # working until a documented rotation. See SECURITY.md.

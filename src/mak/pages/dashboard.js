@@ -31,9 +31,9 @@ export function dashboardPage({
         <h2>${on ? 'Activation server is <span class="grad">online</span>.' : 'Activation server is <span class="grad">offline</span>.'}</h2>
         <p>${on
           ? 'Hosts can request signed authorizations. Every guest install, launch, update and restart is checked against its license, device and APK identity.'
-          : 'All MAK/1 endpoints are failing closed right now. Existing sessions are denied immediately until the server is switched back on.'}</p>
+          : 'All MAK/2 endpoints are failing closed right now. Existing grants and tickets are denied immediately until the server is switched back on.'}</p>
         <div class="hero-meta">
-          <div>Protocol<b>MAK/1</b></div>
+          <div>Protocol<b>MAK/2</b></div>
           <div>Signing<b>${signingReady ? 'Ed25519 active' : 'Not configured'}</b></div>
           <div>Key ID<b>${signingReady ? esc(server.keyId || 'active') : '—'}</b></div>
           <div>Edge<b>Cloudflare + D1</b></div>
@@ -89,13 +89,14 @@ export function dashboardPage({
           </div>
         </div>
         <div class="card tight">
-          ${sectionHead('Protocol endpoints', 'Base URL: this Worker origin + /mak/v1', `<a class="btn btn-sm btn-ghost" href="/mak/v1/status" target="_blank" rel="noopener">${icon('external', 14)} Status JSON</a>`)}
+          ${sectionHead('Protocol endpoints', 'Base URL: this Worker origin + /mak/v2 · signed + encrypted', `<a class="btn btn-sm btn-ghost" href="/mak/v2/status" target="_blank" rel="noopener">${icon('external', 14)} Status JSON</a>`)}
           <div style="padding:4px 18px 16px">
-            <div class="endpoint"><span class="method">POST</span><code>/mak/v1/challenge</code><span class="dot-ok">${on ? 'LIVE' : 'CLOSED'}</span></div>
-            <div class="endpoint"><span class="method">POST</span><code>/mak/v1/authorize</code><span class="dot-ok">${on ? 'LIVE' : 'CLOSED'}</span></div>
-            <div class="endpoint"><span class="method">POST</span><code>/mak/v1/guest/check</code><span class="dot-ok">${on ? 'LIVE' : 'CLOSED'}</span></div>
-            <div class="endpoint"><span class="method">POST</span><code>/mak/v1/renew</code><span class="dot-ok">${on ? 'LIVE' : 'CLOSED'}</span></div>
-            <div class="endpoint"><span class="method">POST</span><code>/mak/v1/heartbeat</code><span class="dot-ok">${on ? 'LIVE' : 'CLOSED'}</span></div>
+            <div class="endpoint"><span class="method">POST</span><code>/mak/v2/activate</code><span class="dot-ok">${on ? 'LIVE' : 'CLOSED'}</span></div>
+            <div class="endpoint"><span class="method">POST</span><code>/mak/v2/host/verify</code><span class="dot-ok">${on ? 'LIVE' : 'CLOSED'}</span></div>
+            <div class="endpoint"><span class="method">POST</span><code>/mak/v2/guest/check</code><span class="dot-ok">${on ? 'LIVE' : 'CLOSED'}</span></div>
+            <div class="endpoint"><span class="method">POST</span><code>/mak/v2/status</code><span class="dot-ok">${on ? 'LIVE' : 'CLOSED'}</span></div>
+            <div class="endpoint"><span class="method">POST</span><code>/mak/v2/deactivate</code><span class="dot-ok">${on ? 'LIVE' : 'CLOSED'}</span></div>
+            <div class="endpoint"><span class="method">GET</span><code>/mak/v2/status</code><span class="dot-ok">${on ? 'LIVE' : 'CLOSED'}</span></div>
           </div>
         </div>
       </div>

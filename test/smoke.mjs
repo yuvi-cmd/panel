@@ -197,7 +197,7 @@ console.log('mak integration');
 
   const srv = await call(env, 'GET', '/sdk/server', { cookie: ownerCookie });
   const srvBody = await srv.text();
-  ok(srv.status === 200 && srvBody.includes('/mak/v1/authorize'), 'SDK Server page lists the MAK/1 endpoints');
+  ok(srv.status === 200 && srvBody.includes('/mak/v2/activate'), 'SDK Server page lists the MAK/2 endpoints');
   const hash = await call(env, 'GET', '/sdk/hash', { cookie: ownerCookie });
   ok(hash.status === 200 && (await hash.text()).includes('Hash Vault'), 'SDK Hash Vault still renders');
 }

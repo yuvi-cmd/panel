@@ -2,11 +2,17 @@
 // HKDF-SHA256 key separation. This is deliberately NOT AES.
 //
 // Request  : { v:2, e:<client ephemeral X25519 pub>, n:<24-byte nonce>, c:<cipher> }
-// Response : { v:2, c:<cipher>, sig:<Ed25519>, key_id:<signing key id> }
+// Response : { v:2, c:<cipher>, sig:<Ed25519> }
 //
-// The server static X25519 keypair comes from the MAK_ENC_KEY Worker secret.
-// A fresh client keypair and nonce are required per request; the nonce is also
-// stored server-side so an envelope cannot be replayed.
+// The response carries no plaintext metadata at all: protocol version,
+// decision, key id and every other field live inside the encrypted payload.
+// The Ed25519 signature covers the exact plaintext bytes, so a client verifies
+// it after decrypting and before acting on the decision.
+//
+// The server static X25519 keypair comes from the panel keyring (or the
+// MAK_ENC_KEY fallback secret). A fresh client keypair and nonce are required
+// per request; the nonce is also stored server-side so an envelope cannot be
+// replayed.
 
 import nacl from 'tweetnacl';
 import {
@@ -29,9 +35,18 @@ export function isEnvelope(body) {
   return !!body && typeof body === 'object' && body.v === 2 && body.e && body.n && body.c;
 }
 
-export async function openRequest(body, env) {
-  const enc = loadEncryptionConfig(env);
-  if (!enc.ok) throw new EnvelopeError('ENCRYPTION_NOT_CONFIGURED', enc.reason);
+function resolveKeys(input) {
+  if (input && input.encryption && input.signing) return input;
+  return {
+    encryption: loadEncryptionConfig(input || {}),
+    signing: loadSigningConfig(input || {}),
+  };
+}
+
+export async function openRequest(body, keysOrEnv) {
+  const keys = resolveKeys(keysOrEnv);
+  const enc = keys.encryption;
+  if (!enc?.ok) throw new EnvelopeError('ENCRYPTION_NOT_CONFIGURED', enc?.reason || 'encryption key is not configured');
 
   const clientPub = b64decode(body.e);
   const nonce = b64decode(body.n);
@@ -67,22 +82,22 @@ export async function openRequest(body, env) {
   return { payload, shared, nonce, clientPub };
 }
 
-export async function sealResponse(payload, ctx, env) {
-  const signing = loadSigningConfig(env);
-  if (!signing.ok) throw new EnvelopeError('SERVER_ERROR', 'signing key is not configured');
+export async function sealResponse(payload, ctx, keysOrEnv) {
+  const keys = resolveKeys(keysOrEnv);
+  const signing = keys.signing;
+  if (!signing?.ok) throw new EnvelopeError('SERVER_ERROR', 'signing key is not configured');
 
   const key = await hkdfSha256(ctx.shared, ctx.nonce, PROTOCOL_V2 + '-RESP');
   const plaintext = canonicalJson(payload);
   const cipher = nacl.secretbox(utf8(plaintext), ctx.nonce, key);
   // Envelope signature covers the exact plaintext bytes. The inner response
-  // may also carry its own domain signature for defence in depth.
+  // also carries its own domain signature for defence in depth.
   const message = `${PROTOCOL_V2}\nENVELOPE\n${plaintext}`;
   const signature = nacl.sign.detached(utf8(message), signing.active.secret_key);
   return {
     v: 2,
     c: b64encode(cipher),
     sig: b64encode(signature),
-    key_id: signing.active.key_id,
   };
 }
 

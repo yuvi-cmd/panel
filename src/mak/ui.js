@@ -661,7 +661,7 @@ export function layout(o) {
 <div class="aurora a1"></div><div class="aurora a2"></div><div class="aurora a3"></div>
 <div class="app">
   <aside class="sidebar" id="sidebar">
-    <a class="brand" href="/dashboard"><span class="brand-mark">${icon('layers', 22)}</span><span class="brand-text"><b>${esc(panelName)}</b><small>SDK PANEL · MAK/1</small></span></a>
+    <a class="brand" href="/dashboard"><span class="brand-mark">${icon('layers', 22)}</span><span class="brand-text"><b>${esc(panelName)}</b><small>SDK PANEL · MAK/2</small></span></a>
     <div class="server-mini ${serverOn ? 'on' : 'off'}"><span class="pulse-dot"></span><span>Server <b>${serverOn ? 'ONLINE' : 'OFFLINE'}</b></span>${signingReady ? '' : `<span class="chip bad" style="margin-left:auto">KEY</span>`}</div>
     <nav class="nav">
       <a href="/sdk" class="nav-item">${icon('external', 17)}<span>Back to SDK Panel</span></a>
@@ -685,7 +685,7 @@ export function layout(o) {
         <div class="who"><b>${esc(admin.username || 'admin')}</b><small>${esc(admin.role || 'OWNER')}</small></div>
         <form method="post" action="/logout" style="margin:0">${csrf ? `<input type="hidden" name="_csrf" value="${esc(csrf)}">` : ''}<button class="logout-btn" title="Sign out" type="submit">${icon('logout', 15)}</button></form>
       </div>
-      <div class="build"><span>MAK/1 · v${esc(version)}</span><span>TLS 1.3</span></div>
+      <div class="build"><span>MAK/2 · v${esc(version)}</span><span>TLS 1.3</span></div>
     </div>
   </aside>
   <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
@@ -700,7 +700,7 @@ export function layout(o) {
           <button class="avatar" onclick="toggleUserMenu(event)" aria-label="Account">${initial}</button>
           <div class="user-menu-pop">
             <a href="/settings">${icon('settings', 16)} Settings</a>
-            <a href="/mak/v1/status" target="_blank" rel="noopener">${icon('external', 16)} Protocol status</a>
+            <a href="/mak/v2/status" target="_blank" rel="noopener">${icon('external', 16)} Protocol status</a>
             <form method="post" action="/logout" style="margin:0">${csrf ? `<input type="hidden" name="_csrf" value="${esc(csrf)}">` : ''}<button type="submit">${icon('logout', 16)} Sign out</button></form>
           </div>
         </div>
@@ -710,7 +710,7 @@ export function layout(o) {
       ${flashHtml(o.ok, o.err)}
       ${flash}
       ${content}
-      <div class="footer"><span>MAK Activation · MAK/1 · Server-authoritative</span><span>${signingReady ? 'Ed25519 signing active' : 'Signing key not configured'}</span></div>
+      <div class="footer"><span>MAK Activation · MAK/2 · Server-authoritative</span><span>${signingReady ? 'Ed25519 signing active' : 'Signing key not configured'}</span></div>
     </main>
   </div>
 </div>
@@ -746,19 +746,19 @@ export function authLayout({ title, subtitle = '', body = '', panelName = 'MAK A
 <button class="icon-btn auth-theme" onclick="toggleTheme()" aria-label="Toggle theme">${icon('sun', 17)}</button>
 <div class="auth-wrap">
   <aside class="auth-side">
-    <div class="auth-brand"><span class="brand-mark">${icon('layers', 22)}</span><span class="brand-text"><b>${esc(panelName)}</b><small>SDK PANEL · MAK/1</small></span></div>
+    <div class="auth-brand"><span class="brand-mark">${icon('layers', 22)}</span><span class="brand-text"><b>${esc(panelName)}</b><small>SDK PANEL · MAK/2</small></span></div>
     <div class="auth-hero">
-      <span class="hero-kicker">${icon('radio', 12)} MAK/1 protocol</span>
+      <span class="hero-kicker">${icon('radio', 12)} MAK/2 protocol</span>
       <h1>Silent activation.<br><span class="grad">Server authority.</span></h1>
-      <p>One credential per host APK. Ed25519-signed decisions, ECDSA device proof, replay-proof challenges, and native-enforced guest installation.</p>
+      <p>One credential per host APK. Encrypted NaCl envelopes, Ed25519-signed grants and tickets, panel-generated keys, and native-enforced guest installation.</p>
       <div class="auth-feats">
-        <div class="auth-feat">${icon('shield-check', 17)}<div><b>Signed decisions</b><small>Ed25519 on every allow &amp; deny</small></div></div>
-        <div class="auth-feat">${icon('fingerprint', 17)}<div><b>Device-bound</b><small>P-256 Keystore proof</small></div></div>
-        <div class="auth-feat">${icon('refresh', 17)}<div><b>Replay-proof</b><small>Single-use challenges</small></div></div>
+        <div class="auth-feat">${icon('shield-check', 17)}<div><b>Signed decisions</b><small>Ed25519 on every grant &amp; ticket</small></div></div>
+        <div class="auth-feat">${icon('fingerprint', 17)}<div><b>App-locked</b><small>Package + cert fingerprint</small></div></div>
+        <div class="auth-feat">${icon('refresh', 17)}<div><b>Encrypted bodies</b><small>X25519 + XSalsa20-Poly1305</small></div></div>
         <div class="auth-feat">${icon('lock', 17)}<div><b>Zero UI</b><small>No login or key screen</small></div></div>
       </div>
     </div>
-    <div class="auth-foot"><span>MAK/1</span><span>TLS 1.3</span><span>Cloudflare Edge</span><span>D1</span></div>
+    <div class="auth-foot"><span>MAK/2</span><span>TLS 1.3</span><span>Cloudflare Edge</span><span>D1</span></div>
   </aside>
   <main class="auth-main">
     <div class="auth-card fade-up">

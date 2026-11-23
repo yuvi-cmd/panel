@@ -5,8 +5,9 @@
 import { getAdminSession, verifyCsrf } from './auth.js';
 import {
   canonicalMak, clampInt, generateMak, hashIp, nowS,
-  loadSigningConfig, makHash, normalizeHex64, signingPublicKeys, validPackageName,
+  makHash, normalizeHex64, signingPublicKeys, validPackageName,
 } from './crypto.js';
+import { loadKeyConfig } from './keystore.js';
 import { getSettings, setSettings } from './settings.js';
 import {
   eventTypes, licenseEvents, listEvents, logEvent, recentEvents,
@@ -175,7 +176,8 @@ export async function handleMakAdmin(request, env, db, options = {}) {
       : '/dashboard');
   const flash = (suffix, ok = '', err = '') => flashRedirect(publicAdminPath(mount, suffix), ok, err);
   const method = request.method.toUpperCase();
-  const config = loadSigningConfig(env);
+  const keys = await loadKeyConfig(db, env);
+  const config = keys.signing;
   const settings = await getSettings(db);
   const ip = clientIp(request);
   const ipHash = await hashIp(ip, env);

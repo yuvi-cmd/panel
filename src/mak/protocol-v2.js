@@ -14,20 +14,18 @@ import {
   generateGrantId,
   generateTicketId,
   hashIp,
-  loadEncryptionConfig,
-  loadSigningConfig,
   makHash,
   normalizeHex64,
   nowS,
   randomId,
   sha256Hex,
   signWithProtocol,
-  signingPublicKeys,
   validPackageName,
 } from './crypto.js';
 import {
   EnvelopeError, isEnvelope, openRequest, sealResponse,
 } from './secure.js';
+import { loadKeyConfig, publicKeysView } from './keystore.js';
 import {
   bindGuestAtomic,
   createHostAtomic,
@@ -118,7 +116,7 @@ function signPayload(payload, config, domain) {
 async function respond(payload, ctx, status = 200, extra = {}) {
   if (ctx) {
     try {
-      const envelope = await sealResponse(payload, ctx, extra.env || {});
+      const envelope = await sealResponse(payload, ctx, extra.keys || {});
       return apiJson(envelope, status, extra.headers || {});
     } catch (err) {
       // If sealing fails we cannot safely send an encrypted body. Fail closed.
@@ -128,7 +126,7 @@ async function respond(payload, ctx, status = 200, extra = {}) {
   return apiJson(payload, status, extra.headers || {});
 }
 
-async function readPayload(request, env, endpoint, db) {
+async function readPayload(request, env, endpoint, db, keys) {
   let raw;
   try {
     raw = await jsonBody(request);
@@ -139,7 +137,7 @@ async function readPayload(request, env, endpoint, db) {
   let payload = raw;
   if (isEnvelope(raw)) {
     try {
-      ctx = await openRequest(raw, env);
+      ctx = await openRequest(raw, keys);
     } catch (err) {
       if (err instanceof EnvelopeError) throw new HttpError(err.code === 'ENCRYPTION_NOT_CONFIGURED' ? 503 : 400, err.code, err.message);
       throw new HttpError(400, 'ENVELOPE_INVALID', 'Encrypted envelope rejected');
@@ -238,16 +236,20 @@ export async function handleMakV2(request, env, db) {
     return new Response(null, { status: 204, headers: { ...CORS, 'Cache-Control': 'no-store' } });
   }
 
-  const config = loadSigningConfig(env);
+  const keys = await loadKeyConfig(db, env);
+  const config = keys.signing;
+  const enc = keys.encryption;
   const settings = await getSettings(db);
   const ip = clientIp(request);
   const ipHash = await hashIp(ip, env);
   const endpoint = path.slice('/mak/v2'.length) || '/';
 
   // Public status is intentionally readable without an envelope: the client
-  // needs the pinned encryption key and signing key ids to bootstrap.
+  // needs the signing key + encryption key to bootstrap. The keys are
+  // generated and rotated from the panel, never compiled into the AAR. An
+  // existing client accepts a rotated key only after verifying the signed
+  // rotation chain published here.
   if ((endpoint === '/status' || endpoint === '/health') && method === 'GET') {
-    const enc = loadEncryptionConfig(env);
     const payload = {
       protocol: PROTOCOL,
       service: String(env.MAK_SERVER_NAME || 'MAK Activation'),
@@ -255,7 +257,9 @@ export async function handleMakV2(request, env, db) {
       server_enabled: !!settings.server_enabled,
       signing_ready: !!config.ok,
       key_id: config.ok ? config.active.key_id : null,
-      public_keys: signingPublicKeys(config),
+      public_keys: publicKeysView(config),
+      key_source: keys.source,
+      rotations: keys.rotations,
       signature_alg: 'Ed25519',
       encryption: 'X25519+XSalsa20-Poly1305',
       encryption_ready: !!enc.ok,
@@ -286,7 +290,7 @@ export async function handleMakV2(request, env, db) {
     if (endpoint === '/activate' && method === 'POST') {
       const rl = hitRate('mak2:activate:' + ip, 60, 60_000);
       if (!rl.allowed) throw new HttpError(429, 'RATE_LIMITED', 'Too many activation attempts');
-      const read = await readPayload(request, env, endpoint, db);
+      const read = await readPayload(request, env, endpoint, db, keys);
       ctx = read.ctx;
       const body = read.payload;
       const requestId = cleanRequestId(body.request_id);
@@ -382,13 +386,13 @@ export async function handleMakV2(request, env, db) {
         grant: grantOut,
         server_time: nowS(),
       }, config, 'RESPONSE');
-      return await respond(payload, ctx, 200, { env, headers: rateHeaders(rl) });
+      return await respond(payload, ctx, 200, { env, keys, headers: rateHeaders(rl) });
     }
 
     if (endpoint === '/host/verify' && method === 'POST') {
       const rl = hitRate('mak2:host:' + ip, 180, 60_000);
       if (!rl.allowed) throw new HttpError(429, 'RATE_LIMITED', 'Too many host verification attempts');
-      const read = await readPayload(request, env, endpoint, db);
+      const read = await readPayload(request, env, endpoint, db, keys);
       ctx = read.ctx;
       const body = read.payload;
       const requestId = cleanRequestId(body.request_id);
@@ -438,13 +442,13 @@ export async function handleMakV2(request, env, db) {
         ticket,
         server_time: nowS(),
       }, config, 'RESPONSE');
-      return await respond(payload, ctx, 200, { env, headers: rateHeaders(rl) });
+      return await respond(payload, ctx, 200, { env, keys, headers: rateHeaders(rl) });
     }
 
     if (endpoint === '/guest/check' && method === 'POST') {
       const rl = hitRate('mak2:guest:' + ip, 240, 60_000);
       if (!rl.allowed) throw new HttpError(429, 'RATE_LIMITED', 'Too many guest checks');
-      const read = await readPayload(request, env, endpoint, db);
+      const read = await readPayload(request, env, endpoint, db, keys);
       ctx = read.ctx;
       const body = read.payload;
       const requestId = cleanRequestId(body.request_id);
@@ -577,11 +581,11 @@ export async function handleMakV2(request, env, db) {
         },
         server_time: nowS(),
       }, config, 'RESPONSE');
-      return await respond(payload, ctx, 200, { env, headers: rateHeaders(rl) });
+      return await respond(payload, ctx, 200, { env, keys, headers: rateHeaders(rl) });
     }
 
     if (endpoint === '/status' && method === 'POST') {
-      const read = await readPayload(request, env, endpoint, db);
+      const read = await readPayload(request, env, endpoint, db, keys);
       ctx = read.ctx;
       const body = read.payload;
       const requestId = cleanRequestId(body.request_id);
@@ -606,11 +610,11 @@ export async function handleMakV2(request, env, db) {
         expires_at: license.expires_at || null,
         server_time: nowS(),
       }, config, 'STATUS');
-      return await respond(payload, ctx, 200, { env });
+      return await respond(payload, ctx, 200, { env, keys });
     }
 
     if (endpoint === '/deactivate' && method === 'POST') {
-      const read = await readPayload(request, env, endpoint, db);
+      const read = await readPayload(request, env, endpoint, db, keys);
       ctx = read.ctx;
       const body = read.payload;
       const requestId = cleanRequestId(body.request_id);
@@ -628,7 +632,7 @@ export async function handleMakV2(request, env, db) {
         protocol: PROTOCOL, decision: 'ALLOW', code: 'DEACTIVATED',
         request_id: requestId, grant_id: grant.grant_id, epoch, server_time: nowS(),
       }, config, 'RESPONSE');
-      return await respond(payload, ctx, 200, { env });
+      return await respond(payload, ctx, 200, { env, keys });
     }
 
     throw new HttpError(404, 'NOT_FOUND', 'Unknown MAK/2 endpoint');
@@ -641,6 +645,6 @@ export async function handleMakV2(request, env, db) {
       protocol: PROTOCOL, decision: 'DENY', code,
       request_id: randomId('REQ', 12), message, server_time: nowS(),
     }, config, 'ERROR');
-    return await respond(payload, (err && err.ctx) || ctx, status, { env });
+    return await respond(payload, (err && err.ctx) || ctx, status, { env, keys });
   }
 }
