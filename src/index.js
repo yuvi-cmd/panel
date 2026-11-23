@@ -5,9 +5,21 @@ import { PROTOCOL, nowS, randomId } from './backend/crypto.js';
 import { SECURITY_HEADERS, json, text } from './backend/http.js';
 import { handleRequest } from './backend/router.js';
 
+const BUILD = '2026-11-23.3';
+
 export default {
   async fetch(request, env) {
     try {
+      // Lightweight deployment probe. Never touches D1, so it also works when
+      // the database is misconfigured or still bootstrapping.
+      if (new URL(request.url).pathname === '/healthz') {
+        return json({
+          ok: true,
+          build: BUILD,
+          db_bound: !!env.DB,
+          server_time: nowS(),
+        }, 200, { 'Access-Control-Allow-Origin': '*' });
+      }
       return await handleRequest(request, env);
     } catch (err) {
       console.error('mak_request_failed', String(err && err.stack ? err.stack : err));

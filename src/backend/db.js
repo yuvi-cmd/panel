@@ -64,7 +64,16 @@ export async function ensureDB(db) {
   // D1's exec() splits input by newline, which breaks multi-line DDL. Split
   // the schema into complete statements and run them as one batch instead.
   const statements = splitSqlStatements(SCHEMA);
-  if (statements.length) await db.batch(statements.map((sql) => db.prepare(sql)));
+  if (statements.length) {
+    try {
+      await db.batch(statements.map((sql) => db.prepare(sql)));
+    } catch (batchError) {
+      // Some D1 deployments reject DDL inside a batch transaction. Fall back
+      // to sequential execution; every statement is idempotent.
+      console.error('mak_schema_batch_failed', String(batchError));
+      for (const sql of statements) await db.prepare(sql).run();
+    }
+  }
   const now = nowS();
   const stmts = Object.entries(DEFAULT_SETTINGS).map(([key, value]) =>
     db.prepare('INSERT OR IGNORE INTO mak_settings (key,value,updated_at) VALUES (?,?,?)').bind(key, value, now),
