@@ -56,13 +56,24 @@ step is needed after a deploy.
 ## Deploy
 
 ```bash
-cd sdk-worker
+cd panel
 npm install
-npx wrangler d1 execute sdk --file=schema.sql
 npx wrangler deploy
 ```
 
-Pehli baar site par `/setup` khol ke admin banao. Purane DB par bhi safe hai — Worker startup par naye columns auto-migrate hote hain.
+Pehli baar site par `/setup` khol ke admin banao. Purane DB par bhi safe hai —
+Worker startup par naye columns auto-migrate hote hain **aur MAK tables bhi
+automatically create hote hain**. `schema.sql` sirf manual/backup ke liye hai.
+
+MAK activation ke liye ek baar signing key set karo (Cloudflare Dashboard →
+Workers & Pages → panel → Settings → Variables and Secrets, ya `wrangler secret
+put MAK_SIGNING_KEY`). Seed base64 32-byte hona chahiye:
+
+```bash
+npm run keys -- --public
+```
+
+Bina key ke panel chalega, lekin `/mak/v1/authorize` fail-closed rahega.
 
 ## Note (PHP se farak)
 
