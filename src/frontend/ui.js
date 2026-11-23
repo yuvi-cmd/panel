@@ -173,7 +173,7 @@ html[data-theme="light"]{
   --bg:#f5f6fb; --bg2:#eef1f8; --panel:rgba(255,255,255,.82); --panel-solid:#ffffff;
   --panel2:rgba(248,250,253,.9); --line:rgba(15,23,42,.09); --line2:rgba(15,23,42,.15);
   --ink:#0f172a; --muted:#5d6b82; --faint:#8591a5;
-  --acc:#6d28d9; --acc2:#0891b2; --acc-soft:rgba(109,40,217,.09); --acc-line:rgba(109,40,217,.3);
+  --acc:#4F46E5; --acc2:#0891b2; --acc-soft:rgba(79,70,229,.09); --acc-line:rgba(79,70,229,.3);
   --ok:#059669; --ok-soft:rgba(5,150,105,.09); --warn:#b45309; --warn-soft:rgba(180,83,9,.1);
   --bad:#e11d48; --bad-soft:rgba(225,29,72,.08); --info:#2563eb; --info-soft:rgba(37,99,235,.08);
   --shadow:0 20px 60px rgba(15,23,42,.1);
@@ -210,6 +210,7 @@ html[data-theme="light"] .aurora{opacity:.35}
 .app{display:grid;grid-template-columns:268px minmax(0,1fr);min-height:100vh;position:relative;z-index:1}
 .sidebar{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;background:linear-gradient(180deg,rgba(14,16,25,.94),rgba(10,12,20,.9));border-right:1px solid var(--line);backdrop-filter:blur(22px);z-index:60}
 html[data-theme="light"] .sidebar{background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(248,250,253,.9))}
+html[data-theme="light"] .brand-mark{background:linear-gradient(135deg,#4F46E5,#4338CA);box-shadow:0 10px 28px rgba(79,70,229,.3),inset 0 1px 0 rgba(255,255,255,.35)}
 .brand{display:flex;align-items:center;gap:12px;padding:22px 20px 18px}
 .brand-mark{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;color:#fff;background:linear-gradient(135deg,#8b5cf6,#22d3ee);box-shadow:0 10px 28px rgba(139,92,246,.38),inset 0 1px 0 rgba(255,255,255,.35);position:relative;overflow:hidden}
 .brand-mark::after{content:"";position:absolute;inset:1px;border-radius:13px;border:1px solid rgba(255,255,255,.28)}
@@ -636,7 +637,7 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape'){closeSideba
 document.addEventListener('DOMContentLoaded',function(){var f=document.querySelectorAll('.alert');f.forEach(function(x){setTimeout(function(){if(x)x.style.display='none'},9000)});});
 `;
 
-export const THEME_EARLY = `<script>(function(){try{var t=localStorage.getItem('mak-theme');if(t==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>`;
+export const THEME_EARLY = `<script>(function(){try{var t=localStorage.getItem('mak-theme');if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>`;
 
 function navItem(href, active, iconName, label, badge = '') {
   return `<a href="${esc(href)}" class="nav-item ${active ? 'active' : ''}">${icon(iconName, 17)}<span>${esc(label)}</span>${badge ? `<span class="nav-badge">${esc(badge)}</span>` : ''}</a>`;
@@ -649,9 +650,9 @@ export function layout(o) {
   } = o;
   const initial = esc(String(admin.username || 'A').slice(0, 1).toUpperCase());
   const serverOn = !!server.enabled;
-  return `<!DOCTYPE html><html lang="en" data-theme="dark"><head>
+  return `<!DOCTYPE html><html lang="en" data-theme="light"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="color-scheme" content="dark light"><meta name="theme-color" content="#07080d">
+<meta name="color-scheme" content="light dark"><meta name="theme-color" content="#F5F6F8">
 <title>${esc(title)} · ${esc(panelName)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -660,19 +661,19 @@ export function layout(o) {
 <div class="aurora a1"></div><div class="aurora a2"></div><div class="aurora a3"></div>
 <div class="app">
   <aside class="sidebar" id="sidebar">
-    <a class="brand" href="/dashboard"><span class="brand-mark">${icon('shield-check', 22)}</span><span class="brand-text"><b>MUNDO</b><small>MAK CONTROL</small></span></a>
+    <a class="brand" href="/dashboard"><span class="brand-mark">${icon('layers', 22)}</span><span class="brand-text"><b>${esc(panelName)}</b><small>SDK PANEL · MAK/1</small></span></a>
     <div class="server-mini ${serverOn ? 'on' : 'off'}"><span class="pulse-dot"></span><span>Server <b>${serverOn ? 'ONLINE' : 'OFFLINE'}</b></span>${signingReady ? '' : `<span class="chip bad" style="margin-left:auto">KEY</span>`}</div>
     <nav class="nav">
-      <div class="nav-label">Control plane</div>
-      ${navItem('/dashboard', active === 'dashboard', 'grid', 'Overview')}
-      ${navItem('/licenses', active === 'licenses', 'key', 'Licenses')}
+      <div class="nav-label">SDK Panel</div>
+      ${navItem('/dashboard', active === 'dashboard', 'grid', 'Dashboard')}
+      ${navItem('/licenses', active === 'licenses', 'key', 'MAK Keys')}
+      ${navItem('/guests', active === 'guests', 'apps', 'Guest Apps')}
       ${navItem('/hosts', active === 'hosts', 'server', 'Hosts')}
-      ${navItem('/guests', active === 'guests', 'apps', 'Guest apps')}
-      <div class="nav-label">Telemetry</div>
+      <div class="nav-label">Monitoring</div>
       ${navItem('/devices', active === 'devices', 'smartphone', 'Devices')}
       ${navItem('/sessions', active === 'sessions', 'radio', 'Sessions')}
-      ${navItem('/logs', active === 'logs', 'activity', 'Security logs')}
-      <div class="nav-label">Configure</div>
+      ${navItem('/logs', active === 'logs', 'activity', 'Security Logs')}
+      <div class="nav-label">System</div>
       ${navItem('/settings', active === 'settings', 'settings', 'Settings')}
     </nav>
     <div class="sidebar-foot">
@@ -688,7 +689,7 @@ export function layout(o) {
   <div class="main">
     <header class="topbar">
       <button class="icon-btn mobile-only mobile-menu-btn" onclick="openSidebar()" aria-label="Open menu">${icon('menu', 19)}</button>
-      <div class="topbar-title"><span class="crumb">Control plane</span><strong>${esc(title)}</strong></div>
+      <div class="topbar-title"><span class="crumb">SDK Panel</span><strong>${esc(title)}</strong></div>
       <div class="topbar-actions">
         <a class="server-pill ${serverOn ? 'on' : ''}" href="/settings">Server ${serverOn ? 'online' : 'offline'}</a>
         <button class="icon-btn" onclick="toggleTheme()" aria-label="Toggle theme" title="Light / dark">${icon('sun', 17)}</button>
@@ -730,9 +731,9 @@ export function layout(o) {
 }
 
 export function authLayout({ title, subtitle = '', body = '', panelName = 'MUNDO MAK', ok = '', err = '', footer = '' }) {
-  return `<!DOCTYPE html><html lang="en" data-theme="dark"><head>
+  return `<!DOCTYPE html><html lang="en" data-theme="light"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="color-scheme" content="dark light"><meta name="theme-color" content="#07080d">
+<meta name="color-scheme" content="light dark"><meta name="theme-color" content="#F5F6F8">
 <title>${esc(title)} · ${esc(panelName)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -742,7 +743,7 @@ export function authLayout({ title, subtitle = '', body = '', panelName = 'MUNDO
 <button class="icon-btn auth-theme" onclick="toggleTheme()" aria-label="Toggle theme">${icon('sun', 17)}</button>
 <div class="auth-wrap">
   <aside class="auth-side">
-    <div class="auth-brand"><span class="brand-mark">${icon('shield-check', 22)}</span><span class="brand-text"><b>MUNDO</b><small>MAK CONTROL</small></span></div>
+    <div class="auth-brand"><span class="brand-mark">${icon('layers', 22)}</span><span class="brand-text"><b>${esc(panelName)}</b><small>SDK PANEL · MAK/1</small></span></div>
     <div class="auth-hero">
       <span class="hero-kicker">${icon('radio', 12)} MAK/1 protocol</span>
       <h1>Silent activation.<br><span class="grad">Server authority.</span></h1>

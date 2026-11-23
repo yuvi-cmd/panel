@@ -41,8 +41,10 @@ tables.
 npm run db:migrate
 ```
 
-The Worker also runs `CREATE TABLE IF NOT EXISTS` on boot, but running the
-migration explicitly gives you a clean, reviewable first deploy.
+The Worker also runs `CREATE TABLE IF NOT EXISTS` on boot, so this step is
+optional for a first deploy. Every new isolate applies the schema
+automatically; new tables and indexes are picked up without a manual migration.
+Take a D1 backup before destructive schema changes.
 
 To verify:
 
@@ -107,6 +109,11 @@ key to clients before switching `MAK_SIGNING_KEY_ID`, then remove the old entry.
 ```bash
 npm run deploy
 ```
+
+For automatic deployment on every push, add `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID` to the GitHub repository secrets; the included
+`.github/workflows/deploy.yml` runs tests and deploys `main` automatically.
+Alternatively connect the repository through Cloudflare Workers Builds.
 
 `wrangler.toml` sets `workers_dev = true`, so you get a
 `https://panel.<subdomain>.workers.dev` URL immediately. For production,

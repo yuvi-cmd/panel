@@ -64,6 +64,30 @@ notes.
 
 ## Deploy (Cloudflare)
 
+The panel keeps the existing **SDK Panel** shell and the MAK pages live inside
+it. Schema bootstrap is automatic: the Worker applies `schema.sql` on the first
+request per isolate, so a deploy does not need a manual SQL step.
+
+### Automatic deploy (recommended)
+
+The repository ships `.github/workflows/deploy.yml`. Add these GitHub repository
+secrets once:
+
+| Secret | Value |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | Token with **Workers Scripts: Edit** and **D1: Edit** |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account id |
+
+Every push to `main` then runs the test suite and deploys the Worker
+automatically. You can also trigger it manually from **Actions → Deploy MAK
+panel → Run workflow**.
+
+If you prefer Cloudflare Workers Builds instead, connect the repository in
+**Workers & Pages → panel → Settings → Builds** and set the deploy command to
+`npx wrangler deploy`.
+
+### Manual deploy
+
 ```bash
 npm install
 npx wrangler login
@@ -71,7 +95,7 @@ npx wrangler login
 # 1. Create the D1 database once, then copy its id into wrangler.toml.
 npx wrangler d1 create panel
 
-# 2. Apply the schema.
+# 2. Apply the schema once (the Worker also does this automatically).
 npm run db:migrate
 
 # 3. Generate an Ed25519 signing seed and store it as a Worker secret.
