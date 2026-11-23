@@ -13,6 +13,9 @@ and fail-closed by design.
 
 ## Panel
 
+`GET /healthz` is an unauthenticated deployment probe. It never touches D1 and
+returns the current build stamp, so a stale deploy is immediately obvious.
+
 | Page | Purpose |
 | --- | --- |
 | `/setup` | First-run owner account (single use, optional `SETUP_CODE` gate) |
@@ -88,7 +91,6 @@ MAK_BASE_URL=https://your-domain MAK_PUBLIC_KEY=<public-key> npm run check
 `wrangler.toml` already binds D1 as `DB` and targets `main`. Replace the
 `database_id` if you create a fresh database. `workers_dev = true` gives you a
 `*.workers.dev` URL; attach a custom domain from the Cloudflare dashboard.
-
 After the first deploy open `/setup`, create the owner account, then confirm the
 signing key is reported as ready on `/settings`.
 

@@ -109,7 +109,7 @@ npm run deploy
 ```
 
 `wrangler.toml` sets `workers_dev = true`, so you get a
-`https://mak-panel.<subdomain>.workers.dev` URL immediately. For production,
+`https://panel.<subdomain>.workers.dev` URL immediately. For production,
 attach a custom domain from **Workers & Pages → your Worker → Settings →
 Domains & Routes**, and put Cloudflare WAF/rate-limiting rules in front of
 `/login` and `/mak/v1/*`.
