@@ -30,10 +30,10 @@ export function dashboardPage(d) {
 
   const warnings = [];
   if (!server.enabled) {
-    warnings.push('<div class="glass-card p-4 mb-4" style="border-left:4px solid #ef4444"><p class="font-bold text-red-700 text-sm"><i class="bi bi-exclamation-circle-fill mr-1"></i> Activation server is OFF</p><p class="text-xs text-slate-600 mt-1">Every authorize/guest/renew/heartbeat request is denied. Turn it on from <a class="underline font-bold" href="/sdk/server">Server</a>.</p></div>');
+    warnings.push('<div class="glass-card p-4 mb-4" style="border-left:4px solid #ef4444"><p class="font-bold text-red-700 text-sm"><i class="bi bi-exclamation-circle-fill mr-1"></i> Activation server is OFF</p><p class="text-xs text-slate-600 mt-1">Every MAK/2 activate / host / guest / status request is denied. Turn it on from <a class="underline font-bold" href="/sdk/server">Server</a>.</p></div>');
   }
   if (!server.signingReady) {
-    warnings.push('<div class="glass-card p-4 mb-4" style="border-left:4px solid #f59e0b"><p class="font-bold text-amber-700 text-sm"><i class="bi bi-shield-exclamation mr-1"></i> Signing key missing</p><p class="text-xs text-slate-600 mt-1">MAK issuance works, but signed decisions fail closed until <code>MAK_SIGNING_KEY</code> is set as a Worker secret.</p></div>');
+    warnings.push('<div class="glass-card p-4 mb-4" style="border-left:4px solid #f59e0b"><p class="font-bold text-amber-700 text-sm"><i class="bi bi-shield-exclamation mr-1"></i> MAK/2 keys not generated</p><p class="text-xs text-slate-600 mt-1">MAK issuance works, but every signed decision fails closed until keys exist. Open <a class="underline font-bold" href="/sdk/server">Server &amp; API</a> and press <b>Generate MAK/2 keys</b>. The Ed25519 + X25519 keys are created in D1 — no Worker secret is needed.</p></div>');
   }
 
   const recentHtml = recent.length ? recent.map((l) =>
@@ -66,7 +66,7 @@ export function dashboardPage(d) {
     + '<div class="glass-card p-4"><p class="text-[10px] font-extrabold text-slate-400 uppercase">Guest apps</p><p class="text-xl font-black">' + Number(stats.guests || 0) + '</p></div>'
     + '<div class="glass-card p-4"><p class="text-[10px] font-extrabold text-slate-400 uppercase">New (7 days)</p><p class="text-xl font-black">' + Number(stats.new_licenses || 0) + '</p></div>'
     + '<div class="glass-card p-4"><p class="text-[10px] font-extrabold text-slate-400 uppercase">Activations</p><p class="text-xl font-black">' + Number(stats.activations || 0) + '</p></div>'
-    + '<div class="glass-card p-4"><p class="text-[10px] font-extrabold text-slate-400 uppercase">Signing</p><p class="text-sm font-black ' + (server.signingReady ? 'text-emerald-600' : 'text-amber-600') + '">' + (server.signingReady ? 'Ed25519 ready' : 'Key missing') + '</p></div>'
+    + '<div class="glass-card p-4"><p class="text-[10px] font-extrabold text-slate-400 uppercase">Signing</p><p class="text-sm font-black ' + (server.signingReady ? 'text-emerald-600' : 'text-amber-600') + '">' + (server.signingReady ? 'Ed25519 ready' : 'Not generated') + '</p></div>'
     + '</div>';
 }
 
@@ -91,7 +91,7 @@ export function generatePage(o) {
     notice = '<div class="glass-card p-4 mb-6" style="border-left:4px solid #ef4444"><p class="text-xs font-bold text-red-700"><i class="bi bi-exclamation-circle-fill mr-1"></i> ' + esc(o.error) + '</p></div>';
   }
   if (!server.signingReady) {
-    notice += '<div class="glass-card p-4 mb-6" style="border-left:4px solid #f59e0b"><p class="text-xs text-amber-700"><i class="bi bi-shield-exclamation mr-1"></i> Signing key is not configured. You can issue MAKs, but activation decisions will be denied until <code>MAK_SIGNING_KEY</code> is set.</p></div>';
+    notice += '<div class="glass-card p-4 mb-6" style="border-left:4px solid #f59e0b"><p class="text-xs text-amber-700"><i class="bi bi-shield-exclamation mr-1"></i> MAK/2 keys are not generated yet. You can issue MAKs, but activation decisions will be denied until you open <a class="underline font-bold" href="/sdk/server">Server &amp; API</a> and press <b>Generate MAK/2 keys</b>. No Worker secret is needed.</p></div>';
   }
 
   const field = (label, input, hint) =>
