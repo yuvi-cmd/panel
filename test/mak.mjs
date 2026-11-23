@@ -123,7 +123,10 @@ async function makeDevice() {
   return { pair, publicKeyValue, norm, sign };
 }
 
-async function authorize(env, { licenseCredential, device, hostPackage = 'com.test.host', hostCert = 'c'.repeat(64), timestamp = nowS() }) {
+async function authorize(env, {
+  licenseCredential, device, hostPackage = 'com.test.host', hostCert = 'c'.repeat(64),
+  hostAppName = '', deviceId = '', timestamp = nowS(),
+}) {
   const c = await challenge(env);
   const proofMessage = deviceProofMessage('AUTHORIZE', [
     c.challenge_id, c.nonce, hostPackage, hostCert, device.publicKeyValue, timestamp,
@@ -138,8 +141,8 @@ async function authorize(env, { licenseCredential, device, hostPackage = 'com.te
       nonce: c.nonce,
       timestamp,
       license: { credential: licenseCredential },
-      host: { package_name: hostPackage, signing_cert_sha256: hostCert },
-      device: { public_key: device.publicKeyValue, proof, timestamp },
+      host: { package_name: hostPackage, app_name: hostAppName, signing_cert_sha256: hostCert },
+      device: { public_key: device.publicKeyValue, proof, timestamp, device_id: deviceId },
     },
   });
   const text = await res.text();
@@ -150,10 +153,10 @@ async function deviceProof(device, kind, fields) {
   return device.sign(deviceProofMessage(kind, fields));
 }
 
-async function sessionProof(device, kind, fields) {
+async function sessionProof(device, kind, fields, deviceId = '') {
   const timestamp = nowS();
   const proof = await device.sign(deviceProofMessage(kind, [...fields, device.publicKeyValue, timestamp]));
-  return { public_key: device.publicKeyValue, proof, timestamp };
+  return { public_key: device.publicKeyValue, proof, timestamp, device_id: deviceId };
 }
 
 async function main() {
@@ -257,11 +260,13 @@ async function main() {
         _csrf: token,
         label: 'Test License',
         user_ref: 'test-user',
-        expires_on: futureDate(30),
+        duration: '30',
         max_devices: '2',
         max_activations: '3',
         session_ttl: '3600',
-        host_bind_mode: 'FIRST_USE',
+        max_packages: '2',
+        max_apps: '2',
+        host_bind_mode: 'AUTO',
         notes: 'unit test',
       }),
     });
@@ -275,6 +280,9 @@ async function main() {
     assert.equal(license.credential_hash.length, 64);
     assert.notEqual(license.credential_hash, makMatch[0]);
     assert.equal(license.activation_count, 0);
+    assert.equal(license.max_packages, 2);
+    assert.equal(license.max_apps, 2);
+    assert.equal(license.host_bind_mode, 'AUTO');
 
     const detail = await call(env, '/sdk/keys/' + license.id, { cookie });
     assert.equal(detail.status, 200);
@@ -286,93 +294,125 @@ async function main() {
     env.__test = { cookie, token, license, credential: makMatch[0], device: await makeDevice() };
   });
 
-  await test('MAK/1 first-use host binding, guest checks, renew, heartbeat', async () => {
+  await test('MAK/1 AUTO host + guest binding, per-package limits, device_id audit, renew, heartbeat', async () => {
     const env = globalThis.__lastEnv;
     assert.ok(env, 'previous test environment');
     const { license, credential, device } = env.__test;
     const config = loadSigningConfig(env);
 
-    const auth = await authorize(env, { licenseCredential: credential, device });
+    const auth = await authorize(env, {
+      licenseCredential: credential, device, hostAppName: 'Test Host', deviceId: 'DEV-A',
+    });
     assert.equal(auth.status, 200, JSON.stringify(auth.response));
     assert.equal(auth.response.decision, 'ALLOW');
     assert.equal(auth.response.code, 'AUTHORIZED');
+    assert.equal(auth.response.host.app_name, 'Test Host');
     assert.equal(verifySignedPayload(auth.response, config, 'RESPONSE'), true, 'authorize response is signed');
     const session = auth.response.session.session_id;
     assert.ok(session);
 
-    const hostRow = await env.DB.prepare('SELECT * FROM mak_hosts WHERE license_id=?').bind(license.id).first();
+    const hostRow = await env.DB.prepare('SELECT * FROM mak_hosts WHERE license_id=? ORDER BY id LIMIT 1').bind(license.id).first();
     assert.equal(hostRow.package_name, 'com.test.host');
+    assert.equal(hostRow.app_name, 'Test Host');
     const deviceRow = await env.DB.prepare('SELECT * FROM mak_devices WHERE license_id=?').bind(license.id).first();
     assert.equal(deviceRow.status, 'ACTIVE');
+    assert.equal(deviceRow.device_id, 'DEV-A');
     assert.match(deviceRow.fingerprint, /^SHA256:[0-9A-F]{64}$/);
     const licAfter = await env.DB.prepare('SELECT activation_count FROM mak_licenses WHERE id=?').bind(license.id).first();
     assert.equal(licAfter.activation_count, 1);
 
-    // A guest is not approved yet.
+    // AUTO binds the first guest package on first use.
     const guestPackage = 'com.test.guest';
     const apkHash = 'a'.repeat(64);
     const guestCert = 'b'.repeat(64);
-    const guestProof = await sessionProof(device, 'GUEST_CHECK', [session, 'LAUNCH', guestPackage, apkHash, guestCert, 1]);
-    const deniedGuest = await call(env, '/mak/v1/guest/check', {
+    const guestProof = await sessionProof(device, 'GUEST_CHECK', [session, 'LAUNCH', guestPackage, apkHash, guestCert, 1], 'DEV-A');
+    const autoGuest = await call(env, '/mak/v1/guest/check', {
       method: 'POST',
       json: {
-        protocol: 'MAK/1', request_id: 'REQ_GUEST_DENY', session_id: session, operation: 'LAUNCH',
+        protocol: 'MAK/1', request_id: 'REQ_GUEST_AUTO', session_id: session, operation: 'LAUNCH',
         guest: { package_name: guestPackage, app_name: 'Guest', apk_sha256: apkHash, signing_cert_sha256: guestCert, version_code: 1 },
         device: guestProof,
       },
     });
-    const deniedJson = jsonBody(await deniedGuest.text());
-    assert.equal(deniedJson.decision, 'DENY');
-    assert.equal(deniedJson.code, 'GUEST_PACKAGE_MISMATCH');
-
-    // Admin registers and binds the exact guest build.
-    const { cookie, token } = env.__test;
-    const guestPost = await call(env, '/sdk/guests/new', {
-      method: 'POST', cookie,
-      body: form({ _csrf: token, package_name: guestPackage, app_name: 'Guest', apk_sha256: apkHash, cert_sha256: guestCert, version_code: '1' }),
-    });
-    assert.equal(guestPost.status, 303, await guestPost.clone().text());
-    const guest = await env.DB.prepare('SELECT * FROM mak_guest_apps ORDER BY id DESC LIMIT 1').first();
-    assert.equal(guest.package_name, guestPackage);
-
-    const bind = await call(env, `/sdk/keys/${license.id}/action`, {
-      method: 'POST', cookie,
-      body: form({ _csrf: token, action: 'binding_add', guest_id: guest.id, perm_launch: '1' }),
-    });
-    assert.equal(bind.status, 303);
-    const binding = await env.DB.prepare('SELECT * FROM mak_bindings WHERE license_id=? AND guest_app_id=?').bind(license.id, guest.id).first();
+    const autoJson = jsonBody(await autoGuest.text());
+    assert.equal(autoJson.decision, 'ALLOW', JSON.stringify(autoJson));
+    assert.equal(autoJson.permissions.launch, true);
+    assert.equal(verifySignedPayload(autoJson, config, 'RESPONSE'), true);
+    const guest = await env.DB.prepare('SELECT * FROM mak_guest_apps WHERE package_name=? ORDER BY id DESC LIMIT 1').bind(guestPackage).first();
+    assert.ok(guest);
+    const binding = await env.DB.prepare('SELECT * FROM mak_bindings WHERE license_id=? AND host_id=? AND guest_app_id=?').bind(license.id, hostRow.id, guest.id).first();
+    assert.ok(binding);
     assert.equal(binding.can_launch, 1);
-    assert.equal(binding.can_install, 0);
 
-    const allowedProof = await sessionProof(device, 'GUEST_CHECK', [session, 'LAUNCH', guestPackage, apkHash, guestCert, 1]);
-    const allowed = await call(env, '/mak/v1/guest/check', {
+    // A new version of the same package must not consume another app slot.
+    const apkHashV2 = 'f'.repeat(64);
+    const v2Proof = await sessionProof(device, 'GUEST_CHECK', [session, 'LAUNCH', guestPackage, apkHashV2, guestCert, 2], 'DEV-A');
+    const v2 = await call(env, '/mak/v1/guest/check', {
       method: 'POST',
       json: {
-        protocol: 'MAK/1', request_id: 'REQ_GUEST_ALLOW', session_id: session, operation: 'LAUNCH',
-        guest: { package_name: guestPackage, app_name: 'Guest', apk_sha256: apkHash, signing_cert_sha256: guestCert, version_code: 1 },
-        device: allowedProof,
+        protocol: 'MAK/1', request_id: 'REQ_GUEST_V2', session_id: session, operation: 'LAUNCH',
+        guest: { package_name: guestPackage, app_name: 'Guest', apk_sha256: apkHashV2, signing_cert_sha256: guestCert, version_code: 2 },
+        device: v2Proof,
       },
     });
-    const allowedJson = jsonBody(await allowed.text());
-    assert.equal(allowedJson.decision, 'ALLOW', JSON.stringify(allowedJson));
-    assert.equal(allowedJson.permissions.launch, true);
-    assert.equal(allowedJson.permissions.install, false);
-    assert.equal(verifySignedPayload(allowedJson, config, 'RESPONSE'), true);
+    assert.equal(jsonBody(await v2.text()).decision, 'ALLOW');
+    const distinct = await env.DB.prepare(
+      `SELECT COUNT(DISTINCT g.package_name) AS c FROM mak_bindings b JOIN mak_guest_apps g ON g.id=b.guest_app_id
+        WHERE b.license_id=? AND b.host_id=? AND b.status='ACTIVE'`,
+    ).bind(license.id, hostRow.id).first();
+    assert.equal(distinct.c, 1);
 
-    const installProof = await sessionProof(device, 'GUEST_CHECK', [session, 'INSTALL', guestPackage, apkHash, guestCert, 1]);
-    const installDenied = await call(env, '/mak/v1/guest/check', {
+    // Second distinct guest package fills the per-package limit.
+    const guest2 = 'com.test.guest2';
+    const proof2 = await sessionProof(device, 'GUEST_CHECK', [session, 'LAUNCH', guest2, '1'.repeat(64), guestCert, 1], 'DEV-A');
+    const second = await call(env, '/mak/v1/guest/check', {
       method: 'POST',
       json: {
-        protocol: 'MAK/1', request_id: 'REQ_GUEST_INSTALL', session_id: session, operation: 'INSTALL',
-        guest: { package_name: guestPackage, app_name: 'Guest', apk_sha256: apkHash, signing_cert_sha256: guestCert, version_code: 1 },
-        device: installProof,
+        protocol: 'MAK/1', request_id: 'REQ_GUEST_2', session_id: session, operation: 'LAUNCH',
+        guest: { package_name: guest2, app_name: 'Guest 2', apk_sha256: '1'.repeat(64), signing_cert_sha256: guestCert, version_code: 1 },
+        device: proof2,
       },
     });
-    const installJson = jsonBody(await installDenied.text());
-    assert.equal(installJson.decision, 'DENY');
-    assert.equal(installJson.code, 'OPERATION_NOT_ALLOWED');
+    assert.equal(jsonBody(await second.text()).decision, 'ALLOW');
 
-    const heartbeatProof = await sessionProof(device, 'HEARTBEAT', [session]);
+    // Third distinct guest package is rejected.
+    const guest3 = 'com.test.guest3';
+    const proof3 = await sessionProof(device, 'GUEST_CHECK', [session, 'LAUNCH', guest3, '2'.repeat(64), guestCert, 1], 'DEV-A');
+    const third = await call(env, '/mak/v1/guest/check', {
+      method: 'POST',
+      json: {
+        protocol: 'MAK/1', request_id: 'REQ_GUEST_3', session_id: session, operation: 'LAUNCH',
+        guest: { package_name: guest3, app_name: 'Guest 3', apk_sha256: '2'.repeat(64), signing_cert_sha256: guestCert, version_code: 1 },
+        device: proof3,
+      },
+    });
+    const thirdJson = jsonBody(await third.text());
+    assert.equal(thirdJson.decision, 'DENY');
+    assert.equal(thirdJson.code, 'APP_LIMIT_REACHED');
+
+    // A second host package is allowed. A changed device_id is audit-only.
+    const auth2 = await authorize(env, {
+      licenseCredential: credential, device, hostPackage: 'com.test.host2',
+      hostCert: 'e'.repeat(64), hostAppName: 'Second Host', deviceId: 'DEV-B',
+    });
+    assert.equal(auth2.status, 200, JSON.stringify(auth2.response));
+    assert.equal(auth2.response.decision, 'ALLOW');
+    const mismatch = await env.DB.prepare(
+      "SELECT * FROM mak_events WHERE license_id=? AND event_type='DEVICE_ID_MISMATCH' ORDER BY id DESC LIMIT 1",
+    ).bind(license.id).first();
+    assert.ok(mismatch, 'device_id change is logged');
+    const deviceAfter = await env.DB.prepare('SELECT device_id FROM mak_devices WHERE license_id=?').bind(license.id).first();
+    assert.equal(deviceAfter.device_id, 'DEV-B');
+
+    // A third host package exceeds max_packages.
+    const auth3 = await authorize(env, {
+      licenseCredential: credential, device, hostPackage: 'com.test.host3', hostCert: '3'.repeat(64),
+    });
+    assert.equal(auth3.status, 403);
+    assert.equal(auth3.response.decision, 'DENY');
+    assert.equal(auth3.response.code, 'PACKAGE_LIMIT_REACHED');
+
+    const heartbeatProof = await sessionProof(device, 'HEARTBEAT', [session], 'DEV-B');
     const heartbeat = await call(env, '/mak/v1/heartbeat', {
       method: 'POST',
       json: { protocol: 'MAK/1', request_id: 'REQ_HB', session_id: session, device: heartbeatProof },
@@ -381,7 +421,7 @@ async function main() {
     assert.equal(heartbeatJson.decision, 'ALLOW');
     assert.equal(heartbeatJson.code, 'ALIVE');
 
-    const renewProof = await sessionProof(device, 'RENEW', [session]);
+    const renewProof = await sessionProof(device, 'RENEW', [session], 'DEV-B');
     const renew = await call(env, '/mak/v1/renew', {
       method: 'POST',
       json: { protocol: 'MAK/1', request_id: 'REQ_RENEW', session_id: session, device: renewProof },
@@ -392,6 +432,93 @@ async function main() {
 
     env.__test.session = session;
     env.__test.guest = guest;
+    env.__test.hostRow = hostRow;
+  });
+
+  await test('MAK/1 MANUAL binding requires pre-registered host and guest', async () => {
+    const env = globalThis.__lastEnv;
+    const { cookie, token, device } = env.__test;
+    const manualHost = 'com.manual.host';
+    const manualCert = 'd'.repeat(64);
+
+    const issued = await call(env, '/sdk/generate', {
+      method: 'POST', cookie,
+      body: form({
+        _csrf: token, label: 'Manual License', duration: '30',
+        max_devices: '1', max_activations: '2', session_ttl: '3600',
+        max_packages: '1', max_apps: '2',
+        host_package: manualHost, host_app_name: 'Manual Host', host_cert: manualCert,
+        host_bind_mode: 'MANUAL',
+      }),
+    });
+    assert.equal(issued.status, 200, await issued.clone().text());
+    const mak = /MAK-[0-9A-HJKMNP-TV-Z]{5}(?:-[0-9A-HJKMNP-TV-Z]{5}){3}/.exec(await issued.text())[0];
+    const manualLicense = await env.DB.prepare('SELECT * FROM mak_licenses ORDER BY id DESC LIMIT 1').first();
+    assert.equal(manualLicense.host_bind_mode, 'MANUAL');
+
+    const auth = await authorize(env, { licenseCredential: mak, device, hostPackage: manualHost, hostCert: manualCert });
+    assert.equal(auth.status, 200, JSON.stringify(auth.response));
+    const session = auth.response.session.session_id;
+
+    const wrongHost = await authorize(env, {
+      licenseCredential: mak, device, hostPackage: 'com.manual.other', hostCert: manualCert,
+    });
+    assert.equal(wrongHost.status, 403);
+    assert.equal(wrongHost.response.code, 'HOST_PACKAGE_MISMATCH');
+
+    const guestPackage = 'com.manual.guest';
+    const apkHash = '4'.repeat(64);
+    const guestCert = '5'.repeat(64);
+    const denyProof = await sessionProof(device, 'GUEST_CHECK', [session, 'LAUNCH', guestPackage, apkHash, guestCert, 1]);
+    const denied = await call(env, '/mak/v1/guest/check', {
+      method: 'POST',
+      json: {
+        protocol: 'MAK/1', request_id: 'REQ_MANUAL_DENY', session_id: session, operation: 'LAUNCH',
+        guest: { package_name: guestPackage, app_name: 'Manual Guest', apk_sha256: apkHash, signing_cert_sha256: guestCert, version_code: 1 },
+        device: denyProof,
+      },
+    });
+    assert.equal(jsonBody(await denied.text()).code, 'GUEST_PACKAGE_MISMATCH');
+
+    const guestPost = await call(env, '/sdk/guests/new', {
+      method: 'POST', cookie,
+      body: form({ _csrf: token, package_name: guestPackage, app_name: 'Manual Guest', apk_sha256: apkHash, cert_sha256: guestCert, version_code: '1' }),
+    });
+    assert.equal(guestPost.status, 303);
+    const guest = await env.DB.prepare('SELECT * FROM mak_guest_apps WHERE package_name=? ORDER BY id DESC LIMIT 1').bind(guestPackage).first();
+    const bind = await call(env, `/sdk/keys/${manualLicense.id}/action`, {
+      method: 'POST', cookie,
+      body: form({ _csrf: token, action: 'binding_add', guest_id: guest.id, perm_launch: '1' }),
+    });
+    assert.equal(bind.status, 303);
+    const binding = await env.DB.prepare('SELECT * FROM mak_bindings WHERE license_id=? AND guest_app_id=?').bind(manualLicense.id, guest.id).first();
+    assert.equal(binding.host_id, 0);
+    assert.equal(binding.can_launch, 1);
+    assert.equal(binding.can_install, 0);
+
+    const allowProof = await sessionProof(device, 'GUEST_CHECK', [session, 'LAUNCH', guestPackage, apkHash, guestCert, 1]);
+    const allowed = await call(env, '/mak/v1/guest/check', {
+      method: 'POST',
+      json: {
+        protocol: 'MAK/1', request_id: 'REQ_MANUAL_ALLOW', session_id: session, operation: 'LAUNCH',
+        guest: { package_name: guestPackage, app_name: 'Manual Guest', apk_sha256: apkHash, signing_cert_sha256: guestCert, version_code: 1 },
+        device: allowProof,
+      },
+    });
+    const allowedJson = jsonBody(await allowed.text());
+    assert.equal(allowedJson.decision, 'ALLOW', JSON.stringify(allowedJson));
+    assert.equal(allowedJson.permissions.launch, true);
+
+    const installProof = await sessionProof(device, 'GUEST_CHECK', [session, 'INSTALL', guestPackage, apkHash, guestCert, 1]);
+    const installDenied = await call(env, '/mak/v1/guest/check', {
+      method: 'POST',
+      json: {
+        protocol: 'MAK/1', request_id: 'REQ_MANUAL_INSTALL', session_id: session, operation: 'INSTALL',
+        guest: { package_name: guestPackage, app_name: 'Manual Guest', apk_sha256: apkHash, signing_cert_sha256: guestCert, version_code: 1 },
+        device: installProof,
+      },
+    });
+    assert.equal(jsonBody(await installDenied.text()).code, 'OPERATION_NOT_ALLOWED');
   });
 
   await test('challenge replay, host mismatch, invalid device proof, server kill switch', async () => {
