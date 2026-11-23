@@ -300,7 +300,9 @@ CREATE TABLE IF NOT EXISTS mak_licenses (
   max_activations  INTEGER NOT NULL DEFAULT 1,
   activation_count INTEGER NOT NULL DEFAULT 0,
   session_ttl      INTEGER NOT NULL DEFAULT 3600,
-  host_bind_mode   TEXT NOT NULL DEFAULT 'FIRST_USE', -- FIRST_USE | STRICT
+  max_packages     INTEGER NOT NULL DEFAULT 1, -- host APK package names this MAK may bind
+  max_apps         INTEGER NOT NULL DEFAULT 2, -- guest apps allowed PER host package
+  host_bind_mode   TEXT NOT NULL DEFAULT 'AUTO', -- AUTO | MANUAL
   notes            TEXT NOT NULL DEFAULT '',
   created_by       INTEGER,
   last_used_at     INTEGER,
@@ -310,19 +312,24 @@ CREATE INDEX IF NOT EXISTS idx_mak_licenses_status ON mak_licenses(status);
 CREATE INDEX IF NOT EXISTS idx_mak_licenses_expiry ON mak_licenses(expires_at);
 
 -- ---------------------------------------------------------------------------
--- Host APK binding: package + signing certificate (one host per license)
+-- Host APK bindings: one row per host package (up to max_packages per license)
+-- AUTO mode binds a new package on first authenticated use; MANUAL mode only
+-- accepts packages an administrator registered in advance.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS mak_hosts (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  license_id    INTEGER NOT NULL UNIQUE,
+  license_id    INTEGER NOT NULL,
   package_name  TEXT NOT NULL,
+  app_name      TEXT NOT NULL DEFAULT '',
   cert_sha256   TEXT NOT NULL,
   status        TEXT NOT NULL DEFAULT 'ACTIVE',
   version_policy TEXT NOT NULL DEFAULT 'ANY',
   created_at    INTEGER NOT NULL,
   updated_at    INTEGER NOT NULL,
-  last_seen     INTEGER
+  last_seen     INTEGER,
+  UNIQUE(license_id, package_name)
 );
+CREATE INDEX IF NOT EXISTS idx_mak_hosts_license ON mak_hosts(license_id);
 CREATE INDEX IF NOT EXISTS idx_mak_hosts_package ON mak_hosts(package_name);
 CREATE INDEX IF NOT EXISTS idx_mak_hosts_status ON mak_hosts(status);
 
@@ -350,6 +357,7 @@ CREATE INDEX IF NOT EXISTS idx_mak_guests_status ON mak_guest_apps(status);
 CREATE TABLE IF NOT EXISTS mak_bindings (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   license_id   INTEGER NOT NULL,
+  host_id      INTEGER NOT NULL DEFAULT 0, -- 0 = license-wide (admin) binding
   guest_app_id INTEGER NOT NULL,
   can_install  INTEGER NOT NULL DEFAULT 1,
   can_launch   INTEGER NOT NULL DEFAULT 1,
@@ -358,9 +366,10 @@ CREATE TABLE IF NOT EXISTS mak_bindings (
   status       TEXT NOT NULL DEFAULT 'ACTIVE',
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL,
-  UNIQUE(license_id, guest_app_id)
+  UNIQUE(license_id, host_id, guest_app_id)
 );
 CREATE INDEX IF NOT EXISTS idx_mak_bindings_license ON mak_bindings(license_id);
+CREATE INDEX IF NOT EXISTS idx_mak_bindings_host ON mak_bindings(license_id, host_id);
 CREATE INDEX IF NOT EXISTS idx_mak_bindings_guest ON mak_bindings(guest_app_id);
 
 -- ---------------------------------------------------------------------------
@@ -372,6 +381,10 @@ CREATE TABLE IF NOT EXISTS mak_devices (
   license_id   INTEGER NOT NULL,
   public_key   TEXT NOT NULL, -- spki:<base64 DER>
   fingerprint  TEXT NOT NULL,
+  -- Client-reported device id. Never used as a security binding; stored only
+  -- for audit and so an administrator can enable a device-id policy later.
+  device_id    TEXT NOT NULL DEFAULT '',
+  device_id_first TEXT NOT NULL DEFAULT '',
   key_algorithm TEXT NOT NULL DEFAULT 'ECDSA-P256',
   status       TEXT NOT NULL DEFAULT 'ACTIVE',
   registered_at INTEGER NOT NULL,
@@ -443,6 +456,7 @@ CREATE TABLE IF NOT EXISTS mak_events (
   event_type   TEXT NOT NULL,
   result       TEXT NOT NULL DEFAULT 'INFO', -- ALLOW | DENY | SUCCESS | ERROR | INFO
   error_code   TEXT NOT NULL DEFAULT '',
+  device_uid   TEXT NOT NULL DEFAULT '', -- client-reported device id (audit only)
   detail       TEXT NOT NULL DEFAULT '',
   actor        TEXT NOT NULL DEFAULT 'CLIENT',
   request_id   TEXT NOT NULL DEFAULT '',

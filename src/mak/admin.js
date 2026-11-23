@@ -17,7 +17,7 @@ import {
 import {
   activeLicenseOptions, bindGuest, createGuest, dashboardStats,
   deleteDevice, deleteHost, deviceCounts, devicesForLicense, eventCounts, expiringLicenses,
-  getDeviceById, getGuestById, getHostForLicense, getLicenseById, getSession,
+  getDeviceById, getGuestById, getHostById, getHostForLicense, getHostsForLicense, getLicenseById, getSession,
   guestCounts, guestEvents, hostCounts, licenseCounts, listAllActiveGuests,
   listBindingsForGuest, listBindingsForLicense, listDevices, listGuests, listHosts,
   listLicenses, listSessions, revokeAllSessions, revokeDevice, revokeLicense,
@@ -242,13 +242,17 @@ export async function handleMakAdmin(request, env, db, options = {}) {
     const values = {
       label: String(sp.get('label') || ''),
       user_ref: String(sp.get('user_ref') || ''),
+      duration: String(sp.get('duration') || '30'),
       expires_on: String(sp.get('expires_on') || ''),
       max_devices: String(sp.get('max_devices') || ''),
       max_activations: String(sp.get('max_activations') || ''),
       session_ttl: String(sp.get('session_ttl') || ''),
+      max_packages: String(sp.get('max_packages') || ''),
+      max_apps: String(sp.get('max_apps') || ''),
       host_package: String(sp.get('host_package') || ''),
+      host_app_name: String(sp.get('host_app_name') || ''),
       host_cert: String(sp.get('host_cert') || ''),
-      host_bind_mode: String(sp.get('host_bind_mode') || 'FIRST_USE'),
+      host_bind_mode: String(sp.get('host_bind_mode') || 'AUTO'),
       notes: String(sp.get('notes') || ''),
       guest_ids: sp.getAll('guest_ids'),
     };
@@ -320,15 +324,15 @@ export async function handleMakAdmin(request, env, db, options = {}) {
     if (parts.length === 2 && method === 'GET') {
       const license = await getLicenseById(db, id);
       if (!license) return notFoundResponse(env, request, session, session, settings, config, 'That license does not exist.');
-      const [host, bindings, allGuests, devices, sessions, events] = await Promise.all([
-        getHostForLicense(db, id), listBindingsForLicense(db, id), listAllActiveGuests(db),
+      const [host, hosts, bindings, allGuests, devices, sessions, events] = await Promise.all([
+        getHostForLicense(db, id), getHostsForLicense(db, id), listBindingsForLicense(db, id), listAllActiveGuests(db),
         devicesForLicense(db, id), sessionsForLicense(db, id), licenseEvents(db, id, 12),
       ]);
       return panelResponse(env, request, session, session, settings, config, {
         title: license.label || 'License',
         active: 'licenses',
         content: licenseDetailPage({
-          license, host, bindings, allGuests, devices, sessions, events,
+          license, host, hosts, bindings, allGuests, devices, sessions, events,
           csrf: session.csrf, server: { enabled: settings.server_enabled },
         }),
       });
@@ -345,8 +349,13 @@ export async function handleMakAdmin(request, env, db, options = {}) {
       const fail = (message) => flash(`/licenses/${id}`, '', message);
 
       if (action === 'update_policy') {
-        const parsed = parseLicensePolicy(sp);
+        const hosts = await getHostsForLicense(db, id);
+        const parsed = parseLicensePolicy(sp, { hasHost: hosts.length > 0 });
         if (parsed.error) return fail(parsed.error);
+        const activeHosts = hosts.filter((h) => String(h.status).toUpperCase() === 'ACTIVE').length;
+        if (Number(parsed.policy.max_packages) < activeHosts) {
+          return fail('Max host packages cannot be lower than the ' + activeHosts + ' active package(s) already bound.');
+        }
         await updateLicensePolicy(db, id, parsed.policy);
         await logEvent(db, { license_id: id, event_type: 'LICENSE_UPDATED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'License policy updated' });
         return done('License policy saved.');
@@ -378,19 +387,26 @@ export async function handleMakAdmin(request, env, db, options = {}) {
       }
       if (action === 'host_save') {
         const hostPackage = String(sp.get('host_package') || '').trim();
+        const hostAppName = String(sp.get('host_app_name') || '').trim().slice(0, 120);
         const hostCert = normalizeHex64(sp.get('host_cert'));
         if (!validPackageName(hostPackage)) return fail('Host package name is malformed.');
         if (!hostCert) return fail('Host certificate must be 64 hex characters.');
-        await upsertHost(db, id, { package_name: hostPackage, cert_sha256: hostCert });
+        const hosts = await getHostsForLicense(db, id);
+        const existing = hosts.find((h) => String(h.package_name) === hostPackage);
+        if (!existing && hosts.length >= Number(license.max_packages || 1)) {
+          return fail('Host package limit reached. Increase Max host packages before adding another.');
+        }
+        await upsertHost(db, id, { package_name: hostPackage, app_name: hostAppName, cert_sha256: hostCert });
         await revokeSessionsForLicense(db, id);
-        await logEvent(db, { license_id: id, event_type: 'HOST_BOUND', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Host binding saved by administrator' });
-        return done('Host binding saved. Sessions revoked.');
+        await logEvent(db, { license_id: id, event_type: 'HOST_BOUND', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Host package saved by administrator: ' + hostPackage });
+        return done('Host package saved. Sessions revoked.');
       }
       if (action === 'host_reset') {
-        await deleteHost(db, id);
+        const hostId = Number(sp.get('host_id') || 0);
+        await deleteHost(db, id, hostId);
         await revokeSessionsForLicense(db, id);
-        await logEvent(db, { license_id: id, event_type: 'HOST_RESET', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Host binding reset by administrator' });
-        return done('Host binding reset.');
+        await logEvent(db, { license_id: id, event_type: 'HOST_RESET', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: hostId ? 'Host package removed by administrator' : 'All host packages reset by administrator' });
+        return done(hostId ? 'Host package removed.' : 'All host packages reset.');
       }
       if (action === 'binding_add') {
         const guestId = Number(sp.get('guest_id') || 0);
@@ -573,21 +589,22 @@ export async function handleMakAdmin(request, env, db, options = {}) {
     const action = String(sp.get('action') || '');
     const license = await getLicenseById(db, licenseId);
     if (!license) return flash('/hosts', '', 'Host binding not found.');
-    const host = await getHostForLicense(db, licenseId);
-    if (!host) return flash('/hosts', '', 'Host binding not found.');
+    const hostId = Number(sp.get('host_id') || 0);
+    const host = hostId ? await getHostById(db, hostId) : await getHostForLicense(db, licenseId);
+    if (!host || Number(host.license_id) !== licenseId) return flash('/hosts', '', 'Host binding not found.');
 
     if (action === 'suspend' || action === 'activate') {
       const status = action === 'suspend' ? 'SUSPENDED' : 'ACTIVE';
-      await setHostStatus(db, licenseId, status);
+      await setHostStatus(db, licenseId, status, host.id);
       if (status !== 'ACTIVE') await revokeSessionsForLicense(db, licenseId);
-      await logEvent(db, { license_id: licenseId, host_id: host.id, event_type: action === 'suspend' ? 'HOST_SUSPENDED' : 'HOST_REACTIVATED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Host status changed by administrator' });
-      return flash('/hosts', action === 'suspend' ? 'Host binding suspended. Sessions revoked.' : 'Host binding reactivated.');
+      await logEvent(db, { license_id: licenseId, host_id: host.id, event_type: action === 'suspend' ? 'HOST_SUSPENDED' : 'HOST_REACTIVATED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Host package ' + host.package_name + ' status changed by administrator' });
+      return flash('/hosts', action === 'suspend' ? 'Host package suspended. Sessions revoked.' : 'Host package reactivated.');
     }
     if (action === 'reset') {
-      await deleteHost(db, licenseId);
+      await deleteHost(db, licenseId, host.id);
       await revokeSessionsForLicense(db, licenseId);
-      await logEvent(db, { license_id: licenseId, host_id: host.id, event_type: 'HOST_RESET', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Host binding reset from hosts page' });
-      return flash('/hosts', 'Host binding reset.');
+      await logEvent(db, { license_id: licenseId, host_id: host.id, event_type: 'HOST_RESET', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Host package ' + host.package_name + ' reset from hosts page' });
+      return flash('/hosts', 'Host package removed.');
     }
     return flash('/hosts', '', 'Unknown host action.');
   }

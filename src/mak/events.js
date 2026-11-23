@@ -11,8 +11,8 @@ export async function logEvent(db, e) {
   try {
     await db.prepare(
       `INSERT INTO mak_events
-       (license_id,device_id,host_id,guest_app_id,event_type,result,error_code,detail,actor,request_id,ip_hash,created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+       (license_id,device_id,host_id,guest_app_id,event_type,result,error_code,device_uid,detail,actor,request_id,ip_hash,created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     ).bind(
       e.license_id || null,
       e.device_id || null,
@@ -21,6 +21,7 @@ export async function logEvent(db, e) {
       clip(e.event_type || 'UNKNOWN', 64),
       clip(e.result || 'INFO', 16),
       clip(e.error_code || '', 64),
+      clip(e.device_uid || '', 128),
       clip(e.detail || '', 700),
       clip(e.actor || 'CLIENT', 80),
       clip(e.request_id || '', 96),

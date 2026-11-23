@@ -4,7 +4,7 @@ import { nowS, randomId } from './crypto.js';
 
 const LICENSE_POLICY_KEYS = new Set([
   'label', 'user_ref', 'max_devices', 'max_activations', 'session_ttl',
-  'host_bind_mode', 'notes', 'expires_at',
+  'max_packages', 'max_apps', 'host_bind_mode', 'notes', 'expires_at',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -52,14 +52,18 @@ export async function listLicenses(db, { q = '', status = 'ALL' } = {}) {
   else if (s === 'REVOKED') { where.push("l.status='REVOKED'"); }
   const search = String(q || '').trim();
   if (search) {
-    where.push('(l.license_uid LIKE ? OR l.label LIKE ? OR l.user_ref LIKE ? OR h.package_name LIKE ?)');
+    where.push('(l.license_uid LIKE ? OR l.label LIKE ? OR l.user_ref LIKE ? OR EXISTS (SELECT 1 FROM mak_hosts hs WHERE hs.license_id=l.id AND hs.package_name LIKE ?))');
     const like = `%${search}%`;
     args.push(like, like, like, like);
   }
-  const sql = `SELECT l.*, h.package_name AS host_package, h.status AS host_status, h.cert_sha256 AS host_cert_sha256,
+  const sql = `SELECT l.*,
+                      (SELECT package_name FROM mak_hosts WHERE license_id=l.id ORDER BY id LIMIT 1) AS host_package,
+                      (SELECT status FROM mak_hosts WHERE license_id=l.id ORDER BY id LIMIT 1) AS host_status,
+                      (SELECT cert_sha256 FROM mak_hosts WHERE license_id=l.id ORDER BY id LIMIT 1) AS host_cert_sha256,
+                      (SELECT COUNT(*) FROM mak_hosts hm WHERE hm.license_id=l.id AND hm.status='ACTIVE') AS package_count,
                       (SELECT COUNT(*) FROM mak_devices d WHERE d.license_id=l.id AND d.status='ACTIVE') AS device_count,
                       (SELECT COUNT(*) FROM mak_bindings b WHERE b.license_id=l.id AND b.status='ACTIVE') AS guest_count
-                 FROM mak_licenses l LEFT JOIN mak_hosts h ON h.license_id=l.id
+                 FROM mak_licenses l
                  ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
                 ORDER BY l.id DESC LIMIT 300`;
   return (await db.prepare(sql).bind(...args).all().catch(() => ({ results: [] }))).results || [];
@@ -70,8 +74,9 @@ export async function createLicenseRecord(db, input) {
   const inserted = await db.prepare(
     `INSERT INTO mak_licenses
       (license_uid,label,user_ref,credential_hash,status,created_at,updated_at,expires_at,
-       max_devices,max_activations,activation_count,session_ttl,host_bind_mode,notes,created_by)
-     VALUES (?,?,?,?, 'ACTIVE', ?,?,?,?,?,0,?,?,?,?)
+       max_devices,max_activations,activation_count,session_ttl,max_packages,max_apps,
+       host_bind_mode,notes,created_by)
+     VALUES (?,?,?,?, 'ACTIVE', ?,?,?,?,?,0,?,?,?,?,?,?)
      RETURNING id`,
   ).bind(
     input.license_uid,
@@ -80,7 +85,9 @@ export async function createLicenseRecord(db, input) {
     input.credential_hash,
     now, now, input.expires_at || null,
     input.max_devices, input.max_activations,
-    input.session_ttl, input.host_bind_mode || 'FIRST_USE', input.notes || '', input.created_by || null,
+    input.session_ttl,
+    input.max_packages || 1, input.max_apps || 2,
+    input.host_bind_mode || 'AUTO', input.notes || '', input.created_by || null,
   ).first();
   const id = Number(inserted?.id);
   if (!id) throw new Error('license insert did not return id');
@@ -88,15 +95,17 @@ export async function createLicenseRecord(db, input) {
   const stmts = [];
   if (input.host?.package_name && input.host?.cert_sha256) {
     stmts.push(db.prepare(
-      `INSERT INTO mak_hosts (license_id,package_name,cert_sha256,status,version_policy,created_at,updated_at)
-       VALUES (?,?,?,'ACTIVE','ANY',?,?)`,
-    ).bind(id, input.host.package_name, input.host.cert_sha256, now, now));
+      `INSERT INTO mak_hosts (license_id,package_name,app_name,cert_sha256,status,version_policy,created_at,updated_at)
+       VALUES (?,?,?,?,'ACTIVE','ANY',?,?)`,
+    ).bind(id, input.host.package_name, input.host.app_name || '', input.host.cert_sha256, now, now));
   }
   for (const guestId of input.guest_ids || []) {
+    // Admin-selected guests are license-wide (host_id=0), so every host package
+    // under this MAK can use them unless a host-specific binding is added later.
     stmts.push(db.prepare(
       `INSERT OR IGNORE INTO mak_bindings
-        (license_id,guest_app_id,can_install,can_launch,can_update,can_restart,status,created_at,updated_at)
-       VALUES (?,?,1,1,1,1,'ACTIVE',?,?)`,
+        (license_id,host_id,guest_app_id,can_install,can_launch,can_update,can_restart,status,created_at,updated_at)
+       VALUES (?,0,?,1,1,1,1,'ACTIVE',?,?)`,
     ).bind(id, Number(guestId), now, now));
   }
   if (stmts.length) await db.batch(stmts);
@@ -148,34 +157,85 @@ export async function expiringLicenses(db, withinSeconds = 7 * 86400, limit = 6)
 // ---------------------------------------------------------------------------
 // Host bindings
 // ---------------------------------------------------------------------------
+export async function getHostById(db, id) {
+  return db.prepare('SELECT * FROM mak_hosts WHERE id=?').bind(Number(id) || 0).first().catch(() => null);
+}
+
+export async function getHostsForLicense(db, licenseId) {
+  return (await db.prepare('SELECT * FROM mak_hosts WHERE license_id=? ORDER BY id')
+    .bind(Number(licenseId) || 0).all().catch(() => ({ results: [] }))).results || [];
+}
+
+// Legacy single-host helper: first package registered for the license.
 export async function getHostForLicense(db, licenseId) {
-  return db.prepare('SELECT * FROM mak_hosts WHERE license_id=?').bind(Number(licenseId) || 0).first().catch(() => null);
+  return db.prepare('SELECT * FROM mak_hosts WHERE license_id=? ORDER BY id LIMIT 1')
+    .bind(Number(licenseId) || 0).first().catch(() => null);
 }
 
-export async function upsertHost(db, licenseId, { package_name, cert_sha256, status = 'ACTIVE', version_policy = 'ANY' }) {
+export async function findHostForLicensePackage(db, licenseId, packageName) {
+  return db.prepare('SELECT * FROM mak_hosts WHERE license_id=? AND package_name=?')
+    .bind(Number(licenseId) || 0, String(packageName || '')).first().catch(() => null);
+}
+
+export async function countActiveHosts(db, licenseId) {
+  const row = await db.prepare("SELECT COUNT(*) AS c FROM mak_hosts WHERE license_id=? AND status='ACTIVE'")
+    .bind(Number(licenseId) || 0).first().catch(() => null);
+  return Number(row?.c || 0);
+}
+
+// Atomic first-use bind: inserts only while the active package count is below
+// the license limit. D1 serializes writes, so concurrent requests cannot both
+// take the last slot.
+export async function createHostAtomic(db, licenseId, { package_name, app_name = '', cert_sha256, maxPackages }) {
   const now = nowS();
-  await db.prepare(
-    `INSERT INTO mak_hosts (license_id,package_name,cert_sha256,status,version_policy,created_at,updated_at)
-     VALUES (?,?,?,?,?,?,?)
-     ON CONFLICT(license_id) DO UPDATE SET
-       package_name=excluded.package_name, cert_sha256=excluded.cert_sha256,
-       status=excluded.status, version_policy=excluded.version_policy, updated_at=excluded.updated_at`,
-  ).bind(Number(licenseId), package_name, cert_sha256, status, version_policy, now, now).run();
-  return getHostForLicense(db, licenseId);
+  const row = await db.prepare(
+    `INSERT INTO mak_hosts (license_id,package_name,app_name,cert_sha256,status,version_policy,created_at,updated_at)
+     SELECT ?,?,?,?, 'ACTIVE','ANY',?,?
+      WHERE (SELECT COUNT(*) FROM mak_hosts WHERE license_id=? AND status='ACTIVE') < ?
+     RETURNING *`,
+  ).bind(
+    Number(licenseId), package_name, app_name || '', cert_sha256, now, now,
+    Number(licenseId), Math.max(1, Number(maxPackages) || 1),
+  ).first().catch(() => null);
+  if (!row) return { ok: false, code: 'PACKAGE_LIMIT_REACHED' };
+  return { ok: true, host: row };
 }
 
-export async function setHostStatus(db, licenseId, status) {
+export async function upsertHost(db, licenseId, { package_name, app_name = '', cert_sha256, status = 'ACTIVE', version_policy = 'ANY' }) {
+  const now = nowS();
+  const row = await db.prepare(
+    `INSERT INTO mak_hosts (license_id,package_name,app_name,cert_sha256,status,version_policy,created_at,updated_at)
+     VALUES (?,?,?,?,?,?,?,?)
+     ON CONFLICT(license_id,package_name) DO UPDATE SET
+       app_name=excluded.app_name, cert_sha256=excluded.cert_sha256,
+       status=excluded.status, version_policy=excluded.version_policy, updated_at=excluded.updated_at
+     RETURNING *`,
+  ).bind(Number(licenseId), package_name, app_name || '', cert_sha256, status, version_policy, now, now).first().catch(() => null);
+  return row || findHostForLicensePackage(db, licenseId, package_name);
+}
+
+export async function setHostStatus(db, licenseId, status, hostId = 0) {
+  if (Number(hostId) > 0) {
+    await db.prepare('UPDATE mak_hosts SET status=?,updated_at=? WHERE id=? AND license_id=?')
+      .bind(status, nowS(), Number(hostId), Number(licenseId)).run();
+    return;
+  }
   await db.prepare('UPDATE mak_hosts SET status=?,updated_at=? WHERE license_id=?')
     .bind(status, nowS(), Number(licenseId)).run();
 }
 
-export async function deleteHost(db, licenseId) {
+export async function deleteHost(db, licenseId, hostId = 0) {
+  if (Number(hostId) > 0) {
+    await db.prepare('DELETE FROM mak_hosts WHERE id=? AND license_id=?')
+      .bind(Number(hostId), Number(licenseId)).run();
+    return;
+  }
   await db.prepare('DELETE FROM mak_hosts WHERE license_id=?').bind(Number(licenseId)).run();
 }
 
-export async function touchHost(db, licenseId) {
-  await db.prepare('UPDATE mak_hosts SET last_seen=? WHERE license_id=?')
-    .bind(nowS(), Number(licenseId)).run().catch(() => {});
+export async function touchHost(db, hostId) {
+  await db.prepare('UPDATE mak_hosts SET last_seen=? WHERE id=?')
+    .bind(nowS(), Number(hostId) || 0).run().catch(() => {});
 }
 
 export async function listHosts(db, { q = '', status = 'ALL' } = {}) {
@@ -260,16 +320,75 @@ export async function listAllActiveGuests(db) {
     .all().catch(() => ({ results: [] }))).results || [];
 }
 
-export async function getBinding(db, licenseId, guestId) {
-  return db.prepare('SELECT * FROM mak_bindings WHERE license_id=? AND guest_app_id=?')
+// Host-specific binding wins; host_id=0 is the license-wide admin binding.
+export async function getBinding(db, licenseId, guestId, hostId = 0) {
+  if (Number(hostId) > 0) {
+    const specific = await db.prepare('SELECT * FROM mak_bindings WHERE license_id=? AND host_id=? AND guest_app_id=?')
+      .bind(Number(licenseId), Number(hostId), Number(guestId)).first().catch(() => null);
+    if (specific) return specific;
+  }
+  return db.prepare('SELECT * FROM mak_bindings WHERE license_id=? AND host_id=0 AND guest_app_id=?')
     .bind(Number(licenseId), Number(guestId)).first().catch(() => null);
+}
+
+export async function getHostBinding(db, licenseId, hostId, guestId) {
+  return db.prepare('SELECT * FROM mak_bindings WHERE license_id=? AND host_id=? AND guest_app_id=?')
+    .bind(Number(licenseId), Number(hostId), Number(guestId)).first().catch(() => null);
+}
+
+export async function countHostGuestPackages(db, licenseId, hostId) {
+  const row = await db.prepare(
+    `SELECT COUNT(DISTINCT g.package_name) AS c
+       FROM mak_bindings b JOIN mak_guest_apps g ON g.id=b.guest_app_id
+      WHERE b.license_id=? AND b.host_id=? AND b.status='ACTIVE'`,
+  ).bind(Number(licenseId), Number(hostId)).first().catch(() => null);
+  return Number(row?.c || 0);
+}
+
+// Atomic AUTO bind. A new APK version of an already-bound package does not
+// consume another app slot; a brand-new package is allowed only while the
+// per-host distinct package count is below max_apps.
+export async function bindGuestAtomic(db, licenseId, hostId, guestId, guestPackage, perms = {}, maxApps = 2) {
+  const now = nowS();
+  const row = await db.prepare(
+    `INSERT INTO mak_bindings
+       (license_id,host_id,guest_app_id,can_install,can_launch,can_update,can_restart,status,created_at,updated_at)
+     SELECT ?,?,?,?,?,?,?, 'ACTIVE', ?,?
+      WHERE (
+        EXISTS (
+          SELECT 1 FROM mak_bindings b JOIN mak_guest_apps g ON g.id=b.guest_app_id
+           WHERE b.license_id=? AND b.host_id=? AND b.status='ACTIVE' AND g.package_name=?
+        )
+        OR (
+          SELECT COUNT(DISTINCT g.package_name)
+            FROM mak_bindings b JOIN mak_guest_apps g ON g.id=b.guest_app_id
+           WHERE b.license_id=? AND b.host_id=? AND b.status='ACTIVE'
+        ) < ?
+      )
+     ON CONFLICT(license_id,host_id,guest_app_id) DO UPDATE SET
+       can_install=excluded.can_install, can_launch=excluded.can_launch,
+       can_update=excluded.can_update, can_restart=excluded.can_restart,
+       status='ACTIVE', updated_at=excluded.updated_at
+     RETURNING *`,
+  ).bind(
+    Number(licenseId), Number(hostId), Number(guestId),
+    perms.install === false ? 0 : 1, perms.launch === false ? 0 : 1,
+    perms.update === false ? 0 : 1, perms.restart === false ? 0 : 1,
+    now, now,
+    Number(licenseId), Number(hostId), String(guestPackage || ''),
+    Number(licenseId), Number(hostId), Math.max(1, Number(maxApps) || 1),
+  ).first().catch(() => null);
+  if (!row) return { ok: false, code: 'APP_LIMIT_REACHED' };
+  return { ok: true, binding: row };
 }
 
 export async function listBindingsForLicense(db, licenseId) {
   return (await db.prepare(
-    `SELECT b.*, g.package_name, g.app_name, g.apk_sha256, g.cert_sha256, g.version_code, g.status AS guest_status
+    `SELECT b.*, g.package_name, g.app_name, g.apk_sha256, g.cert_sha256, g.version_code, g.status AS guest_status,
+            h.package_name AS host_package
        FROM mak_bindings b JOIN mak_guest_apps g ON g.id=b.guest_app_id
-      WHERE b.license_id=? ORDER BY b.id DESC`,
+       LEFT JOIN mak_hosts h ON h.id=b.host_id
+      WHERE b.license_id=? ORDER BY b.host_id, b.id DESC`,
   ).bind(Number(licenseId)).all().catch(() => ({ results: [] }))).results || [];
 }
 
@@ -281,35 +400,38 @@ export async function listBindingsForGuest(db, guestId) {
   ).bind(Number(guestId)).all().catch(() => ({ results: [] }))).results || [];
 }
 
-export async function bindGuest(db, licenseId, guestId, perms = {}) {
+export async function bindGuest(db, licenseId, guestId, perms = {}, hostId = 0) {
   const now = nowS();
   await db.prepare(
     `INSERT INTO mak_bindings
-      (license_id,guest_app_id,can_install,can_launch,can_update,can_restart,status,created_at,updated_at)
-     VALUES (?,?,?,?,?,?, 'ACTIVE', ?,?)
-     ON CONFLICT(license_id,guest_app_id) DO UPDATE SET
+      (license_id,host_id,guest_app_id,can_install,can_launch,can_update,can_restart,status,created_at,updated_at)
+     VALUES (?,?,?,?,?,?,?, 'ACTIVE', ?,?)
+     ON CONFLICT(license_id,host_id,guest_app_id) DO UPDATE SET
        can_install=excluded.can_install, can_launch=excluded.can_launch,
        can_update=excluded.can_update, can_restart=excluded.can_restart,
        status='ACTIVE', updated_at=excluded.updated_at`,
   ).bind(
-    Number(licenseId), Number(guestId),
+    Number(licenseId), Number(hostId) || 0, Number(guestId),
     perms.install ? 1 : 0, perms.launch ? 1 : 0, perms.update ? 1 : 0, perms.restart ? 1 : 0,
     now, now,
   ).run();
 }
 
-export async function updateBindingPermissions(db, licenseId, guestId, perms) {
+export async function updateBindingPermissions(db, licenseId, guestId, perms, hostId = 0) {
   await db.prepare(
-    `UPDATE mak_bindings SET can_install=?,can_launch=?,can_update=?,can_restart=?,updated_at=? WHERE license_id=? AND guest_app_id=?`,
+    `UPDATE mak_bindings SET can_install=?,can_launch=?,can_update=?,can_restart=?,updated_at=?
+      WHERE license_id=? AND guest_app_id=? AND (?=0 OR host_id=?)`,
   ).bind(
     perms.install ? 1 : 0, perms.launch ? 1 : 0, perms.update ? 1 : 0, perms.restart ? 1 : 0,
-    nowS(), Number(licenseId), Number(guestId),
+    nowS(), Number(licenseId), Number(guestId), Number(hostId) || 0, Number(hostId) || 0,
   ).run();
 }
 
-export async function unbindGuest(db, licenseId, guestId) {
-  await db.prepare("UPDATE mak_bindings SET status='REVOKED',updated_at=? WHERE license_id=? AND guest_app_id=?")
-    .bind(nowS(), Number(licenseId), Number(guestId)).run();
+export async function unbindGuest(db, licenseId, guestId, hostId = 0) {
+  await db.prepare(
+    `UPDATE mak_bindings SET status='REVOKED',updated_at=?
+      WHERE license_id=? AND guest_app_id=? AND (?=0 OR host_id=?)`,
+  ).bind(nowS(), Number(licenseId), Number(guestId), Number(hostId) || 0, Number(hostId) || 0).run();
 }
 
 // ---------------------------------------------------------------------------
@@ -330,18 +452,19 @@ export async function activeDeviceCount(db, licenseId) {
   return Number(row?.c || 0);
 }
 
-export async function registerDeviceAtomic(db, licenseId, publicKey, fingerprint) {
+export async function registerDeviceAtomic(db, licenseId, publicKey, fingerprint, reportedDeviceId = '') {
   const now = nowS();
   const deviceUid = randomId('DEV', 15);
+  const deviceText = String(reportedDeviceId || '').slice(0, 128);
   const insert = db.prepare(
     `INSERT INTO mak_devices
-      (device_uid,license_id,public_key,fingerprint,key_algorithm,status,registered_at,last_seen)
-     SELECT ?,?,?,?, 'ECDSA-P256', 'ACTIVE', ?,?
+      (device_uid,license_id,public_key,fingerprint,device_id,device_id_first,key_algorithm,status,registered_at,last_seen)
+     SELECT ?,?,?,?,?,?, 'ECDSA-P256', 'ACTIVE', ?,?
       WHERE (SELECT COUNT(*) FROM mak_devices WHERE license_id=? AND status='ACTIVE')
             < (SELECT max_devices FROM mak_licenses WHERE id=?)
         AND (SELECT activation_count FROM mak_licenses WHERE id=?)
             < (SELECT max_activations FROM mak_licenses WHERE id=?)`,
-  ).bind(deviceUid, Number(licenseId), publicKey, fingerprint, now, now, Number(licenseId), Number(licenseId), Number(licenseId), Number(licenseId));
+  ).bind(deviceUid, Number(licenseId), publicKey, fingerprint, deviceText, deviceText, now, now, Number(licenseId), Number(licenseId), Number(licenseId), Number(licenseId));
   const bump = db.prepare(
     `UPDATE mak_licenses SET activation_count=activation_count+1,updated_at=?
       WHERE id=? AND activation_count < max_activations
@@ -386,6 +509,18 @@ export async function resetLicenseDevices(db, licenseId, actor = 'ADMIN') {
 
 export async function touchDevice(db, deviceId) {
   await db.prepare('UPDATE mak_devices SET last_seen=? WHERE id=?').bind(nowS(), Number(deviceId)).run().catch(() => {});
+}
+
+// device_id is audit metadata only. It never grants or denies access; it is
+// stored so the server can add a device-id policy later without a migration.
+export async function updateDeviceId(db, deviceId, reportedDeviceId) {
+  const value = String(reportedDeviceId || '').slice(0, 128);
+  if (!value) return;
+  await db.prepare(
+    `UPDATE mak_devices
+        SET device_id=?, device_id_first=CASE WHEN device_id_first='' THEN ? ELSE device_id_first END
+      WHERE id=?`,
+  ).bind(value, value, Number(deviceId)).run().catch(() => {});
 }
 
 export async function listDevices(db, { q = '', status = 'ALL' } = {}) {  const where = [];
@@ -447,13 +582,15 @@ export async function getSession(db, id) {
     `SELECT s.id AS session_id, s.license_id, s.device_id, s.host_id, s.issued_at, s.expires_at,
             s.last_heartbeat, s.revoked_at, s.status AS session_status, s.request_id,
             l.license_uid, l.label, l.status AS license_status, l.expires_at AS license_expires_at,
-            l.session_ttl, l.max_devices, l.max_activations,
-            d.public_key, d.fingerprint, d.status AS device_status,
-            h.package_name AS host_package, h.cert_sha256 AS host_cert_sha256, h.status AS host_status
+            l.session_ttl, l.max_devices, l.max_activations, l.max_packages, l.max_apps,
+            l.host_bind_mode,
+            d.public_key, d.fingerprint, d.status AS device_status, d.device_id AS device_text,
+            h.package_name AS host_package, h.cert_sha256 AS host_cert_sha256, h.status AS host_status,
+            h.app_name AS host_app_name
        FROM mak_sessions s
        JOIN mak_licenses l ON l.id=s.license_id
        JOIN mak_devices d ON d.id=s.device_id
-       LEFT JOIN mak_hosts h ON h.license_id=l.id
+       LEFT JOIN mak_hosts h ON h.id=s.host_id
       WHERE s.id=?`,
   ).bind(String(id || '')).first().catch(() => null);
 }

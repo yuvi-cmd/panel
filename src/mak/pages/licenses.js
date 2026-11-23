@@ -85,24 +85,30 @@ export function newLicensePage({ csrf, guests = [], error = '', values = {}, def
             <div class="form-grid">
               ${field('Label', `<input name="label" value="${esc(v.label || '')}" placeholder="e.g. Rahul · monthly" maxlength="80" required>`)}
               ${field('User reference', `<input name="user_ref" value="${esc(v.user_ref || '')}" placeholder="Name, email or order ID" maxlength="120">`)}
-              ${field('Expires on', `<input type="date" name="expires_on" value="${esc(v.expires_on || defaultExpiry)}" required>`, 'Server rejects every request once this date passes (IST date input).')}
+              ${field('Duration', `<select name="duration" onchange="this.form.expires_on.parentElement.style.display=this.value==='custom'?'':'none'">
+                ${[['1', '1 day'], ['3', '3 days'], ['7', '7 days'], ['14', '14 days'], ['30', '30 days'], ['60', '60 days'], ['90', '90 days'], ['180', '180 days'], ['365', '1 year'], ['730', '2 years'], ['lifetime', 'Lifetime (no expiry)'], ['custom', 'Custom date…']].map(([value, label]) => `<option value="${value}" ${String(v.duration || '30') === value ? 'selected' : ''}>${label}</option>`).join('')}
+              </select>`, 'Server rejects every request once this duration ends.')}
+              ${field('Custom expiry date', `<input type="date" name="expires_on" value="${esc(v.expires_on || defaultExpiry)}">`, 'Only used when Duration = Custom date.')}
               ${field('Session TTL (seconds)', `<input type="number" name="session_ttl" min="300" max="86400" value="${esc(v.session_ttl || 3600)}" required>`, 'Short-lived signed sessions. Default 1 hour.')}
               ${field('Max devices', `<input type="number" name="max_devices" min="1" max="100" value="${esc(v.max_devices || 1)}" required>`, 'Concurrent active device keys.')}
               ${field('Max activations', `<input type="number" name="max_activations" min="1" max="1000" value="${esc(v.max_activations || 2)}" required>`, 'Lifetime registrations, including reinstalls.')}
+              ${field('Max host packages', `<input type="number" name="max_packages" min="1" max="100" value="${esc(v.max_packages || 1)}" required>`, 'Kitne host APK package names is MAK se bind ho sakte hain.')}
+              ${field('Max apps per package', `<input type="number" name="max_apps" min="1" max="100" value="${esc(v.max_apps || 2)}" required>`, 'Har host package ke liye kitne guest apps. Total = packages × apps.')}
               ${field('Notes', `<textarea name="notes" placeholder="Internal note (not shown to the client)" maxlength="1000">${esc(v.notes || '')}</textarea>`, '', 'span-2')}
             </div>
           </div>
           <div class="card">
             ${sectionHead('Host binding', 'Package name + signing certificate SHA-256.')}
             <div class="form-grid">
-              ${field('Host package name', `<input name="host_package" value="${esc(v.host_package || '')}" placeholder="com.example.host" maxlength="200">`, 'Leave blank to allow first authenticated host binding.')}
+              ${field('Host package name', `<input name="host_package" value="${esc(v.host_package || '')}" placeholder="com.example.host" maxlength="200">`, 'Optional in AUTO mode; required in MANUAL mode.')}
+              ${field('Host app name', `<input name="host_app_name" value="${esc(v.host_app_name || '')}" placeholder="Display name (optional)" maxlength="120">`)}
               ${field('Signing certificate SHA-256', `<input name="host_cert" value="${esc(v.host_cert || '')}" placeholder="64 hex characters" maxlength="80">`, 'Lowercase or uppercase hex; colons are removed.')}
               ${field('Binding mode', `<select name="host_bind_mode">
-                <option value="FIRST_USE" ${v.host_bind_mode !== 'STRICT' ? 'selected' : ''}>Bind on first authentication</option>
-                <option value="STRICT" ${v.host_bind_mode === 'STRICT' ? 'selected' : ''}>Strict — require pre-registered host</option>
+                <option value="AUTO" ${v.host_bind_mode !== 'MANUAL' ? 'selected' : ''}>AUTO — pkg name + app name first use par bind</option>
+                <option value="MANUAL" ${v.host_bind_mode === 'MANUAL' ? 'selected' : ''}>MANUAL — sirf pre-registered packages</option>
               </select>`, '', 'span-2')}
             </div>
-            <div class="notice" style="margin:14px 0 0">${icon('shield', 17)}<div><b>First-use binding</b> is protected by the MAK + device proof, then becomes strict. Admins can rebind or reset it from the license page.</div></div>
+            <div class="notice" style="margin:14px 0 0">${icon('shield', 17)}<div><b>AUTO:</b> pehle <b>Max host packages</b> packages khud bind honge (pkg + app name + cert). <b>MANUAL:</b> sirf yahan diya gaya package authenticate kar sakta hai.</div></div>
           </div>
           <div class="card">
             ${sectionHead('Guest access', 'Only these guest apps will receive signed ALLOW decisions.')}
@@ -157,7 +163,8 @@ export function revealLicensePage({ license, credential, csrf, server }) {
         <dt>License ID</dt><dd class="mono">${esc(license.license_uid)}</dd>
         <dt>Expires</dt><dd>${esc(fmtDate(license.expires_at))}</dd>
         <dt>Devices / activations</dt><dd>${license.max_devices} / ${license.max_activations}</dd>
-        <dt>Host binding</dt><dd>${license.host_bind_mode === 'STRICT' ? 'Strict' : 'First authenticated use'}</dd>
+        <dt>Host packages / apps</dt><dd>${license.max_packages || 1} packages × ${license.max_apps || 2} apps = ${(license.max_packages || 1) * (license.max_apps || 2)} apps</dd>
+        <dt>Host binding</dt><dd>${String(license.host_bind_mode || 'AUTO') === 'MANUAL' ? 'Manual (pre-registered)' : 'Auto (first use)'}</dd>
         <dt>Server</dt><dd>${statusBadge(server.enabled ? 'ONLINE' : 'OFFLINE')}</dd>
       </dl>
       <div class="alert alert-bad" style="margin:16px 0 0"><span class="alert-ic">${icon('alert', 18)}</span><div class="alert-body">Store this key in the host APK's credential field. Anyone with it can attempt to activate a matching host. Rotate immediately if it leaks.</div></div>
@@ -167,7 +174,7 @@ export function revealLicensePage({ license, credential, csrf, server }) {
 }
 
 export function licenseDetailPage({
-  license, host, bindings = [], allGuests = [], devices = [], sessions = [], events = [], csrf, server,
+  license, host, hosts = [], bindings = [], allGuests = [], devices = [], sessions = [], events = [], csrf, server,
 }) {
   const guestRows = bindings.length ? bindings.map((b) => `
     <tr>
@@ -238,10 +245,19 @@ export function licenseDetailPage({
             <div class="form-grid">
               ${field('Label', `<input name="label" value="${esc(license.label)}" maxlength="80" required>`)}
               ${field('User reference', `<input name="user_ref" value="${esc(license.user_ref)}" maxlength="120">`)}
-              ${field('Expires on', `<input type="date" name="expires_on" value="${esc(dateInputValue(license.expires_at))}" required>`)}
+              ${field('Duration', `<select name="duration" onchange="this.form.expires_on.parentElement.style.display=this.value==='custom'?'':'none'">
+                ${[['1', '1 day'], ['3', '3 days'], ['7', '7 days'], ['14', '14 days'], ['30', '30 days'], ['60', '60 days'], ['90', '90 days'], ['180', '180 days'], ['365', '1 year'], ['730', '2 years'], ['lifetime', 'Lifetime (no expiry)'], ['custom', 'Custom date…']].map(([value, label]) => `<option value="${value}" ${(license.expires_at ? 'custom' : 'lifetime') === value ? 'selected' : ''}>${label}</option>`).join('')}
+              </select>`, 'Server rejects every request once this duration ends.')}
+              ${field('Custom expiry date', `<input type="date" name="expires_on" value="${esc(dateInputValue(license.expires_at))}">`, 'Only used when Duration = Custom date.')}
               ${field('Session TTL (seconds)', `<input type="number" name="session_ttl" min="300" max="86400" value="${license.session_ttl}" required>`)}
               ${field('Max devices', `<input type="number" name="max_devices" min="1" max="100" value="${license.max_devices}" required>`)}
               ${field('Max activations', `<input type="number" name="max_activations" min="1" max="1000" value="${license.max_activations}" required>`)}
+              ${field('Max host packages', `<input type="number" name="max_packages" min="1" max="100" value="${license.max_packages || 1}" required>`, 'Kitne host APK package names is MAK se bind ho sakte hain.')}
+              ${field('Max apps per package', `<input type="number" name="max_apps" min="1" max="100" value="${license.max_apps || 2}" required>`, 'Har host package ke liye kitne guest apps.')}
+              ${field('Binding mode', `<select name="host_bind_mode">
+                <option value="AUTO" ${String(license.host_bind_mode || 'AUTO') !== 'MANUAL' ? 'selected' : ''}>AUTO — first use par bind</option>
+                <option value="MANUAL" ${String(license.host_bind_mode || 'AUTO') === 'MANUAL' ? 'selected' : ''}>MANUAL — sirf pre-registered</option>
+              </select>`, '', 'span-2')}
               ${field('Notes', `<textarea name="notes" maxlength="1000">${esc(license.notes || '')}</textarea>`, '', 'span-2')}
             </div>
             <div class="form-actions"><button class="btn btn-primary" type="submit">${icon('check', 15)} Save policy</button></div>
@@ -254,26 +270,27 @@ export function licenseDetailPage({
         </div>
 
         <div class="card">
-          ${sectionHead('Host binding', 'Package name + signing certificate must both match.', host ? statusBadge(host.status) : statusBadge('PENDING'))}
-          ${host ? `
-            <dl class="kv">
-              <dt>Package</dt><dd class="mono">${esc(host.package_name)}</dd>
-              <dt>Certificate</dt><dd class="mono">${esc(host.cert_sha256)}</dd>
-              <dt>Mode</dt><dd><span class="chip acc">${license.host_bind_mode === 'STRICT' ? 'STRICT' : 'FIRST USE'}</span></dd>
-              <dt>Last seen</dt><dd>${timeCell(host.last_seen)}</dd>
-            </dl>` : `<div class="notice" style="margin:0">${icon('clock', 17)}<div><b>First-use binding enabled.</b> The next authenticated host will be pinned to this license.</div></div>`}
+          ${sectionHead('Host packages', 'Package name + signing certificate must both match. ' + Number(hosts.length || 0) + ' / ' + Number(license.max_packages || 1) + ' used.', host ? statusBadge(host.status) : statusBadge('PENDING'))}
+          ${hosts.length ? `<div class="table-wrap" style="border:0;background:transparent"><table class="tbl" style="min-width:0"><thead><tr><th>Package</th><th>App</th><th>Status</th><th></th></tr></thead><tbody>${hosts.map((h) => `
+            <tr>
+              <td data-label="Package"><div class="cell-main mono">${esc(h.package_name)}</div><div class="cell-sub mono">${esc(h.cert_sha256)}</div></td>
+              <td data-label="App">${esc(h.app_name || '—')}</td>
+              <td data-label="Status">${statusBadge(h.status)}</td>
+              <td data-label="" class="actions"><form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="host_reset"><input type="hidden" name="host_id" value="${h.id}"><button class="btn btn-sm btn-danger" type="submit" onclick="return askConfirm(this.form,'Remove this host package?','Sessions are revoked. This package can be auto-bound again in AUTO mode.','danger')">Remove</button></form></td>
+            </tr>`).join('')}</tbody></table></div>` : `<div class="notice" style="margin:0">${icon('clock', 17)}<div><b>${String(license.host_bind_mode || 'AUTO') === 'MANUAL' ? 'Manual binding.' : 'Auto binding enabled.'}</b> ${String(license.host_bind_mode || 'AUTO') === 'MANUAL' ? 'Only the packages you register here can authenticate.' : 'The first ' + Number(license.max_packages || 1) + ' host packages will bind on first authenticated use.'}</div></div>`}
           <details style="margin-top:14px">
-            <summary class="btn btn-sm btn-ghost" style="list-style:none;display:inline-flex">${icon('edit', 14)} ${host ? 'Rebind host' : 'Pre-register host'}</summary>
+            <summary class="btn btn-sm btn-ghost" style="list-style:none;display:inline-flex">${icon('edit', 14)} ${hosts.length ? 'Add / update host package' : 'Pre-register host'}</summary>
             <form method="post" action="/licenses/${license.id}/action" style="margin-top:12px">
               ${csrfInput(csrf)}<input type="hidden" name="action" value="host_save">
               <div class="form-grid">
-                ${field('Package name', `<input name="host_package" value="${esc(host?.package_name || '')}" placeholder="com.example.host" required>`)}
-                ${field('Certificate SHA-256', `<input name="host_cert" value="${esc(host?.cert_sha256 || '')}" placeholder="64 hex characters" required>`)}
+                ${field('Package name', `<input name="host_package" placeholder="com.example.host" required>`)}
+                ${field('App name', `<input name="host_app_name" placeholder="Display name (optional)">`)}
+                ${field('Certificate SHA-256', `<input name="host_cert" placeholder="64 hex characters" required>`, '', 'span-2')}
               </div>
-              <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit" onclick="return askConfirm(this.form,'Rebind host identity?','All active sessions will be revoked. New authorization must match the new package and certificate.','danger')">Save binding</button></div>
+              <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit" onclick="return askConfirm(this.form,'Save host package?','All active sessions will be revoked. New authorization must match the package and certificate.','danger')">Save package</button></div>
             </form>
           </details>
-          ${host ? `<div class="divider"></div><div class="row" style="justify-content:space-between"><span class="muted small">Reset removes the pin and allows first-use binding again.</span><form method="post" action="/licenses/${license.id}/action">${csrfInput(csrf)}<input type="hidden" name="action" value="host_reset"><button class="btn btn-sm btn-danger" type="submit" onclick="return askConfirm(this.form,'Reset host binding?','Active sessions are revoked. The next host authentication will bind a new package + certificate.','danger')">Reset host</button></form></div>` : ''}
+          ${hosts.length ? `<div class="divider"></div><div class="row" style="justify-content:space-between"><span class="muted small">Reset removes every package pin.</span><form method="post" action="/licenses/${license.id}/action">${csrfInput(csrf)}<input type="hidden" name="action" value="host_reset"><button class="btn btn-sm btn-danger" type="submit" onclick="return askConfirm(this.form,'Reset all host packages?','Active sessions are revoked and every package pin is removed.','danger')">Reset all</button></form></div>` : ''}
         </div>
 
         <div class="card tight">

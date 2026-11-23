@@ -26,17 +26,20 @@ import {
 import { getSettings } from './settings.js';
 import { logEvent } from './events.js';
 import {
-  bindGuest,
+  bindGuestAtomic,
   consumeChallenge,
   createChallenge,
+  createGuest,
+  createHostAtomic,
   createSession,
+  findGuestByPackage,
+  findHostForLicensePackage,
   getBinding,
   getDeviceByLicenseKey,
+  getGuestById,
   getGuestByIdentity,
-  getHostForLicense,
   getLicenseByHash,
   getSession,
-  findGuestByPackage,
   heartbeatSession,
   registerDeviceAtomic,
   renewSession,
@@ -47,7 +50,7 @@ import {
   touchDevice,
   touchHost,
   touchLicense,
-  upsertHost,
+  updateDeviceId,
 } from './store.js';
 import { clientIp, json, jsonBody } from './http.js';
 import { getAdminSession, verifyCsrf } from './auth.js';
@@ -70,6 +73,35 @@ function cleanRequestId(value) {
   const s = String(value || '').trim();
   if (/^[A-Za-z0-9._:-]{4,96}$/.test(s)) return s;
   return randomId('REQ', 12);
+}
+
+// device_id is client-reported audit metadata. It is never part of the
+// authorization decision, so a mismatch is logged and the latest value is
+// stored; this lets the server add a device-id policy later without breaking
+// existing clients.
+function cleanDeviceId(value) {
+  return String(value || '').trim().replace(/[^\x21-\x7e]/g, '').slice(0, 128);
+}
+
+async function auditDeviceId(db, deviceRow, reported, ctx) {
+  const value = cleanDeviceId(reported);
+  if (!deviceRow || !value) return;
+  const stored = String(deviceRow.device_id || '');
+  if (stored && stored !== value) {
+    await logEvent(db, {
+      license_id: ctx.licenseId,
+      device_id: deviceRow.id,
+      host_id: ctx.hostId,
+      event_type: 'DEVICE_ID_MISMATCH',
+      result: 'INFO',
+      error_code: 'DEVICE_ID_MISMATCH',
+      device_uid: value,
+      request_id: ctx.requestId,
+      ip_hash: ctx.ipHash,
+      detail: 'device_id changed (audit only, not enforced): ' + stored.slice(0, 64) + ' -> ' + value.slice(0, 64),
+    });
+  }
+  if (stored !== value) await updateDeviceId(db, deviceRow.id, value);
 }
 
 function requestTimestamp(value, skew) {
@@ -297,31 +329,42 @@ export async function handleMak(request, env, db) {
       return deny(config, 'INVALID_DEVICE_PROOF', requestId, 'Device signature verification failed', 403);
     }
 
-    // Host binding: strict pre-registration, or cryptographically authenticated
-    // first-use binding. Later requests must always match the stored host.
-    let hostRow = await getHostForLicense(db, license.id);
+    // Host binding: one license may own up to max_packages host packages.
+    // AUTO binds an unseen package on first authenticated use; MANUAL only
+    // accepts packages registered by an administrator. Every later request
+    // must match the stored package + signing certificate.
+    const hostAppName = String(host.app_name || '').trim().slice(0, 120);
+    let hostRow = await findHostForLicensePackage(db, license.id, hostPackage);
     if (hostRow) {
       if (String(hostRow.status).toUpperCase() !== 'ACTIVE') {
         await logEvent(db, { license_id: license.id, host_id: hostRow.id, event_type: 'AUTH_FAIL', result: 'DENY', error_code: 'HOST_PACKAGE_MISMATCH', request_id: requestId, ip_hash: ipHash, detail: 'Host binding suspended' });
         return deny(config, 'HOST_PACKAGE_MISMATCH', requestId, 'Host binding is suspended', 403);
-      }
-      if (String(hostRow.package_name) !== hostPackage) {
-        await logEvent(db, { license_id: license.id, host_id: hostRow.id, event_type: 'AUTH_FAIL', result: 'DENY', error_code: 'HOST_PACKAGE_MISMATCH', request_id: requestId, ip_hash: ipHash, detail: 'Host package mismatch' });
-        return deny(config, 'HOST_PACKAGE_MISMATCH', requestId, 'Host package mismatch', 403);
       }
       if (String(hostRow.cert_sha256).toLowerCase() !== hostCert) {
         await logEvent(db, { license_id: license.id, host_id: hostRow.id, event_type: 'AUTH_FAIL', result: 'DENY', error_code: 'HOST_CERT_MISMATCH', request_id: requestId, ip_hash: ipHash, detail: 'Host certificate mismatch' });
         return deny(config, 'HOST_CERT_MISMATCH', requestId, 'Host signing certificate mismatch', 403);
       }
     } else {
-      if (String(license.host_bind_mode).toUpperCase() === 'STRICT') {
-        await logEvent(db, { license_id: license.id, event_type: 'AUTH_FAIL', result: 'DENY', error_code: 'HOST_PACKAGE_MISMATCH', request_id: requestId, ip_hash: ipHash, detail: 'Strict host binding has no registered host' });
-        return deny(config, 'HOST_PACKAGE_MISMATCH', requestId, 'No host is registered for this license', 403);
+      const bindMode = String(license.host_bind_mode || 'AUTO').toUpperCase();
+      if (bindMode === 'MANUAL' || bindMode === 'STRICT') {
+        await logEvent(db, { license_id: license.id, event_type: 'AUTH_FAIL', result: 'DENY', error_code: 'HOST_PACKAGE_MISMATCH', request_id: requestId, ip_hash: ipHash, detail: 'Manual binding: host package is not pre-registered' });
+        return deny(config, 'HOST_PACKAGE_MISMATCH', requestId, 'Host package is not registered for this license', 403);
       }
-      hostRow = await upsertHost(db, license.id, { package_name: hostPackage, cert_sha256: hostCert });
-      await logEvent(db, { license_id: license.id, host_id: hostRow?.id, event_type: 'HOST_BOUND', result: 'SUCCESS', request_id: requestId, ip_hash: ipHash, detail: 'Host bound on first authenticated use' });
+      const created = await createHostAtomic(db, license.id, {
+        package_name: hostPackage,
+        app_name: hostAppName,
+        cert_sha256: hostCert,
+        maxPackages: license.max_packages,
+      });
+      if (!created.ok) {
+        await logEvent(db, { license_id: license.id, event_type: 'AUTH_FAIL', result: 'DENY', error_code: 'PACKAGE_LIMIT_REACHED', request_id: requestId, ip_hash: ipHash, detail: 'Host package limit reached' });
+        return deny(config, 'PACKAGE_LIMIT_REACHED', requestId, 'Host package limit reached', 403);
+      }
+      hostRow = created.host;
+      await logEvent(db, { license_id: license.id, host_id: hostRow?.id, event_type: 'HOST_BOUND', result: 'SUCCESS', request_id: requestId, ip_hash: ipHash, detail: 'Host package auto-bound: ' + hostPackage + (hostAppName ? ' (' + hostAppName + ')' : '') });
     }
 
+    const reportedDeviceId = cleanDeviceId(device.device_id);
     const fingerprint = await fingerprintDevicePublicKey(norm);
     let deviceRow = await getDeviceByLicenseKey(db, license.id, norm.storage);
     if (deviceRow && String(deviceRow.status).toUpperCase() !== 'ACTIVE') {
@@ -329,15 +372,16 @@ export async function handleMak(request, env, db) {
       return deny(config, 'DEVICE_MISMATCH', requestId, 'Device is not authorized', 403);
     }
     if (!deviceRow) {
-      const registration = await registerDeviceAtomic(db, license.id, norm.storage, fingerprint);
+      const registration = await registerDeviceAtomic(db, license.id, norm.storage, fingerprint, reportedDeviceId);
       if (!registration.ok) {
         await logEvent(db, { license_id: license.id, event_type: 'AUTH_FAIL', result: 'DENY', error_code: registration.code, request_id: requestId, ip_hash: ipHash, detail: 'Device registration rejected' });
         return deny(config, registration.code, requestId,
           registration.code === 'ACTIVATION_LIMIT_REACHED' ? 'Activation limit reached' : 'Device limit reached', 403);
       }
       deviceRow = registration.device;
-      await logEvent(db, { license_id: license.id, device_id: deviceRow.id, host_id: hostRow?.id, event_type: 'DEVICE_REGISTERED', result: 'SUCCESS', request_id: requestId, ip_hash: ipHash, detail: 'Device registered: ' + fingerprint });
+      await logEvent(db, { license_id: license.id, device_id: deviceRow.id, host_id: hostRow?.id, event_type: 'DEVICE_REGISTERED', result: 'SUCCESS', device_uid: reportedDeviceId, request_id: requestId, ip_hash: ipHash, detail: 'Device registered: ' + fingerprint });
     } else {
+      await auditDeviceId(db, deviceRow, reportedDeviceId, { licenseId: license.id, hostId: hostRow?.id, requestId, ipHash });
       await touchDevice(db, deviceRow.id);
     }
 
@@ -356,8 +400,8 @@ export async function handleMak(request, env, db) {
     }
 
     await touchLicense(db, license.id);
-    if (hostRow) await touchHost(db, license.id);
-    await logEvent(db, { license_id: license.id, device_id: deviceRow.id, host_id: hostRow?.id, event_type: 'AUTH_SUCCESS', result: 'ALLOW', request_id: requestId, ip_hash: ipHash, detail: 'Host and device authorized' });
+    if (hostRow) await touchHost(db, hostRow.id);
+    await logEvent(db, { license_id: license.id, device_id: deviceRow.id, host_id: hostRow?.id, event_type: 'AUTH_SUCCESS', result: 'ALLOW', device_uid: reportedDeviceId, request_id: requestId, ip_hash: ipHash, detail: 'Host and device authorized' });
 
     const payload = {
       protocol: PROTOCOL,
@@ -366,7 +410,7 @@ export async function handleMak(request, env, db) {
       request_id: requestId,
       license: { license_uid: license.license_uid, expires_at: license.expires_at || null },
       session: { session_id: session.id, issued_at: session.issued_at, expires_at: session.expires_at },
-      host: { package_name: hostPackage, signing_cert_sha256: hostCert },
+      host: { package_name: hostPackage, app_name: hostRow?.app_name || hostAppName || '', signing_cert_sha256: hostCert },
       permissions: { install: false, launch: false, update: false, restart: false },
       challenge: nonce,
       server_time: now,
@@ -395,6 +439,14 @@ export async function handleMak(request, env, db) {
       return deny(config, problem.code, requestId, problem.message, problem.code === 'SESSION_EXPIRED' ? 401 : 403);
     }
 
+    const reportedDeviceId = cleanDeviceId(body.device?.device_id);
+    await auditDeviceId(db, { id: session.device_id, device_id: session.device_text }, reportedDeviceId, {
+      licenseId: session.license_id,
+      hostId: session.host_id,
+      requestId,
+      ipHash,
+    });
+
     const guestInput = body.guest && typeof body.guest === 'object' ? body.guest : {};
     const guestPackage = String(guestInput.package_name || '').trim();
     const guestAppName = String(guestInput.app_name || '').trim();
@@ -420,6 +472,13 @@ export async function handleMak(request, env, db) {
       return deny(config, proofCheck.code, requestId, proofCheck.code === 'DEVICE_MISMATCH' ? 'Device does not own this session' : 'Invalid device proof', 403);
     }
 
+    // AUTO: the first guest app seen for a host package is registered and
+    // bound automatically, up to max_apps distinct packages per host. MANUAL:
+    // only guests an administrator registered may pass.
+    const bindMode = String(session.host_bind_mode || 'AUTO').toUpperCase();
+    const autoBind = bindMode === 'AUTO' || bindMode === 'FIRST_USE';
+    const hostId = Number(session.host_id) || 0;
+
     let guest = await getGuestByIdentity(db, {
       package_name: guestPackage,
       apk_sha256: apkHash,
@@ -428,30 +487,69 @@ export async function handleMak(request, env, db) {
     });
     if (!guest) {
       const rows = await findGuestByPackage(db, guestPackage);
-      let code = 'GUEST_PACKAGE_MISMATCH';
-      let message = 'Guest package is not approved';
-      if (rows.length) {
-        if (!rows.some((r) => String(r.cert_sha256).toLowerCase() === guestCert)) {
-          code = 'GUEST_CERT_MISMATCH';
-          message = 'Guest signing certificate is not approved';
-        } else if (!rows.some((r) => String(r.apk_sha256).toLowerCase() === apkHash)) {
-          code = 'GUEST_HASH_MISMATCH';
-          message = 'Guest APK hash is not approved';
-        } else {
-          code = 'APK_INVALID';
-          message = 'Guest version is not approved';
-        }
+      const certMatch = rows.some((r) => String(r.cert_sha256).toLowerCase() === guestCert);
+      if (rows.length && !certMatch) {
+        await logEvent(db, { license_id: session.license_id, device_id: session.device_id, event_type: 'GUEST_CHECK', result: 'DENY', error_code: 'GUEST_CERT_MISMATCH', request_id: requestId, ip_hash: ipHash, detail: 'Guest signing certificate is not approved' });
+        return deny(config, 'GUEST_CERT_MISMATCH', requestId, 'Guest signing certificate is not approved', 403);
       }
-      await logEvent(db, { license_id: session.license_id, device_id: session.device_id, event_type: 'GUEST_CHECK', result: 'DENY', error_code: code, request_id: requestId, ip_hash: ipHash, detail: message });
-      return deny(config, code, requestId, message, 403);
+      if (!autoBind) {
+        let code = 'GUEST_PACKAGE_MISMATCH';
+        let message = 'Guest package is not approved';
+        if (rows.length) {
+          if (!rows.some((r) => String(r.apk_sha256).toLowerCase() === apkHash)) {
+            code = 'GUEST_HASH_MISMATCH';
+            message = 'Guest APK hash is not approved';
+          } else {
+            code = 'APK_INVALID';
+            message = 'Guest version is not approved';
+          }
+        }
+        await logEvent(db, { license_id: session.license_id, device_id: session.device_id, event_type: 'GUEST_CHECK', result: 'DENY', error_code: code, request_id: requestId, ip_hash: ipHash, detail: message });
+        return deny(config, code, requestId, message, 403);
+      }
+      // AUTO: same signer (or brand-new package) -> register this APK version.
+      let guestId = 0;
+      try {
+        guestId = await createGuest(db, {
+          package_name: guestPackage,
+          app_name: guestAppName,
+          apk_sha256: apkHash,
+          cert_sha256: guestCert,
+          version_code: versionCode,
+        });
+      } catch {
+        guest = await getGuestByIdentity(db, { package_name: guestPackage, apk_sha256: apkHash, cert_sha256: guestCert, version_code: versionCode });
+      }
+      if (!guest) guest = await getGuestById(db, guestId);
+      if (guest) {
+        await logEvent(db, { license_id: session.license_id, device_id: session.device_id, host_id: hostId || null, guest_app_id: guest.id, event_type: 'GUEST_REGISTERED', result: 'SUCCESS', device_uid: reportedDeviceId, request_id: requestId, ip_hash: ipHash, detail: 'Guest auto-registered: ' + guestPackage + (guestAppName ? ' (' + guestAppName + ')' : '') });
+      }
+    }
+    if (!guest) {
+      await logEvent(db, { license_id: session.license_id, device_id: session.device_id, event_type: 'GUEST_CHECK', result: 'DENY', error_code: 'APK_INVALID', request_id: requestId, ip_hash: ipHash, detail: 'Guest identity could not be registered' });
+      return deny(config, 'APK_INVALID', requestId, 'Guest identity is invalid', 400);
     }
     if (String(guest.status).toUpperCase() !== 'ACTIVE') {
       await logEvent(db, { license_id: session.license_id, guest_app_id: guest.id, event_type: 'GUEST_CHECK', result: 'DENY', error_code: 'GUEST_PACKAGE_MISMATCH', request_id: requestId, ip_hash: ipHash, detail: 'Guest application is suspended' });
       return deny(config, 'GUEST_PACKAGE_MISMATCH', requestId, 'Guest application is suspended', 403);
     }
-    const binding = await getBinding(db, session.license_id, guest.id);
-    if (!binding || String(binding.status).toUpperCase() !== 'ACTIVE') {
-      await logEvent(db, { license_id: session.license_id, guest_app_id: guest.id, event_type: 'GUEST_CHECK', result: 'DENY', error_code: 'GUEST_PACKAGE_MISMATCH', request_id: requestId, ip_hash: ipHash, detail: 'Guest is not bound to this license' });
+
+    let binding = await getBinding(db, session.license_id, guest.id, hostId);
+    if (!binding) {
+      if (!autoBind) {
+        await logEvent(db, { license_id: session.license_id, guest_app_id: guest.id, event_type: 'GUEST_CHECK', result: 'DENY', error_code: 'GUEST_PACKAGE_MISMATCH', request_id: requestId, ip_hash: ipHash, detail: 'Guest is not bound to this license' });
+        return deny(config, 'GUEST_PACKAGE_MISMATCH', requestId, 'Guest is not bound to this license', 403);
+      }
+      const auto = await bindGuestAtomic(db, session.license_id, hostId, guest.id, guest.package_name, {}, session.max_apps);
+      if (!auto.ok) {
+        await logEvent(db, { license_id: session.license_id, guest_app_id: guest.id, host_id: hostId || null, event_type: 'GUEST_CHECK', result: 'DENY', error_code: 'APP_LIMIT_REACHED', request_id: requestId, ip_hash: ipHash, detail: 'Per-package guest app limit reached (' + Number(session.max_apps || 0) + ')' });
+        return deny(config, 'APP_LIMIT_REACHED', requestId, 'Guest app limit reached for this host package', 403);
+      }
+      binding = auto.binding;
+      await logEvent(db, { license_id: session.license_id, guest_app_id: guest.id, host_id: hostId || null, event_type: 'GUEST_BOUND', result: 'SUCCESS', device_uid: reportedDeviceId, request_id: requestId, ip_hash: ipHash, detail: 'Guest auto-bound: ' + guest.package_name });
+    }
+    if (String(binding.status).toUpperCase() !== 'ACTIVE') {
+      await logEvent(db, { license_id: session.license_id, guest_app_id: guest.id, event_type: 'GUEST_CHECK', result: 'DENY', error_code: 'GUEST_PACKAGE_MISMATCH', request_id: requestId, ip_hash: ipHash, detail: 'Guest binding is not active' });
       return deny(config, 'GUEST_PACKAGE_MISMATCH', requestId, 'Guest is not bound to this license', 403);
     }
     const permKey = { INSTALL: 'can_install', LAUNCH: 'can_launch', UPDATE: 'can_update', RESTART: 'can_restart' }[operation];
@@ -506,6 +604,13 @@ export async function handleMak(request, env, db) {
       await logEvent(db, { license_id: session?.license_id, device_id: session?.device_id, event_type: isRenew ? 'RENEW' : 'HEARTBEAT', result: 'DENY', error_code: problem.code, request_id: requestId, ip_hash: ipHash, detail: problem.message });
       return deny(config, problem.code, requestId, problem.message, problem.code === 'SESSION_EXPIRED' ? 401 : 403);
     }
+    const reportedDeviceId = cleanDeviceId(body.device?.device_id);
+    await auditDeviceId(db, { id: session.device_id, device_id: session.device_text }, reportedDeviceId, {
+      licenseId: session.license_id,
+      hostId: session.host_id,
+      requestId,
+      ipHash,
+    });
     const proofCheck = await verifySessionDeviceProof({
       db,
       session,
@@ -546,7 +651,7 @@ export async function handleMak(request, env, db) {
 
     await heartbeatSession(db, sessionId);
     await touchDevice(db, session.device_id);
-    await touchHost(db, session.license_id);
+    if (session.host_id) await touchHost(db, session.host_id);
     return apiJson(signed(config, {
       protocol: PROTOCOL,
       decision: 'ALLOW',
@@ -582,6 +687,7 @@ export async function handleMak(request, env, db) {
       event_type: 'NATIVE_' + eventType,
       result: errorCode ? 'ERROR' : 'INFO',
       error_code: errorCode,
+      device_uid: cleanDeviceId(body.device?.device_id),
       detail,
       request_id: requestId,
       ip_hash: ipHash,

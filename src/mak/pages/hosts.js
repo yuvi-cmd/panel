@@ -12,7 +12,7 @@ export function hostsPage({ hosts = [], counts = {}, q = '', status = 'ALL', csr
         <a class="cell-main link" href="/licenses/${h.license_id}">${esc(h.label || h.license_uid)}</a>
         <div class="cell-sub mono">${esc(h.license_uid)}</div>
       </td>
-      <td data-label="Package"><span class="mono">${esc(h.package_name)}</span></td>
+      <td data-label="Package"><span class="mono">${esc(h.package_name)}</span>${h.app_name ? `<div class="cell-sub">${esc(h.app_name)}</div>` : ''}</td>
       <td data-label="Certificate"><span class="mono small" title="${esc(h.cert_sha256)}">${esc(truncate(h.cert_sha256, 24))}</span></td>
       <td data-label="Mode"><span class="chip acc">${h.version_policy === 'ANY' ? 'CERT + PKG' : esc(h.version_policy)}</span></td>
       <td data-label="Last seen">${timeCell(h.last_seen)}</td>
@@ -20,18 +20,20 @@ export function hostsPage({ hosts = [], counts = {}, q = '', status = 'ALL', csr
       <td data-label="" class="actions">
         <form method="post" action="/hosts/action" style="display:inline">
           ${csrfInput(csrf)}<input type="hidden" name="license_id" value="${h.license_id}">
+          <input type="hidden" name="host_id" value="${h.id}">
           <input type="hidden" name="action" value="${active ? 'suspend' : 'activate'}">
           <button class="btn btn-sm ${active ? 'btn-danger' : 'btn-primary'}" type="submit"
-            onclick="return askConfirm(this.form,'${active ? 'Suspend' : 'Reactivate'} this host binding?','${active ? 'Active sessions are revoked and the host is denied until reactivated.' : 'The stored package + certificate will be accepted again.'}','${active ? 'danger' : ''}')">
+            onclick="return askConfirm(this.form,'${active ? 'Suspend' : 'Reactivate'} this host package?','${active ? 'Active sessions are revoked and this package is denied until reactivated.' : 'The stored package + certificate will be accepted again.'}','${active ? 'danger' : ''}')">
             ${icon(active ? 'ban' : 'check', 13)} ${active ? 'Suspend' : 'Activate'}
           </button>
         </form>
         <form method="post" action="/hosts/action" style="display:inline">
           ${csrfInput(csrf)}<input type="hidden" name="license_id" value="${h.license_id}">
+          <input type="hidden" name="host_id" value="${h.id}">
           <input type="hidden" name="action" value="reset">
           <button class="btn btn-sm btn-ghost" type="submit"
-            onclick="return askConfirm(this.form,'Reset host binding?','The package + certificate pin is removed and active sessions are revoked. The next authenticated host will bind again.','danger')">
-            ${icon('rotate', 13)} Reset
+            onclick="return askConfirm(this.form,'Remove this host package?','The package + certificate pin is removed and active sessions are revoked. It can bind again in AUTO mode.','danger')">
+            ${icon('rotate', 13)} Remove
           </button>
         </form>
       </td>
@@ -42,7 +44,7 @@ export function hostsPage({ hosts = [], counts = {}, q = '', status = 'ALL', csr
     ${pageHeader({
       eyebrow: 'Host control',
       title: 'Host bindings',
-      subtitle: 'One host APK per license. Package name and signing certificate are both pinned.',
+      subtitle: 'Every host APK package under a license is pinned by package name and signing certificate, up to the license package limit.',
       actions: `<a class="btn" href="/licenses">${icon('key', 16)} Licenses</a><a class="btn btn-primary" href="/licenses/new">${icon('plus', 16)} Issue MAK</a>`,
     })}
     ${!server.enabled ? `<div class="notice">${icon('alert', 17)}<div><b>Activation server is OFF.</b> Host authentication is denied until it is switched on.</div></div>` : ''}
@@ -69,8 +71,8 @@ export function hostsPage({ hosts = [], counts = {}, q = '', status = 'ALL', csr
       <div class="card">
         ${sectionHead('Binding rules')}
         <div class="timeline">
-          <div class="timeline-item"><span class="timeline-dot"></span><div class="timeline-main"><b>First use</b><p>Without a pre-registered host, the first valid MAK + device proof pins package and certificate.</p></div></div>
-          <div class="timeline-item"><span class="timeline-dot"></span><div class="timeline-main"><b>Strict mode</b><p>The license can require a host that was pre-registered by an administrator.</p></div></div>
+          <div class="timeline-item"><span class="timeline-dot"></span><div class="timeline-main"><b>AUTO mode</b><p>The first valid MAK + device proof binds each new package (with its app name and certificate), up to Max host packages.</p></div></div>
+          <div class="timeline-item"><span class="timeline-dot"></span><div class="timeline-main"><b>MANUAL mode</b><p>Only host packages pre-registered by an administrator can authenticate.</p></div></div>
           <div class="timeline-item"><span class="timeline-dot bad"></span><div class="timeline-main"><b>Mismatch is fatal</b><p>Any package or certificate difference returns HOST_PACKAGE_MISMATCH / HOST_CERT_MISMATCH.</p></div></div>
         </div>
       </div>

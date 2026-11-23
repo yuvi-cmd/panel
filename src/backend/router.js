@@ -854,13 +854,17 @@ export default {
       const values = {
         label: String(sp.get('label') || ''),
         user_ref: String(sp.get('user_ref') || ''),
+        duration: String(sp.get('duration') || '30'),
         expires_on: String(sp.get('expires_on') || ''),
         max_devices: String(sp.get('max_devices') || ''),
         max_activations: String(sp.get('max_activations') || ''),
         session_ttl: String(sp.get('session_ttl') || ''),
+        max_packages: String(sp.get('max_packages') || ''),
+        max_apps: String(sp.get('max_apps') || ''),
         host_package: String(sp.get('host_package') || ''),
+        host_app_name: String(sp.get('host_app_name') || ''),
         host_cert: String(sp.get('host_cert') || ''),
-        host_bind_mode: String(sp.get('host_bind_mode') || 'FIRST_USE'),
+        host_bind_mode: String(sp.get('host_bind_mode') || 'AUTO'),
         notes: String(sp.get('notes') || ''),
         guest_ids: sp.getAll('guest_ids'),
       };

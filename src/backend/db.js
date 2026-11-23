@@ -107,6 +107,110 @@ async function runStatements(db, sql) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// MAK migrations. D1/SQLite cannot drop a UNIQUE constraint in place, so the
+// two tables that gained a wider uniqueness key are rebuilt once. Every step
+// is idempotent: it inspects sqlite_master / PRAGMA table_info first.
+// ---------------------------------------------------------------------------
+async function makTableSql(db, name) {
+  const row = await db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?")
+    .bind(String(name)).first().catch(() => null);
+  return row ? String(row.sql || '') : '';
+}
+
+async function makColumnExists(db, table, column) {
+  const rows = await db.prepare(`PRAGMA table_info(${table})`).all().catch(() => ({ results: [] }));
+  return (rows.results || []).some((r) => String(r.name) === String(column));
+}
+
+async function addMakColumn(db, table, column, definition) {
+  if (await makColumnExists(db, table, column)) return;
+  try { await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run(); }
+  catch (err) { console.error('mak_alter_failed', table + '.' + column, String(err)); }
+}
+
+async function rebuildMakHosts(db) {
+  const hasAppName = await makColumnExists(db, 'mak_hosts', 'app_name');
+  const hasLastSeen = await makColumnExists(db, 'mak_hosts', 'last_seen');
+  await db.prepare('DROP TABLE IF EXISTS mak_hosts_migrate').run();
+  await db.prepare(`CREATE TABLE mak_hosts_migrate (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    license_id INTEGER NOT NULL,
+    package_name TEXT NOT NULL,
+    app_name TEXT NOT NULL DEFAULT '',
+    cert_sha256 TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    version_policy TEXT NOT NULL DEFAULT 'ANY',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    last_seen INTEGER,
+    UNIQUE(license_id, package_name)
+  )`).run();
+  await db.prepare(
+    `INSERT INTO mak_hosts_migrate
+      (id,license_id,package_name,app_name,cert_sha256,status,version_policy,created_at,updated_at,last_seen)
+     SELECT id,license_id,package_name,${hasAppName ? 'app_name' : "''"},cert_sha256,status,version_policy,created_at,updated_at,${hasLastSeen ? 'last_seen' : 'NULL'}
+       FROM mak_hosts`,
+  ).run();
+  await db.prepare('DROP TABLE mak_hosts').run();
+  await db.prepare('ALTER TABLE mak_hosts_migrate RENAME TO mak_hosts').run();
+  await db.prepare('CREATE INDEX IF NOT EXISTS idx_mak_hosts_license ON mak_hosts(license_id)').run();
+  await db.prepare('CREATE INDEX IF NOT EXISTS idx_mak_hosts_package ON mak_hosts(package_name)').run();
+  await db.prepare('CREATE INDEX IF NOT EXISTS idx_mak_hosts_status ON mak_hosts(status)').run();
+}
+
+async function rebuildMakBindings(db) {
+  await db.prepare('DROP TABLE IF EXISTS mak_bindings_migrate').run();
+  await db.prepare(`CREATE TABLE mak_bindings_migrate (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    license_id INTEGER NOT NULL,
+    host_id INTEGER NOT NULL DEFAULT 0,
+    guest_app_id INTEGER NOT NULL,
+    can_install INTEGER NOT NULL DEFAULT 1,
+    can_launch INTEGER NOT NULL DEFAULT 1,
+    can_update INTEGER NOT NULL DEFAULT 1,
+    can_restart INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(license_id, host_id, guest_app_id)
+  )`).run();
+  await db.prepare(
+    `INSERT INTO mak_bindings_migrate
+      (id,license_id,host_id,guest_app_id,can_install,can_launch,can_update,can_restart,status,created_at,updated_at)
+     SELECT id,license_id,0,guest_app_id,can_install,can_launch,can_update,can_restart,status,created_at,updated_at
+       FROM mak_bindings`,
+  ).run();
+  await db.prepare('DROP TABLE mak_bindings').run();
+  await db.prepare('ALTER TABLE mak_bindings_migrate RENAME TO mak_bindings').run();
+  await db.prepare('CREATE INDEX IF NOT EXISTS idx_mak_bindings_license ON mak_bindings(license_id)').run();
+  await db.prepare('CREATE INDEX IF NOT EXISTS idx_mak_bindings_host ON mak_bindings(license_id, host_id)').run();
+  await db.prepare('CREATE INDEX IF NOT EXISTS idx_mak_bindings_guest ON mak_bindings(guest_app_id)').run();
+}
+
+async function migrateMakSchema(db) {
+  // New policy columns.
+  await addMakColumn(db, 'mak_licenses', 'max_packages', 'INTEGER NOT NULL DEFAULT 1');
+  await addMakColumn(db, 'mak_licenses', 'max_apps', 'INTEGER NOT NULL DEFAULT 2');
+  await addMakColumn(db, 'mak_devices', 'device_id', "TEXT NOT NULL DEFAULT ''");
+  await addMakColumn(db, 'mak_devices', 'device_id_first', "TEXT NOT NULL DEFAULT ''");
+  await addMakColumn(db, 'mak_events', 'device_uid', "TEXT NOT NULL DEFAULT ''");
+
+  // Old bind modes become the new AUTO/MANUAL vocabulary.
+  await db.prepare("UPDATE mak_licenses SET host_bind_mode='AUTO' WHERE host_bind_mode='FIRST_USE'").run().catch(() => {});
+  await db.prepare("UPDATE mak_licenses SET host_bind_mode='MANUAL' WHERE host_bind_mode='STRICT'").run().catch(() => {});
+  await db.prepare("UPDATE mak_licenses SET host_bind_mode='AUTO' WHERE host_bind_mode IS NULL OR host_bind_mode=''").run().catch(() => {});
+
+  const hostSql = await makTableSql(db, 'mak_hosts');
+  if (hostSql && (/UNIQUE\s*\(\s*license_id\s*\)/i.test(hostSql) || !(await makColumnExists(db, 'mak_hosts', 'app_name')))) {
+    await rebuildMakHosts(db);
+  }
+
+  if (!(await makColumnExists(db, 'mak_bindings', 'host_id'))) {
+    await rebuildMakBindings(db);
+  }
+}
+
 export async function ensureDB(db, panelCode) {
   // Don't run the full schema + ALTER migration on every request. D1 persists;
   // one successful ensure per isolate is enough until redeploy.
@@ -115,6 +219,7 @@ export async function ensureDB(db, panelCode) {
   // Core panel schema plus the MAK control-plane tables. Both are idempotent.
   await runStatements(db, SCHEMA);
   await runStatements(db, MAK_SCHEMA);
+  await migrateMakSchema(db).catch((err) => console.error('mak_migration_failed', String(err)));
   await installDefaultSettings(db).catch((err) => console.error('mak_settings_failed', String(err)));
 
   for (const [t, c, def] of MIGRATE_COLS) {
