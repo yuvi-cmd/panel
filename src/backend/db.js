@@ -18,9 +18,53 @@ export const DEFAULT_SETTINGS = {
   server_version: '1.0.0',
 };
 
+// Split a SQL script into complete statements. Handles -- line comments and
+// single/double quoted strings; the project schema does not use block comments
+// or statement-level delimiters beyond semicolons.
+export function splitSqlStatements(sql) {
+  const out = [];
+  let current = '';
+  let single = false;
+  let double = false;
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    if (!single && !double && ch === '-' && sql[i + 1] === '-') {
+      while (i < sql.length && sql[i] !== '\n') i++;
+      current += '\n';
+      continue;
+    }
+    if (ch === "'" && !double) {
+      if (single && sql[i + 1] === "'") {
+        current += "''";
+        i++;
+        continue;
+      }
+      single = !single;
+      current += ch;
+      continue;
+    }
+    if (ch === '"' && !single) {
+      double = !double;
+      current += ch;
+      continue;
+    }
+    if (ch === ';' && !single && !double) {
+      if (current.trim()) out.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) out.push(current.trim());
+  return out;
+}
+
 export async function ensureDB(db) {
   if (globalThis.__makDbReady) return;
-  await db.exec(SCHEMA);
+  // D1's exec() splits input by newline, which breaks multi-line DDL. Split
+  // the schema into complete statements and run them as one batch instead.
+  const statements = splitSqlStatements(SCHEMA);
+  if (statements.length) await db.batch(statements.map((sql) => db.prepare(sql)));
   const now = nowS();
   const stmts = Object.entries(DEFAULT_SETTINGS).map(([key, value]) =>
     db.prepare('INSERT OR IGNORE INTO mak_settings (key,value,updated_at) VALUES (?,?,?)').bind(key, value, now),
