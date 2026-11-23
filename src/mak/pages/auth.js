@@ -1,7 +1,7 @@
 import { authLayout } from '../ui.js';
 import { esc } from '../http.js';
 
-export function authPage({ mode = 'login', panelName = 'MUNDO MAK', error = '', ok = '', setupCodeRequired = false, next = '' } = {}) {
+export function authPage({ mode = 'login', panelName = 'MAK Activation', error = '', ok = '', setupCodeRequired = false, next = '' } = {}) {
   const isSetup = mode === 'setup';
   const body = `
     <form method="post" action="${isSetup ? '/setup' : '/login'}" autocomplete="on">

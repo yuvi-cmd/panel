@@ -646,7 +646,7 @@ function navItem(href, active, iconName, label, badge = '') {
 export function layout(o) {
   const {
     title, active = '', admin = {}, server = { enabled: false }, content = '',
-    flash = '', csrf = '', signingReady = false, panelName = 'MUNDO MAK', version = '1.0.0',
+    flash = '', csrf = '', signingReady = false, panelName = 'MAK Activation', version = '1.0.0',
   } = o;
   const initial = esc(String(admin.username || 'A').slice(0, 1).toUpperCase());
   const serverOn = !!server.enabled;
@@ -708,7 +708,7 @@ export function layout(o) {
       ${flashHtml(o.ok, o.err)}
       ${flash}
       ${content}
-      <div class="footer"><span>MUNDO Activation · MAK/1 · Server-authoritative</span><span>${signingReady ? 'Ed25519 signing active' : 'Signing key not configured'}</span></div>
+      <div class="footer"><span>MAK Activation · MAK/1 · Server-authoritative</span><span>${signingReady ? 'Ed25519 signing active' : 'Signing key not configured'}</span></div>
     </main>
   </div>
 </div>
@@ -731,7 +731,7 @@ export function layout(o) {
 </body></html>`;
 }
 
-export function authLayout({ title, subtitle = '', body = '', panelName = 'MUNDO MAK', ok = '', err = '', footer = '' }) {
+export function authLayout({ title, subtitle = '', body = '', panelName = 'MAK Activation', ok = '', err = '', footer = '' }) {
   return `<!DOCTYPE html><html lang="en" data-theme="light"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark"><meta name="theme-color" content="#F5F6F8">

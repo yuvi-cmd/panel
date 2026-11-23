@@ -1,51 +1,52 @@
 import { esc } from '../ui.js';
-import { tabHead } from './dash.js';
 
-export function keysPage(mundoKeys, bcoreKeys) {
-  function card(k, engine) {
-    const usedApps = k.bindings.length;
-    const totalLimit = k.pkg_limit * k.app_limit;
-    const usedPkgs = new Set(k.bindings.map(b => b.pkg_name)).size;
-    const binds = k.bindings.length ? '<div class="space-y-2 mb-4">' + k.bindings.map(b =>
-      '<div class="clay-card p-3 rounded-2xl"><form method="POST" class="flex flex-wrap gap-2 items-center"><input type="hidden" name="action" value="save_bind"><input type="hidden" name="engine" value="' + engine + '"><input type="hidden" name="key_id" value="' + k.id + '"><input type="hidden" name="bind_id" value="' + b.id + '">'
-      + '<input type="text" name="pkg_name" value="' + esc(b.pkg_name) + '" class="clay-card px-3 py-1.5 text-xs font-mono flex-1 rounded-xl" style="min-width:110px"><input type="text" name="app_name" value="' + esc(b.app_name) + '" class="clay-card px-3 py-1.5 text-xs font-mono flex-1 rounded-xl" style="min-width:110px">'
-      + '<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg ' + (b.is_blocked ? 'bg-red-50 text-red-500' : 'bg-emerald-50 text-emerald-500') + '">' + (b.is_blocked ? 'BLOCKED' : 'ACTIVE') + '</span>'
-      + '<button class="clay-card px-2.5 py-1.5 text-xs font-bold text-emerald-600 rounded-xl"><i class="bi bi-check2"></i></button></form>'
-      + '<div class="flex gap-3 mt-2 ml-1">'
-      + (b.is_blocked
-        ? '<button onclick="ca(\'unblock_bind\',' + k.id + ',' + b.id + ',\'' + engine + '\')" class="text-[10px] text-emerald-600 font-bold">Unblock</button>'
-        : '<button onclick="ca(\'block_bind\',' + k.id + ',' + b.id + ',\'' + engine + '\')" class="text-[10px] text-amber-600 font-bold">Block</button>')
-      + '<button onclick="ca(\'delete_bind\',' + k.id + ',' + b.id + ',\'' + engine + '\')" class="text-[10px] text-red-600 font-bold">Delete</button></div></div>'
-    ).join('') + '</div>' : '<p class="text-xs text-slate-400 italic mb-3">No apps bound yet.</p>';
-    const addForm = usedApps < totalLimit
-      ? '<form method="POST" class="clay-card p-3 flex flex-wrap gap-2 items-center rounded-2xl"><input type="hidden" name="action" value="add_bind"><input type="hidden" name="engine" value="' + engine + '"><input type="hidden" name="key_id" value="' + k.id + '"><input type="text" name="pkg_name" placeholder="pkg_name" required class="clay-card px-3 py-1.5 text-xs font-mono flex-1 rounded-xl" style="min-width:110px"><input type="text" name="app_name" placeholder="app_name" required class="clay-card px-3 py-1.5 text-xs font-mono flex-1 rounded-xl" style="min-width:110px"><button class="btn-premium px-3 py-1.5 rounded-xl text-xs font-bold"><i class="bi bi-plus-lg"></i> Add</button></form>'
-      : '<div class="text-[11px] text-amber-600 bg-amber-50 rounded-lg p-2 font-bold text-center">App limit reached (' + totalLimit + ')</div>';
-    return '<div class="glass-card overflow-hidden"><div class="p-4 md:p-5">'
-      + '<div class="flex items-start justify-between gap-3 mb-3"><div class="flex-1 min-w-0"><div class="flex items-center gap-2 flex-wrap mb-1">'
-      + '<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg ' + (k.is_blocked ? 'bg-red-50 text-red-500' : 'bg-emerald-50 text-emerald-500') + '">' + (k.is_blocked ? 'BLOCKED' : 'ACTIVE') + '</span>'
-      + '<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-purple-50 text-purple-500">' + k.duration_days + 'D</span>'
-      + (k.feature1 ? '<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-500">F1</span>' : '')
-      + (k.feature2 ? '<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-pink-50 text-pink-500">F2</span>' : '')
-      + '</div><p id="kt-' + engine + '-' + k.id + '" class="font-mono text-sm md:text-base font-bold text-slate-800 break-all blur-sm select-none">' + esc(k.sdk_key) + '</p></div>'
-      + '<button onclick="document.getElementById(\'pn-' + engine + '-' + k.id + '\').classList.toggle(\'hidden\')" class="text-slate-400"><i class="bi bi-chevron-down"></i></button></div>'
-      + '<div class="grid grid-cols-3 gap-2 mb-3"><div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">PKG</p><p class="text-xs font-black">' + usedPkgs + '/' + k.pkg_limit + '</p></div><div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">APP</p><p class="text-xs font-black">' + usedApps + '/' + totalLimit + '</p></div><div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">FREE</p><p class="text-xs font-black text-emerald-600">' + Math.max(0, totalLimit - usedApps) + '</p></div></div>'
-      + '<div class="flex flex-wrap gap-2"><button onclick="tb(\'' + engine + '-' + k.id + '\',this)" class="clay-card px-3 py-1.5 text-xs font-bold text-slate-600 rounded-xl"><i class="bi bi-eye"></i> Show</button>'
-      + '<button onclick="doCopy(\'' + esc(k.sdk_key) + '\',this)" class="clay-card px-3 py-1.5 text-xs font-bold text-slate-600 rounded-xl"><i class="bi bi-clipboard"></i> Copy</button>'
-      + (k.is_blocked
-        ? '<button onclick="ca(\'unblock_key\',' + k.id + ',0,\'' + engine + '\')" class="clay-card px-3 py-1.5 text-xs font-bold text-emerald-600 rounded-xl"><i class="bi bi-unlock"></i> Unblock</button>'
-        : '<button onclick="ca(\'block_key\',' + k.id + ',0,\'' + engine + '\')" class="clay-card px-3 py-1.5 text-xs font-bold text-amber-600 rounded-xl"><i class="bi bi-lock"></i> Block</button>')
-      + '<button onclick="ca(\'delete_key\',' + k.id + ',0,\'' + engine + '\')" class="clay-card px-3 py-1.5 text-xs font-bold text-red-600 rounded-xl"><i class="bi bi-trash"></i> Delete</button></div></div>'
-      + '<div id="pn-' + engine + '-' + k.id + '" class="hidden border-t border-slate-200 p-4 bg-slate-50"><h4 class="text-xs font-extrabold text-slate-500 uppercase mb-3">Bound Packages / Apps</h4>' + binds + addForm + '</div></div>';
-  }
-  function section(keys, engine) {
-    if (!keys.length) return '<div class="glass-card p-10 text-center"><i class="bi bi-inbox text-5xl text-slate-300 mb-3"></i><p class="text-slate-500 text-sm">No ' + engine + ' keys found</p><a href="/sdk/generate" class="inline-block mt-3 btn-premium px-6 py-2.5 rounded-xl text-xs font-bold">Generate Key</a></div>';
-    return '<div class="space-y-4">' + keys.map(k => card(k, engine)).join('') + '</div>';
-  }
-  return '<div class="dual-tab-wrapper" id="keysWrapper">'
-    + tabHead('SDK Keys', 'bi-view-list', 'Manage keys & bindings', 'keysTabs', mundoKeys.length, bcoreKeys.length)
-    + '<div class="tab-content-panel active" data-tab="mundo">' + section(mundoKeys, 'MUNDO') + '</div>'
-    + '<div class="tab-content-panel" data-tab="bcore">' + section(bcoreKeys, 'BCORE') + '</div></div>'
-    + '<form id="act" method="POST" style="display:none"><input type="hidden" name="action" id="a-act"><input type="hidden" name="engine" id="a-eng"><input type="hidden" name="key_id" id="a-key"><input type="hidden" name="bind_id" id="a-bind"></form>'
-    + '<script>function tb(id,btn){const el=document.getElementById("kt-"+id);if(!el)return;el.classList.toggle("blur-sm");btn.innerHTML=el.classList.contains("blur-sm")?\'<i class="bi bi-eye"></i> Show\':\'<i class="bi bi-eye-slash"></i> Hide\';}'
-    + 'function ca(action,key,bind,eng){if(!confirm("Are you sure?"))return;document.getElementById("a-act").value=action;document.getElementById("a-eng").value=eng;document.getElementById("a-key").value=key;document.getElementById("a-bind").value=bind;document.getElementById("act").submit();}</script>';
+function fmtDate(seconds) {
+  if (!seconds) return 'No expiry';
+  const d = new Date(Number(seconds) * 1000);
+  if (!Number.isFinite(d.getTime())) return '—';
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function statusChip(status) {
+  const s = String(status || '').toUpperCase();
+  const cls = s === 'ACTIVE' ? 'bg-emerald-50 text-emerald-600'
+    : s === 'SUSPENDED' ? 'bg-amber-50 text-amber-600'
+      : 'bg-red-50 text-red-600';
+  return '<span class="text-[10px] font-extrabold px-2 py-1 rounded-lg uppercase ' + cls + '">' + esc(s || 'UNKNOWN') + '</span>';
+}
+
+export function keysPage(o) {
+  const licenses = o.licenses || [];
+  const counts = o.counts || {};
+  const q = o.q || '';
+  const status = o.status || 'ALL';
+
+  const filters = [['ALL', 'All', counts.total], ['ACTIVE', 'Active', counts.active], ['SUSPENDED', 'Suspended', counts.suspended], ['EXPIRED', 'Expired', counts.expired], ['REVOKED', 'Revoked', counts.revoked]];
+  const filterHtml = '<div class="flex flex-wrap gap-2 mb-4">' + filters.map(([value, label, count]) =>
+    '<a href="/sdk/keys?status=' + encodeURIComponent(value) + (q ? '&q=' + encodeURIComponent(q) : '') + '" class="clay-card px-3 py-1.5 text-xs font-bold rounded-xl ' + (status === value ? 'text-purple-600' : 'text-slate-500') + '">' + esc(label) + ' <span class="opacity-60">' + Number(count || 0) + '</span></a>'
+  ).join('') + '</div>';
+
+  const rows = licenses.length ? licenses.map((l) => {
+    const hosts = l.host_package ? '<span class="text-[10px] font-mono text-slate-500 break-all">' + esc(l.host_package) + '</span>' : '<span class="text-[10px] text-slate-400">First-use / unbound</span>';
+    return '<div class="glass-card p-4 md:p-5"><div class="flex flex-wrap items-start justify-between gap-3">'
+      + '<div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2 mb-1">' + statusChip(l.status)
+      + '<span class="text-[10px] font-extrabold px-2 py-1 rounded-lg bg-purple-50 text-purple-600">' + esc(fmtDate(l.expires_at)) + '</span></div>'
+      + '<p class="text-sm md:text-base font-bold text-slate-800 truncate">' + esc(l.label || l.license_uid) + '</p>'
+      + '<p class="text-[10px] font-mono text-slate-400 mt-0.5 break-all">' + esc(l.license_uid) + (l.user_ref ? ' · ' + esc(l.user_ref) : '') + '</p>'
+      + '<div class="mt-2">' + hosts + '</div></div>'
+      + '<a href="/mak/licenses/' + Number(l.id) + '" class="btn-premium px-4 py-2 rounded-xl text-xs font-bold">Manage</a></div>'
+      + '<div class="grid grid-cols-3 gap-2 mt-4">'
+      + '<div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">DEVICES</p><p class="text-xs font-black">' + Number(l.device_count || 0) + ' / ' + Number(l.max_devices || 0) + '</p></div>'
+      + '<div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">ACTIVATIONS</p><p class="text-xs font-black">' + Number(l.activation_count || 0) + ' / ' + Number(l.max_activations || 0) + '</p></div>'
+      + '<div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">GUESTS</p><p class="text-xs font-black">' + Number(l.guest_count || 0) + '</p></div></div></div>';
+  }).join('') : '<div class="glass-card p-10 text-center"><i class="bi bi-inbox text-5xl text-slate-300 mb-3"></i><p class="text-slate-500 text-sm">No MAK licenses found</p><a href="/sdk/generate" class="inline-block mt-3 btn-premium px-6 py-2.5 rounded-xl text-xs font-bold">Generate MAK</a></div>';
+
+  return '<div class="pagehead"><div class="ph-ic"><i class="bi bi-view-list"></i></div><div class="flex-1 min-w-0"><h1 class="truncate">MAK Keys</h1><p class="truncate">Issued credentials, bindings and device limits</p></div></div>'
+    + '<div class="glass-card p-4 mb-4"><form method="GET" action="/sdk/keys" class="flex flex-wrap gap-2 items-center">'
+    + '<input type="hidden" name="status" value="' + esc(status) + '">'
+    + '<div class="clay-card px-3 py-2 flex items-center gap-2 flex-1 rounded-xl" style="min-width:220px"><i class="bi bi-search text-slate-400"></i><input name="q" value="' + esc(q) + '" placeholder="Search license ID, label, user or host package" class="bg-transparent text-sm flex-1 outline-none"></div>'
+    + '<button class="btn-premium px-4 py-2 rounded-xl text-xs font-bold">Search</button></form></div>'
+    + filterHtml
+    + '<div class="space-y-3">' + rows + '</div>'
+    + '<p class="text-[11px] text-slate-400 mt-4"><i class="bi bi-info-circle"></i> Raw MAK values are never stored. Use the MAK console to rotate a credential if a customer loses it.</p>';
 }

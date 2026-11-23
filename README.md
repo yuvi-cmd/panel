@@ -40,7 +40,9 @@ step is needed after a deploy.
   `/generate` (pricing + balance + bulk + server type), `/keys` (reset/edit/extend/bulk)
 - `/users`, `/admins`, `/permissions`, `/referral` (OWNER/ADMIN rules PHP jaise)
 - `/server` (maintenance + mod config), `/settings` (password + branding + API URLs), `/aes` (AES rotate + activation keys), `/api-test`, `/loader-manager`, `/create-panel` (id==1)
-- `/sdk/*` — MUNDO + BCORE dashboard/generate/keys/server/hash (sirf main OWNER id==1)
+- `/sdk` — MAK dashboard, `/sdk/generate` issue MAK, `/sdk/keys` MAK licenses,
+  `/sdk/server` MAK/1 endpoints + kill switch, `/sdk/hash` universal lib hash
+  (sirf main OWNER id==1 / PROFESSOR). BCORE/MUNDO flow removed.
 - `/opencode` — standalone OpenCode Android control plane with its **own login**
   (`/opencode/login`), global APK ON/OFF, Gmail accounts, device lock, notices and
   encrypted `/api/opencode/*` app transport. SDK owner id==1 can also enter directly.
@@ -50,8 +52,8 @@ step is needed after a deploy.
 
 - `POST /connect/:panel` — game=PUBG, user_key, serial
 - `POST /encrypt/:panel` — same + AES-256-CBC payload (panel active + AES configured hona chahiye)
-- `POST /sdk/mundo/:panel` — AES-128-ECB encrypted
-- `POST /sdk/bcore/:panel` — RC4+Base64 encrypted
+- `POST /mak/v1/challenge`, `/authorize`, `/guest/check`, `/renew`, `/heartbeat`, `/events` — MAK/1 activation
+- `GET /mak/v1/status` — public signing/server status
 
 ## Deploy
 
@@ -94,13 +96,11 @@ src/
 │   ├── session.js           # sdk_session lookup + cookie helpers
 │   ├── theme.js             # ui_theme / accent / panel name
 │   ├── device.js            # device fingerprint (login + /api lock)
-│   ├── crypto.js            # RC4/BCORE/AES/MD5/hashPassword
+│   ├── crypto.js            # AES/MD5/hashPassword + legacy helpers
 │   ├── security.js          # rate-limit + session cookie build
 │   ├── professor.js         # PROFESSOR console data (global aggregates)
 │   ├── api.js               # /api/* JSON endpoints
 │   ├── connect.js           # /connect + /encrypt (app-facing)
-│   ├── mundo.js             # /sdk/mundo/* validation
-│   ├── bcore.js             # /sdk/bcore/* validation
 │   ├── opencode.js          # encrypted OpenCode app API + admin actions
 │   └── opencode-admin.js    # standalone admin password/session auth
 ├── mak/                     # MAK/1 activation (mounted at /mak + /mak/v1)
@@ -109,6 +109,7 @@ src/
 │   ├── store.js             # D1 queries for licenses/devices/sessions/events
 │   ├── crypto.js            # Ed25519, ECDSA P-256, MAK + canonical JSON
 │   ├── schema.js            # mak_* tables (also appended to schema.sql)
+│   ├── issue.js             # shared MAK validation + issuance (SDK + MAK admin)
 │   ├── settings.js          # runtime kill switch + protocol timings
 │   └── ui.js, pages/        # MAK admin rendering
 └── frontend/                # sirf HTML render (koi DB/logic nahi)

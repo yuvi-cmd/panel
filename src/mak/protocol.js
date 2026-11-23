@@ -171,7 +171,7 @@ export async function handleMak(request, env, db) {
   if ((endpoint === '/status' || endpoint === '/health') && method === 'GET') {
     const payload = {
       protocol: PROTOCOL,
-      service: String(env.MAK_SERVER_NAME || 'MUNDO Activation'),
+      service: String(env.MAK_SERVER_NAME || 'MAK Activation'),
       version: settings.server_version,
       server_enabled: settings.server_enabled,
       signing_ready: !!config.ok,

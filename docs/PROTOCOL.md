@@ -48,7 +48,7 @@ configured (in that case the response is unsigned and
 ```json
 {
   "protocol": "MAK/1",
-  "service": "MUNDO Activation",
+  "service": "MAK Activation",
   "version": "1.0.0",
   "server_enabled": true,
   "signing_ready": true,

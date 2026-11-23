@@ -62,6 +62,11 @@ function cookieFrom(res) {
   return m ? `sdk_session=${m[1]}` : '';
 }
 
+function csrfFrom(html) {
+  const m = String(html || '').match(/name="_csrf" value="([a-f0-9]{64})"/);
+  return m ? m[1] : '';
+}
+
 async function call(env, method, path, { cookie, json, form, headers } = {}) {
   const url = 'https://panel.test' + path;
   const h = { ...(headers || {}) };
@@ -139,6 +144,43 @@ console.log('mak integration');
   const sdk = await call(env, 'GET', '/sdk', { cookie: ownerCookie });
   const sdkBody = await sdk.text();
   ok(sdkBody.includes('MAK Activation'), 'SDK Panel sidebar links to MAK Activation');
+  ok(sdkBody.includes('MAK Dashboard'), 'SDK home is the MAK dashboard');
+  ok(!sdkBody.includes('MUNDO') && !sdkBody.includes('BCORE'), 'SDK home no longer shows BCore/Mundo');
+
+  const gen = await call(env, 'GET', '/sdk/generate', { cookie: ownerCookie });
+  const genBody = await gen.text();
+  const makCsrf = csrfFrom(genBody);
+  ok(gen.status === 200 && genBody.includes('Generate MAK') && makCsrf.length === 64, 'SDK generate page renders a MAK form + CSRF');
+
+  const noCsrfForm = new FormData();
+  noCsrfForm.set('label', 'missing csrf');
+  const rejected = await call(env, 'POST', '/sdk/generate', { cookie: ownerCookie, form: noCsrfForm });
+  ok(rejected.status === 403, 'SDK generate rejects a missing CSRF token');
+
+  const issueForm = new FormData();
+  issueForm.set('_csrf', makCsrf);
+  issueForm.set('label', 'SDK issued license');
+  issueForm.set('expires_on', new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));
+  issueForm.set('max_devices', '1');
+  issueForm.set('max_activations', '2');
+  issueForm.set('session_ttl', '3600');
+  issueForm.set('host_bind_mode', 'FIRST_USE');
+  const issued = await call(env, 'POST', '/sdk/generate', { cookie: ownerCookie, form: issueForm });
+  const issuedBody = await issued.text();
+  const mak = (issuedBody.match(/MAK-[0-9A-HJKMNP-TV-Z]{5}(?:-[0-9A-HJKMNP-TV-Z]{5}){3}/) || [])[0] || '';
+  ok(issued.status === 200 && issuedBody.includes('issued successfully') && !!mak, 'SDK Generate MAK issues a credential');
+  const issuedRow = await env.DB.prepare("SELECT * FROM mak_licenses WHERE label='SDK issued license'").bind().first();
+  ok(!!issuedRow && issuedRow.credential_hash.length === 64 && issuedRow.credential_hash !== mak, 'SDK-issued MAK is stored only as a SHA-256 verifier');
+
+  const keys = await call(env, 'GET', '/sdk/keys', { cookie: ownerCookie });
+  const keysBody = await keys.text();
+  ok(keys.status === 200 && keysBody.includes('SDK issued license'), 'SDK MAK Keys lists the issued license');
+
+  const srv = await call(env, 'GET', '/sdk/server', { cookie: ownerCookie });
+  const srvBody = await srv.text();
+  ok(srv.status === 200 && srvBody.includes('/mak/v1/authorize'), 'SDK Server page lists the MAK/1 endpoints');
+  const hash = await call(env, 'GET', '/sdk/hash', { cookie: ownerCookie });
+  ok(hash.status === 200 && (await hash.text()).includes('Hash Vault'), 'SDK Hash Vault still renders');
 }
 
 // ---------- 3. generate + keys ----------
@@ -538,29 +580,29 @@ console.log('connect + encrypt');
   ok(e4.status === 403 && e4.body.reason === 'PANEL NOT ACTIVATED', 'expired panel duration blocks encrypt');
 }
 
-// ---------- 7. bcore tenant-squatting fix + crypto helpers ----------
-console.log('bcore + crypto');
+// ---------- 7. retired BCORE/MUNDO routes + crypto helpers ----------
+console.log('legacy sdk routes + crypto');
 {
-  const before = env.DB.prepare("SELECT COUNT(*) c FROM panels WHERE panel_code='EVIL_PANEL'").bind().first();
-  const r = await call(env, 'POST', '/sdk/bcore/EVIL_PANEL', { headers: { 'Content-Type': 'text/plain' }, });
-  // send empty body via Request text path
-  void r;
-  const req = new Request('https://panel.test/sdk/bcore/EVIL_PANEL', { method: 'POST', body: 'e30=' });
+  const req = new Request('https://panel.test/sdk/bcore/EVIL_PANEL', {
+    method: 'POST', headers: { Cookie: ownerCookie, 'Content-Type': 'text/plain' }, body: 'e30=',
+  });
   const res = await app.fetch(req, env, {});
-  ok(res.status === 404, 'bcore unknown panel rejected, got ' + res.status);
-  const after = env.DB.prepare("SELECT COUNT(*) c FROM panels WHERE panel_code='EVIL_PANEL'").bind().first();
-  ok((before?.c || 0) === 0 && (after?.c || 0) === 0, 'bcore does not auto-create panels');
+  ok(res.status === 404, 'legacy /sdk/bcore endpoint is retired (got ' + res.status + ')');
+
+  const reqM = new Request('https://panel.test/sdk/mundo/YUVI_001', {
+    method: 'POST', headers: { Cookie: ownerCookie, 'Content-Type': 'text/plain' }, body: '',
+  });
+  const resM = await app.fetch(reqM, env, {});
+  ok(resM.status === 404, 'legacy /sdk/mundo endpoint is retired (got ' + resM.status + ')');
 
   const { esc } = await import('../src/frontend/ui.js');
   ok(esc(`a'b"c<d>`) === 'a&#x27;b&quot;c&lt;d&gt;', 'esc() escapes quotes + tags');
   const { formatIST, cleanPanelCode } = await import('../src/backend/security.js');
   ok(formatIST('2026-01-01 00:00:00').length > 0, 'formatIST renders');
   ok(cleanPanelCode('yuvi_001 ') === 'YUVI_001' && cleanPanelCode('a-b') === '', 'panel code validation');
-  const { hashPassword, verifyPassword, bcoreEncrypt, bcoreDecrypt } = await import('../src/backend/crypto.js');
+  const { hashPassword, verifyPassword } = await import('../src/backend/crypto.js');
   const h = await hashPassword('pw123');
   ok(await verifyPassword('pw123', h) && !(await verifyPassword('nope', h)), 'password hash roundtrip');
-  const enc = bcoreEncrypt('{"sdk_key":"x"}');
-  ok(bcoreDecrypt(enc).toString('utf8') === '{"sdk_key":"x"}', 'bcore rc4 roundtrip (compat)');
   // AES-256-CBC moved to WebCrypto: wire format must stay byte-identical
   const { aes256CbcEncrypt, aes256CbcDecryptToString } = await import('../src/backend/crypto.js');
   const { createCipheriv } = await import('node:crypto');
@@ -701,8 +743,8 @@ console.log('fresh install');
   const r0 = await app.fetch(new Request('https://panel.test/setup'), env3, {});
   ok(r0.status === 200, 'GET /setup renders on empty DB (got ' + r0.status + ')');
   const tables = (await db3.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all()).results.map((r) => r.name).sort();
-  const want = ['activation_keys', 'api_keys', 'bcore_key_bindings', 'bcore_keys', 'key_devices', 'loader_config', 'loader_files', 'mod_loaders', 'mod_maintenance', 'mod_settings', 'mod_tags', 'mod_versions', 'mundo_key_bindings', 'mundo_keys', 'panels', 'referrals', 'sdk_hash_vault', 'sdk_server_status', 'sessions', 'users', 'mak_settings', 'mak_licenses', 'mak_hosts', 'mak_guest_apps', 'mak_bindings', 'mak_devices', 'mak_challenges', 'mak_sessions', 'mak_revocations', 'mak_events'];
-  ok(want.every((n) => tables.includes(n)), 'panel + MAK tables auto-created (' + tables.length + ' present)');
+  const want = ['activation_keys', 'api_keys', 'key_devices', 'loader_config', 'loader_files', 'mod_loaders', 'mod_maintenance', 'mod_settings', 'mod_tags', 'mod_versions', 'panels', 'referrals', 'sdk_hash_vault', 'sessions', 'users', 'mak_settings', 'mak_licenses', 'mak_hosts', 'mak_guest_apps', 'mak_bindings', 'mak_devices', 'mak_challenges', 'mak_sessions', 'mak_revocations', 'mak_events'];
+  ok(want.every((n) => tables.includes(n)), 'panel + MAK tables auto-created (' + tables.length + ' present, legacy tables absent)');
   const idx = (await db3.prepare("SELECT name FROM sqlite_master WHERE type='index' AND sql IS NOT NULL").all()).results.map((r) => r.name);
   ok(['idx_users_panel', 'idx_api_panel', 'idx_dev_panel', 'idx_sess_user'].every((n) => idx.includes(n)), 'indexes auto-created');
   const fd = new FormData();
@@ -882,40 +924,6 @@ console.log('test-decrypt preview');
   ok(devsAfter === devsBefore, 'preview never binds a device (dry-run)');
 }
 
-
-// ---------- 7iii. sdk nonce + replay protection (anti MITM / HttpCanary replay) ----------
-console.log('sdk nonce + replay');
-{
-  const { bcoreEncrypt, bcoreDecrypt } = await import('../src/backend/crypto.js');
-  await env.DB.prepare("INSERT INTO bcore_keys (panel_code,sdk_key,duration_days,pkg_limit,app_limit,feature1,feature2,created_by) VALUES ('YUVI_001','TESTSDK-SMOKE',30,10,10,1,1,1)").run();
-  const sdkCall = async (obj) => {
-    const raw = JSON.stringify(obj);
-    const enc = bcoreEncrypt(raw);
-    const r = await app.fetch(new Request('https://panel.test/sdk/bcore/YUVI_001', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: enc }), env, {});
-    const dec = bcoreDecrypt(await r.text()).toString('utf8');
-    let j = null; try { j = JSON.parse(dec); } catch { j = { _raw: dec }; }
-    return { status: r.status, json: j };
-  };
-  const now = Date.now();
-
-  const badKey = await sdkCall({ sdk_key: 'NOPE', pkg_name: 'com.arc.cheat', app_name: 'ArcX', device_id: 'd1', nonce: 'n-smoke-1', ts: String(now) });
-  ok(badKey.status === 400 && badKey.json.code === 'INVALID_KEY', 'invalid sdk key rejected');
-
-  const replay = await sdkCall({ sdk_key: 'TESTSDK-SMOKE', pkg_name: 'com.arc.cheat', app_name: 'ArcX', device_id: 'd1', nonce: 'n-smoke-1', ts: String(now) });
-  ok(replay.status === 403 && replay.json.code === 'REPLAY_DETECTED', 'used nonce rejected (replay protection)');
-
-  const missing = await sdkCall({ sdk_key: 'TESTSDK-SMOKE', pkg_name: 'com.arc.cheat', app_name: 'ArcX', device_id: 'd1', ts: String(now) });
-  ok(missing.status === 400 && missing.json.code === 'MISSING_NONCE', 'missing nonce rejected');
-
-  const stale = await sdkCall({ sdk_key: 'TESTSDK-SMOKE', pkg_name: 'com.arc.cheat', app_name: 'ArcX', device_id: 'd1', nonce: 'n-smoke-stale', ts: String(now - 20 * 60 * 1000) });
-  ok(stale.status === 403 && stale.json.code === 'STALE_REQUEST', 'stale timestamp rejected');
-
-  const good = await sdkCall({ sdk_key: 'TESTSDK-SMOKE', pkg_name: 'com.arc.cheat', app_name: 'ArcX', device_id: 'd1', nonce: 'n-smoke-ok', ts: String(now) });
-  ok(good.status === 200 && good.json.status === 'success' && good.json.nonce === 'n-smoke-ok' && typeof good.json.server_nonce === 'string' && typeof good.json.server_ts === 'number', 'valid sdk key accepted with nonce echo');
-
-  const replay2 = await sdkCall({ sdk_key: 'TESTSDK-SMOKE', pkg_name: 'com.arc.cheat', app_name: 'ArcX', device_id: 'd1', nonce: 'n-smoke-ok', ts: String(now) });
-  ok(replay2.status === 403 && replay2.json.code === 'REPLAY_DETECTED', 'success response nonce cannot be replayed');
-}
 
 // ---------- 7j. OpenCode standalone control plane ----------
 console.log('opencode standalone panel');

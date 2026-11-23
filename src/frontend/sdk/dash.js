@@ -1,60 +1,124 @@
 import { esc } from '../ui.js';
 
-export function tabHead(title, icon, sub, tabsId, mundoCount, bcoreCount) {
-  return '<div class="pagehead"><div class="ph-ic"><i class="bi ' + icon + '"></i></div>'
-    + '<div class="flex-1 min-w-0"><h1 class="truncate">' + title + '</h1><p class="truncate">' + sub + '</p></div></div>'
-    + '<div class="flex justify-start sm:justify-end mb-6"><div class="dual-tab-container" id="' + tabsId + '">'
-    + '<button class="dual-tab-btn active-mundo" data-tab="mundo" onclick="switchDualTab(\'' + tabsId + '\',\'mundo\')"><i class="bi bi-cpu mr-1"></i> MUNDO' + (mundoCount != null ? ' (' + mundoCount + ')' : '') + '</button>'
-    + '<button class="dual-tab-btn" data-tab="bcore" onclick="switchDualTab(\'' + tabsId + '\',\'bcore\')"><i class="bi bi-lightning-charge-fill mr-1"></i> BCORE' + (bcoreCount != null ? ' (' + bcoreCount + ')' : '') + '</button>'
-    + '</div></div>';
+function fmtDate(seconds) {
+  if (!seconds) return 'No expiry';
+  const d = new Date(Number(seconds) * 1000);
+  if (!Number.isFinite(d.getTime())) return '—';
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-export function statCards(total, active, blocked, pkgs, accent) {
-  return '<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">'
-    + '<div class="glass-card p-4 md:p-5"><div class="flex items-center justify-between mb-3"><div class="w-10 h-10 rounded-xl avatar-premium flex items-center justify-center text-white shadow-lg"><i class="bi bi-key-fill"></i></div><span class="text-[10px] font-extrabold text-purple-500 bg-purple-50 px-2 py-1 rounded-lg uppercase">Total</span></div><p class="text-2xl md:text-3xl font-black text-slate-800">' + total + '</p><p class="text-[11px] text-slate-500 font-medium mt-1">' + accent + ' Keys</p></div>'
-    + '<div class="glass-card p-4 md:p-5"><div class="flex items-center justify-between mb-3"><div class="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center text-white shadow-lg"><i class="bi bi-check-circle-fill"></i></div><span class="text-[10px] font-extrabold text-emerald-500 bg-emerald-50 px-2 py-1 rounded-lg uppercase">Active</span></div><p class="text-2xl md:text-3xl font-black text-slate-800">' + active + '</p><p class="text-[11px] text-slate-500 font-medium mt-1">Active</p></div>'
-    + '<div class="glass-card p-4 md:p-5"><div class="flex items-center justify-between mb-3"><div class="w-10 h-10 rounded-xl bg-red-500 flex items-center justify-center text-white shadow-lg"><i class="bi bi-x-circle-fill"></i></div><span class="text-[10px] font-extrabold text-red-500 bg-red-50 px-2 py-1 rounded-lg uppercase">Blocked</span></div><p class="text-2xl md:text-3xl font-black text-slate-800">' + blocked + '</p><p class="text-[11px] text-slate-500 font-medium mt-1">Blocked</p></div>'
-    + '<div class="glass-card p-4 md:p-5"><div class="flex items-center justify-between mb-3"><div class="w-10 h-10 rounded-xl bg-amber-500 flex items-center justify-center text-white shadow-lg"><i class="bi bi-box-seam-fill"></i></div><span class="text-[10px] font-extrabold text-amber-500 bg-amber-50 px-2 py-1 rounded-lg uppercase">Bind</span></div><p class="text-2xl md:text-3xl font-black text-slate-800">' + pkgs + '</p><p class="text-[11px] text-slate-500 font-medium mt-1">Packages Bound</p></div></div>';
+function statusChip(status) {
+  const s = String(status || '').toUpperCase();
+  const cls = s === 'ACTIVE' ? 'bg-emerald-50 text-emerald-600'
+    : s === 'SUSPENDED' ? 'bg-amber-50 text-amber-600'
+      : 'bg-red-50 text-red-600';
+  return '<span class="text-[10px] font-extrabold px-2 py-1 rounded-lg uppercase ' + cls + '">' + esc(s || 'UNKNOWN') + '</span>';
 }
 
-export function recentList(keys, engine) {
-  if (!keys.length) return '<div class="text-center py-10 text-slate-400"><i class="bi bi-inbox text-5xl mb-3 opacity-40"></i><p class="text-sm">No ' + engine + ' keys yet</p><a href="/sdk/generate" class="inline-block mt-3 text-xs font-bold text-purple-600 hover:underline">Generate First Key →</a></div>';
-  return '<div class="space-y-2">' + keys.map(k =>
-    '<div class="clay-card p-3 flex items-center justify-between gap-3 rounded-2xl"><div class="min-w-0 flex-1"><p class="font-mono text-xs md:text-sm font-bold text-slate-700 truncate">' + esc(k.sdk_key) + '</p><p class="text-[10px] text-slate-400 mt-0.5">' + k.pkg_limit + ' Pkg • ' + k.app_limit + ' App • ' + k.duration_days + ' Days</p></div>'
-    + '<span class="text-[10px] font-extrabold px-2 py-1 rounded-lg ' + (k.is_blocked ? 'bg-red-50 text-red-500' : 'bg-emerald-50 text-emerald-500') + '">' + (k.is_blocked ? 'BLOCKED' : 'ACTIVE') + '</span></div>'
-  ).join('') + '</div>';
+function statCard(label, value, sub, icon, tone) {
+  return '<div class="glass-card p-4 md:p-5"><div class="flex items-center justify-between mb-3">'
+    + '<div class="w-10 h-10 rounded-xl ' + tone + ' flex items-center justify-center text-white shadow-lg"><i class="bi ' + icon + '"></i></div>'
+    + '<span class="text-[10px] font-extrabold px-2 py-1 rounded-lg uppercase ' + tone.replace('bg-', 'text-').replace('-500', '-500') + ' bg-slate-50">' + esc(label) + '</span></div>'
+    + '<p class="text-2xl md:text-3xl font-black text-slate-800">' + esc(String(value)) + '</p>'
+    + '<p class="text-[11px] text-slate-500 font-medium mt-1">' + esc(sub) + '</p></div>';
 }
 
 export function dashboardPage(d) {
-  return '<div class="dual-tab-wrapper" id="dashboardWrapper">'
-    + tabHead('SDK Dashboard', 'bi-speedometer2', 'Overview of all SDK keys & bindings', 'dashboardTabsWrap')
-    + '<div class="tab-content-panel active" data-tab="mundo">' + statCards(d.mTotal, d.mActive, d.mBlocked, d.mPkgs, 'MUNDO')
-    + '<div class="glass-card p-5 md:p-6"><h3 class="font-bold text-slate-800 mb-4"><i class="bi bi-clock-history text-purple-500"></i> Recent MUNDO Keys</h3>' + recentList(d.recentM, 'MUNDO') + '</div></div>'
-    + '<div class="tab-content-panel" data-tab="bcore">' + statCards(d.bTotal, d.bActive, d.bBlocked, d.bPkgs, 'BCORE')
-    + '<div class="glass-card p-5 md:p-6"><h3 class="font-bold text-slate-800 mb-4"><i class="bi bi-clock-history text-amber-500"></i> Recent BCORE Keys</h3>' + recentList(d.recentB, 'BCORE') + '</div></div></div>';
+  const stats = d.stats || {};
+  const server = d.server || {};
+  const recent = d.recent || [];
+
+  const warnings = [];
+  if (!server.enabled) {
+    warnings.push('<div class="glass-card p-4 mb-4" style="border-left:4px solid #ef4444"><p class="font-bold text-red-700 text-sm"><i class="bi bi-exclamation-circle-fill mr-1"></i> Activation server is OFF</p><p class="text-xs text-slate-600 mt-1">Every authorize/guest/renew/heartbeat request is denied. Turn it on from <a class="underline font-bold" href="/sdk/server">Server</a>.</p></div>');
+  }
+  if (!server.signingReady) {
+    warnings.push('<div class="glass-card p-4 mb-4" style="border-left:4px solid #f59e0b"><p class="font-bold text-amber-700 text-sm"><i class="bi bi-shield-exclamation mr-1"></i> Signing key missing</p><p class="text-xs text-slate-600 mt-1">MAK issuance works, but signed decisions fail closed until <code>MAK_SIGNING_KEY</code> is set as a Worker secret.</p></div>');
+  }
+
+  const recentHtml = recent.length ? recent.map((l) =>
+    '<div class="clay-card p-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl">'
+    + '<div class="min-w-0 flex-1"><p class="text-sm font-bold text-slate-800 truncate">' + esc(l.label || l.license_uid) + '</p>'
+    + '<p class="text-[10px] font-mono text-slate-400 mt-0.5">' + esc(l.license_uid) + (l.host_package ? ' · ' + esc(l.host_package) : '') + '</p></div>'
+    + '<div class="flex items-center gap-2">' + statusChip(l.status)
+    + '<span class="text-[10px] text-slate-400">' + esc(fmtDate(l.expires_at)) + '</span>'
+    + '<a href="/mak/licenses/' + Number(l.id) + '" class="clay-card px-3 py-1.5 text-xs font-bold text-slate-600 rounded-xl">Open</a></div></div>'
+  ).join('') : '<div class="text-center py-8 text-slate-400"><i class="bi bi-inbox text-4xl mb-2 opacity-40"></i><p class="text-sm">No MAK issued yet</p><a href="/sdk/generate" class="inline-block mt-2 text-xs font-bold text-purple-600 hover:underline">Generate the first MAK →</a></div>';
+
+  return warnings.join('')
+    + '<div class="pagehead"><div class="ph-ic"><i class="bi bi-speedometer2"></i></div><div class="flex-1 min-w-0"><h1 class="truncate">MAK Dashboard</h1><p class="truncate">Activation licenses, devices and sessions</p></div></div>'
+    + '<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">'
+    + statCard('Total', stats.total || 0, 'MAK licenses issued', 'bi-key-fill', 'bg-purple-500')
+    + statCard('Active', stats.active || 0, 'Ready for activation', 'bi-check-circle-fill', 'bg-emerald-500')
+    + statCard('Devices', stats.devices || 0, (stats.devices_online || 0) + ' seen in last 10 min', 'bi-phone-fill', 'bg-blue-500')
+    + statCard('Sessions', stats.sessions || 0, 'Signed sessions live', 'bi-broadcast-pin', 'bg-amber-500')
+    + '</div>'
+    + '<div class="grid lg:grid-cols-3 gap-4 mb-6">'
+    + '<div class="glass-card p-5 lg:col-span-2"><div class="flex items-center justify-between mb-4"><h3 class="font-bold text-slate-800"><i class="bi bi-clock-history text-purple-500"></i> Recent MAK licenses</h3><a href="/sdk/keys" class="text-xs font-bold text-purple-600">View all →</a></div>' + recentHtml + '</div>'
+    + '<div class="glass-card p-5"><h3 class="font-bold text-slate-800 mb-4"><i class="bi bi-lightning-charge-fill text-amber-500"></i> Quick actions</h3>'
+    + '<div class="space-y-2">'
+    + '<a href="/sdk/generate" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-key-fill text-purple-500"></i><span class="text-sm font-bold flex-1">Generate MAK</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
+    + '<a href="/sdk/keys" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-view-list text-blue-500"></i><span class="text-sm font-bold flex-1">MAK keys</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
+    + '<a href="/mak" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-cpu-fill text-emerald-500"></i><span class="text-sm font-bold flex-1">MAK console</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
+    + '<a href="/mak/guests" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-app-indicator text-amber-500"></i><span class="text-sm font-bold flex-1">Guest apps</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
+    + '</div></div></div>'
+    + '<div class="grid grid-cols-2 lg:grid-cols-4 gap-3">'
+    + '<div class="glass-card p-4"><p class="text-[10px] font-extrabold text-slate-400 uppercase">Guest apps</p><p class="text-xl font-black">' + Number(stats.guests || 0) + '</p></div>'
+    + '<div class="glass-card p-4"><p class="text-[10px] font-extrabold text-slate-400 uppercase">New (7 days)</p><p class="text-xl font-black">' + Number(stats.new_licenses || 0) + '</p></div>'
+    + '<div class="glass-card p-4"><p class="text-[10px] font-extrabold text-slate-400 uppercase">Activations</p><p class="text-xl font-black">' + Number(stats.activations || 0) + '</p></div>'
+    + '<div class="glass-card p-4"><p class="text-[10px] font-extrabold text-slate-400 uppercase">Signing</p><p class="text-sm font-black ' + (server.signingReady ? 'text-emerald-600' : 'text-amber-600') + '">' + (server.signingReady ? 'Ed25519 ready' : 'Key missing') + '</p></div>'
+    + '</div>';
 }
 
 export function generatePage(o) {
-  const ok = o.success ? '<div class="glass-card p-4 mb-6 border-l-4 border-emerald-500 flex items-start gap-3" style="border-left:4px solid #10b981"><i class="bi bi-check-circle-fill text-emerald-500 text-xl"></i><div class="flex-1 min-w-0"><p class="font-bold text-emerald-700 text-sm">Success!</p><p class="text-xs text-slate-600 mt-0.5 break-all">' + esc(o.success) + '</p></div></div>' : '';
-  const err = o.error ? '<div class="glass-card p-4 mb-6 flex items-start gap-3" style="border-left:4px solid #ef4444"><i class="bi bi-exclamation-circle-fill text-red-500 text-xl"></i><div class="flex-1"><p class="font-bold text-red-700 text-sm">Error</p><p class="text-xs text-slate-600 mt-0.5">' + esc(o.error) + '</p></div></div>' : '';
-  function form(engine, color, icon, infoBg, infoTx) {
-    return '<div class="tab-content-panel' + (engine === 'MUNDO' ? ' active' : '') + '" data-tab="' + engine.toLowerCase() + '">'
-      + '<form method="POST" class="glass-card p-5 md:p-7"><input type="hidden" name="engine" value="' + engine + '">'
-      + '<div class="flex items-center gap-3 mb-6 pb-4 border-b border-slate-200"><div class="w-12 h-12 rounded-2xl avatar-premium flex items-center justify-center text-white shadow-lg"><i class="bi ' + icon + ' text-xl"></i></div><div><h3 class="font-black text-slate-800">' + engine + ' Engine</h3><p class="text-xs text-slate-500">Generate key for ' + engine + ' SDK</p></div></div>'
-      + '<div class="space-y-5"><div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">SDK Key <span class="text-slate-400 font-medium normal-case">(empty = auto 16 char)</span></label>'
-      + '<input type="text" name="sdk_key" maxlength="100" placeholder="Leave empty for random 16-character key" class="w-full clay-card px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-400 rounded-2xl"></div>'
-      + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Duration</label><select name="duration" class="w-full clay-card custom-select px-4 py-3 text-sm font-semibold rounded-2xl"><option value="7">7 Days</option><option value="15">15 Days</option><option value="30" selected>30 Days</option><option value="60">60 Days</option></select></div>'
-      + '<div class="grid grid-cols-2 gap-3"><div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Pkg Limit</label><input type="number" name="pkg_limit" min="1" max="10" value="1" class="w-full clay-card px-4 py-3 text-sm font-bold text-center rounded-2xl"></div>'
-      + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">App Limit</label><input type="number" name="app_limit" min="1" max="20" value="1" class="w-full clay-card px-4 py-3 text-sm font-bold text-center rounded-2xl"></div></div>'
-      + '<div class="rounded-2xl p-3 text-[11px] ' + infoBg + ' ' + infoTx + ' border"><i class="bi bi-info-circle-fill mr-1"></i><strong>Rule:</strong> Total apps = Pkg Limit x App Limit.</div>'
-      + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Features</label><div class="grid grid-cols-2 gap-3"><label class="feature-card checked"><input type="checkbox" name="feature1" checked onchange="toggleFeature(this)"><span class="text-sm font-bold text-slate-700">F1</span></label><label class="feature-card checked"><input type="checkbox" name="feature2" checked onchange="toggleFeature(this)"><span class="text-sm font-bold text-slate-700">F2</span></label></div></div>'
-      + '<button type="submit" class="btn-premium w-full py-4 rounded-2xl font-extrabold text-sm uppercase tracking-wider"><i class="bi bi-magic"></i> Generate ' + engine + ' Key</button>'
-      + '</div></form></div>';
+  const values = o.values || {};
+  const server = o.server || {};
+  const guests = o.guests || [];
+
+  let notice = '';
+  if (o.success) {
+    const s = o.success;
+    notice = '<div class="glass-card p-5 mb-6" style="border-left:4px solid #10b981">'
+      + '<p class="text-xs font-extrabold uppercase tracking-wider text-emerald-600">MAK issued successfully</p>'
+      + '<p class="text-sm font-bold text-slate-800 mt-1">' + esc(s.license && (s.license.label || s.license.license_uid) || 'New license') + '</p>'
+      + '<div class="clay-card p-3 flex items-center gap-2 mt-3 rounded-2xl"><code id="new-mak" class="flex-1 text-sm md:text-base font-mono font-bold text-slate-800 break-all">' + esc(s.credential) + '</code>'
+      + '<button type="button" onclick="copyMak()" class="btn-premium px-3 py-2 rounded-xl text-xs font-bold"><i class="bi bi-clipboard"></i> Copy</button></div>'
+      + '<p class="text-[11px] text-amber-700 mt-2"><i class="bi bi-exclamation-triangle-fill"></i> This is the only time the raw MAK is shown. Store it now.</p>'
+      + '<div class="flex flex-wrap gap-2 mt-3"><a href="/mak/licenses/' + Number(s.licenseId) + '" class="clay-card px-3 py-2 text-xs font-bold rounded-xl">Open license</a><a href="/sdk/generate" class="btn-premium px-3 py-2 text-xs font-bold rounded-xl">Issue another</a></div></div>';
   }
-  return '<div class="dual-tab-wrapper" id="generateWrapper">'
-    + tabHead('Generate SDK', 'bi-key-fill', 'Create new SDK keys for MUNDO or BCORE', 'generateTabs')
-    + ok + err
-    + form('MUNDO', 'from-blue-500 to-blue-700', 'bi-cpu', 'bg-purple-50/70', 'text-purple-700')
-    + form('BCORE', 'from-amber-500 to-orange-500', 'bi-lightning-charge-fill', 'bg-amber-50/70', 'text-amber-700')
-    + '</div><script>function toggleFeature(cb){const c=cb.closest(".feature-card");if(cb.checked)c.classList.add("checked");else c.classList.remove("checked");}</script>';
+  if (o.error) {
+    notice = '<div class="glass-card p-4 mb-6" style="border-left:4px solid #ef4444"><p class="text-xs font-bold text-red-700"><i class="bi bi-exclamation-circle-fill mr-1"></i> ' + esc(o.error) + '</p></div>';
+  }
+  if (!server.signingReady) {
+    notice += '<div class="glass-card p-4 mb-6" style="border-left:4px solid #f59e0b"><p class="text-xs text-amber-700"><i class="bi bi-shield-exclamation mr-1"></i> Signing key is not configured. You can issue MAKs, but activation decisions will be denied until <code>MAK_SIGNING_KEY</code> is set.</p></div>';
+  }
+
+  const guestCards = guests.length ? guests.map((g) =>
+    '<label class="feature-card' + ((values.guest_ids || []).includes(String(g.id)) ? ' checked' : '') + '"><input type="checkbox" name="guest_ids" value="' + Number(g.id) + '" ' + ((values.guest_ids || []).includes(String(g.id)) ? 'checked' : '') + ' onchange="toggleFeature(this)"><span class="text-sm font-bold text-slate-700">' + esc(g.app_name || g.package_name) + '</span></label>'
+  ).join('') : '<p class="text-xs text-slate-400 italic">No approved guest apps. You can bind them later from the MAK console.</p>';
+
+  return notice
+    + '<div class="pagehead"><div class="ph-ic"><i class="bi bi-key-fill"></i></div><div class="flex-1 min-w-0"><h1 class="truncate">Generate MAK</h1><p class="truncate">Issue a new activation credential for a host application</p></div></div>'
+    + '<form method="POST" action="/sdk/generate" class="glass-card p-5 md:p-7">'
+    + '<input type="hidden" name="_csrf" value="' + esc(o.csrf || '') + '">'
+    + '<div class="flex items-center gap-3 mb-6 pb-4 border-b border-slate-200"><div class="w-12 h-12 rounded-2xl avatar-premium flex items-center justify-center text-white shadow-lg"><i class="bi bi-cpu-fill text-xl"></i></div><div><h3 class="font-black text-slate-800">MAK /1 License</h3><p class="text-xs text-slate-500">Raw credential is shown once and stored only as a SHA-256 verifier.</p></div></div>'
+    + '<div class="grid md:grid-cols-2 gap-4">'
+    + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Label <span class="text-red-500">*</span></label><input name="label" value="' + esc(values.label || '') + '" required maxlength="80" placeholder="e.g. Rahul monthly" class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'
+    + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">User reference</label><input name="user_ref" value="' + esc(values.user_ref || '') + '" maxlength="120" placeholder="Name, email or order ID" class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'
+    + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Expires on <span class="text-red-500">*</span></label><input type="date" name="expires_on" value="' + esc(values.expires_on || o.defaultExpiry || '') + '" required class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'
+    + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Session TTL (seconds)</label><input type="number" name="session_ttl" min="300" max="86400" value="' + esc(values.session_ttl || 3600) + '" required class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'
+    + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Max devices</label><input type="number" name="max_devices" min="1" max="100" value="' + esc(values.max_devices || 1) + '" required class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'
+    + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Max activations</label><input type="number" name="max_activations" min="1" max="1000" value="' + esc(values.max_activations || 2) + '" required class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'
+    + '</div>'
+    + '<div class="mt-5"><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Notes</label><textarea name="notes" maxlength="1000" placeholder="Internal note (never sent to the client)" class="w-full clay-card px-4 py-3 text-sm rounded-2xl">' + esc(values.notes || '') + '</textarea></div>'
+    + '<div class="mt-5 pt-5 border-t border-slate-200"><h4 class="text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-3">Host binding</h4>'
+    + '<div class="grid md:grid-cols-2 gap-4">'
+    + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Host package name</label><input name="host_package" value="' + esc(values.host_package || '') + '" maxlength="200" placeholder="com.example.host" class="w-full clay-card px-4 py-3 text-sm font-mono rounded-2xl"></div>'
+    + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Certificate SHA-256</label><input name="host_cert" value="' + esc(values.host_cert || '') + '" maxlength="80" placeholder="64 hex characters" class="w-full clay-card px-4 py-3 text-sm font-mono rounded-2xl"></div>'
+    + '<div class="md:col-span-2"><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Binding mode</label><select name="host_bind_mode" class="w-full clay-card custom-select px-4 py-3 text-sm font-semibold rounded-2xl"><option value="FIRST_USE"' + (values.host_bind_mode !== 'STRICT' ? ' selected' : '') + '>Bind on first authentication</option><option value="STRICT"' + (values.host_bind_mode === 'STRICT' ? ' selected' : '') + '>Strict — require pre-registered host</option></select></div>'
+    + '</div><p class="text-[11px] text-slate-500 mt-2"><i class="bi bi-shield-lock-fill"></i> Leave the host fields empty to allow first-use binding, protected by MAK + device proof.</p></div>'
+    + '<div class="mt-5 pt-5 border-t border-slate-200"><h4 class="text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-3">Guest access</h4><div class="grid grid-cols-2 gap-3">' + guestCards + '</div></div>'
+    + '<button type="submit" class="btn-premium w-full py-4 rounded-2xl font-extrabold text-sm uppercase tracking-wider mt-6"><i class="bi bi-magic"></i> Generate MAK</button>'
+    + '</form>'
+    + '<script>function toggleFeature(cb){const c=cb.closest(".feature-card");if(cb.checked)c.classList.add("checked");else c.classList.remove("checked");}function copyMak(){const el=document.getElementById("new-mak");if(!el)return;navigator.clipboard.writeText(el.textContent.trim()).then(function(){alert("MAK copied");});}</script>';
 }

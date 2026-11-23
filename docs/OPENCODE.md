@@ -3,14 +3,14 @@
 This is the server side of the OpenCode Android activation system. It lives in
 the existing Worker/D1 deployment, but it is a **standalone control plane**:
 its own tables, its own login page, its own session cookie and its own UI. It
-does not reuse the SDK/MUNDO/BCORE tables or the SDK login session.
+does not reuse the MAK control-plane tables or the SDK login session.
 
 ## Live deployment
 
-- Panel: <https://panel.imranfarhat255.workers.dev>
-- Standalone control plane: <https://panel.imranfarhat255.workers.dev/opencode>
-- Standalone admin login: <https://panel.imranfarhat255.workers.dev/opencode/login>
-- Health: <https://panel.imranfarhat255.workers.dev/health>
+- Panel: <https://panel.itsalihasan75.workers.dev>
+- Standalone control plane: <https://panel.itsalihasan75.workers.dev/opencode>
+- Standalone admin login: <https://panel.itsalihasan75.workers.dev/opencode/login>
+- Health: <https://panel.itsalihasan75.workers.dev/health>
 
 The Worker is deployed with build `2026-11-10-pending-migration`. The app
 encryption key **no longer needs a Cloudflare secret**: a default transport
@@ -119,7 +119,7 @@ VALUES ('opencode_enc_key','<64 hex chars, or a passphrase>');
 matching key in `OpenCodeAndroid/.panel-secret` before shipping it.
 
 The app's native URL is embedded in `libopencode_boot.so`. The Worker URL in
-this repo's app counterpart is `https://panel.imranfarhat255.workers.dev`.
+this repo's app counterpart is `https://panel.itsalihasan75.workers.dev`.
 
 ## Deploy
 

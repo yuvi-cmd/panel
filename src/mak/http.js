@@ -134,6 +134,15 @@ export async function formParams(request) {
 }
 
 export async function formAll(request) {
+  const type = request.headers.get('Content-Type') || '';
+  if (type.includes('multipart/form-data')) {
+    const fd = await request.formData();
+    const sp = new URLSearchParams();
+    for (const [key, value] of fd) {
+      if (typeof value === 'string') sp.append(key, value);
+    }
+    return sp;
+  }
   const raw = await readBody(request);
   return new URLSearchParams(raw);
 }

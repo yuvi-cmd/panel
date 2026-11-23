@@ -1,5 +1,5 @@
 // Generated from schema.sql — keep both in sync.
-export const SCHEMA = `-- MUNDO ACTIVATION KEY (MAK/1) — Cloudflare D1 schema
+export const SCHEMA = `-- MAK ACTIVATION KEY (MAK/1) — Cloudflare D1 schema
 -- Fresh install:
 --   npx wrangler d1 execute panel --file=schema.sql
 -- The Worker also runs this idempotently on first request per isolate.

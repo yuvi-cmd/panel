@@ -320,12 +320,12 @@ export function layout(o) {
     + sideLabel('SDK Panel')
     + '<a href="/dashboard" class="back-link"><i class="bi bi-arrow-left-short text-2xl"></i><span>Back to Main Panel</span></a>'
     + '<a href="/sdk" class="' + navClass('sdk', route) + '"><i class="bi bi-speedometer2 text-lg w-6 text-center"></i> Dashboard</a>'
-    + '<a href="/sdk/generate" class="' + navClass('sdk/generate', route) + '"><i class="bi bi-key-fill text-lg w-6 text-center"></i> Generate SDK</a>'
-    + '<a href="/sdk/keys" class="' + navClass('sdk/keys', route) + '"><i class="bi bi-view-list text-lg w-6 text-center"></i> SDK Keys</a>'
+    + '<a href="/sdk/generate" class="' + navClass('sdk/generate', route) + '"><i class="bi bi-key-fill text-lg w-6 text-center"></i> Generate MAK</a>'
+    + '<a href="/sdk/keys" class="' + navClass('sdk/keys', route) + '"><i class="bi bi-view-list text-lg w-6 text-center"></i> MAK Keys</a>'
     + '<a href="/sdk/server" class="' + navClass('sdk/server', route) + '"><i class="bi bi-hdd-network-fill text-lg w-6 text-center"></i> Server</a>'
     + '<a href="/sdk/hash" class="' + navClass('sdk/hash', route) + '"><i class="bi bi-fingerprint text-lg w-6 text-center"></i> Hash</a>'
     + '<a href="/mak" class="' + navClass('mak', route) + '"><i class="bi bi-cpu-fill text-lg w-6 text-center"></i> MAK Activation</a>'
-    + '</nav><div class="p-3"><div class="clay-card rounded-xl p-3 flex items-center gap-2.5"><span class="status-dot"></span><div class="min-w-0"><p class="text-xs font-bold" style="color:var(--ink)">Engines live</p><p class="text-[11px] truncate" style="color:var(--muted)">Mundo + Bcore</p></div></div></div></aside>'
+    + '</nav><div class="p-3"><div class="clay-card rounded-xl p-3 flex items-center gap-2.5"><span class="status-dot"></span><div class="min-w-0"><p class="text-xs font-bold" style="color:var(--ink)">MAK activation</p><p class="text-[11px] truncate" style="color:var(--muted)">Protocol MAK/1</p></div></div></div></aside>'
     + '<div class="flex-1 flex flex-col h-screen overflow-y-auto relative w-full z-10">'
     + '<header class="glass-header sticky top-0 z-30"><div class="flex items-center gap-3 px-4 lg:px-8 h-16">'
     + '<button onclick="toggleSidebar()" class="md:hidden mode-btn" aria-label="Open menu"><i class="bi bi-list text-xl"></i></button>'
@@ -337,7 +337,7 @@ export function layout(o) {
     + '<div class="absolute right-0 mt-3 w-52 rounded-xl overflow-hidden bg-white border border-slate-200 shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all"><div class="p-3"><a href="/logout" class="flex items-center gap-3 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 rounded-xl font-medium"><i class="bi bi-box-arrow-right"></i> Sign Out</a></div></div>'
     + '</div></div></div></header>'
     + '<main class="p-4 md:p-8 pb-20 relative z-10"><div class="mx-auto w-full max-w-6xl">' + content + '</div></main></div>'
-    + PAL_SHELL + '<script>window.PGS=[["Back to main panel","/dashboard","bi-arrow-left-short"],["SDK dashboard","/sdk","bi-speedometer2"],["Generate SDK","/sdk/generate","bi-key-fill"],["SDK keys","/sdk/keys","bi-view-list"],["SDK server","/sdk/server","bi-hdd-network-fill"],["Hash vault","/sdk/hash","bi-fingerprint"],["MAK Activation","/mak","bi-cpu-fill"]];</script>'
+    + PAL_SHELL + '<script>window.PGS=[["Back to main panel","/dashboard","bi-arrow-left-short"],["MAK dashboard","/sdk","bi-speedometer2"],["Generate MAK","/sdk/generate","bi-key-fill"],["MAK keys","/sdk/keys","bi-view-list"],["MAK server","/sdk/server","bi-hdd-network-fill"],["Hash vault","/sdk/hash","bi-fingerprint"],["MAK console","/mak","bi-cpu-fill"]];</script>'
     + '<script>' + BASE_JS + '</script></body></html>';
 }
 
@@ -364,6 +364,6 @@ export function authPage(o) {
     + '<p class="mt-3 text-sm" style="color:#B9BCE0;">Issue, bind and monitor keys per tenant — from any device.</p>'
     + '</div></aside>'
     + '<main class="auth-main"><div class="fixed top-4 right-4 z-50">' + MODE_BTN + '</div>'
-    + '<div class="auth-box"><div class="glass-card auth-card p-6 md:p-8"><div class="mb-5"><h1 class="text-xl font-extrabold tracking-tight" style="color:var(--ink)">' + (isSetup ? 'Setup Admin' : 'Welcome Back') + '</h1><p class="text-[13px] mt-1" style="color:var(--muted)">SDK Panel - Mundo + Bcore</p></div>' + inner + '</div></div></main>'
+    + '<div class="auth-box"><div class="glass-card auth-card p-6 md:p-8"><div class="mb-5"><h1 class="text-xl font-extrabold tracking-tight" style="color:var(--ink)">' + (isSetup ? 'Setup Admin' : 'Welcome Back') + '</h1><p class="text-[13px] mt-1" style="color:var(--muted)">SDK Panel - MAK Activation</p></div>' + inner + '</div></div></main>'
     + '</div></body></html>';
 }

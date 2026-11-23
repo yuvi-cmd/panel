@@ -1,5 +1,5 @@
 // Backend router — every HTTP route of the Worker.
-// Backend modules ./ (crypto, api, security, db, connect, mundo, bcore…),
+// Backend modules ./ (crypto, api, security, db, connect, opencode…),
 // frontend page renderers ../frontend/*.
 
 // ---- backend ----
@@ -7,8 +7,6 @@ import { mundoSaltFromEnv, mundoAesKeyHex, hashPassword, verifyPassword, randomH
 import { handleApi } from './api.js';
 import { clientIp, hitRate, isProfessor } from './security.js';
 import { handleConnect, handleEncrypt, ensureModVersions, libUrlOk } from './connect.js';
-import { handleMundo } from './mundo.js';
-import { handleBcore } from './bcore.js';
 import { ensureDB } from './db.js';
 import { html, redir, parseCookies, formParams, tsMs, deny } from './http.js';
 import { getSession, sessCookie, clearCookie } from './session.js';
@@ -33,13 +31,20 @@ import { panelLayout } from '../frontend/panel-ui.js';
 import { loginPage, registerPage, resetPage, joinPage } from '../frontend/auth.js';
 import { dashboardPage, generatePage } from '../frontend/sdk/dash.js';
 import { keysPage } from '../frontend/sdk/keys.js';
-import { serverPage as sdkServerPage, hashPage as sdkHashPage } from '../frontend/sdk/server.js';
+import { serverPage as sdkServerPage, hashPage } from '../frontend/sdk/server.js';
 import { panelDashboard, panelGenerate, panelKeyList, KEY_PRICING, KEY_DURATIONS, arcxRand } from '../frontend/panel/dash.js';
 import { usersPage, adminsPage, permissionsPage, referralPage } from '../frontend/panel/users.js';
 import { serverPage, settingsPage, aesPage, apiTestPage, createPanelPage, loaderPage, MOD_FIELDS } from '../frontend/panel/system.js';
 import { professorDashboard } from '../frontend/panel/professor.js';
 import { getProfessorData } from './professor.js';
 import { opencodeLoginPage, opencodeAdminLayout, opencodeOverview, opencodeUsersPage, opencodeNoticesPage, opencodeSettingsPage } from '../frontend/opencode-admin.js';
+import { getAdminSession, verifyCsrf } from '../mak/auth.js';
+import { loadSigningConfig } from '../mak/crypto.js';
+import { logEvent } from '../mak/events.js';
+import { formAll as readFormAll, sameOrigin } from '../mak/http.js';
+import { defaultExpiryDate, issueMak } from '../mak/issue.js';
+import { getSettings, setSettings } from '../mak/settings.js';
+import { dashboardStats, getLicenseById, licenseCounts, listAllActiveGuests, listLicenses } from '../mak/store.js';
 
 
 export default {
@@ -60,8 +65,6 @@ export default {
       return new Response(JSON.stringify({ ok: true, build: '2026-11-17-connect-only', panel: mainPanel }), { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
     }
     if (path.startsWith('/encrypt/')) return handleEncrypt(request, db, decodeURIComponent(path.split('/')[2] || ''), env);
-    if (path.startsWith('/sdk/mundo/') || path === '/sdk/mundo') return handleMundo(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel), env);
-    if (path.startsWith('/sdk/bcore/') || path === '/sdk/bcore') return handleBcore(request, db, decodeURIComponent(path.split('/')[3] || url.searchParams.get('panel_code') || mainPanel), env);
     if (path.startsWith('/api/opencode/')) return handleOpenCodeApi(request, db, env);
     if (path.startsWith('/api/')) {
       const r = await handleApi(request, db, env);
@@ -802,117 +805,181 @@ export default {
       return P('create-panel', 'New Tenant', createPanelPage(list, { ok, error }));
     }
 
-    // ---------- SDK (main-owner only, same as PHP) ----------
+    // ---------- SDK Panel / MAK (main-owner only) ----------
     const sdkGate = () => (myId === 1 || isProfessor(sess) ? null : redir('/dashboard'));
+    const sdkAdmin = async () => {
+      const admin = await getAdminSession(db, request);
+      return admin && (Number(admin.id) === 1 || isProfessor(admin)) ? admin : null;
+    };
+
     if (path === '/sdk') {
       const g = sdkGate(); if (g) return g;
-      const q = async (sql, ...b) => (await db.prepare(sql).bind(...b).first().catch(() => ({})));
-      const mP = myPanel;
-      const d = {
-        mTotal: (await q('SELECT COUNT(*) c FROM mundo_keys WHERE panel_code=?', mP)).c || 0,
-        mActive: (await q('SELECT COUNT(*) c FROM mundo_keys WHERE panel_code=? AND is_blocked=0', mP)).c || 0,
-        mBlocked: (await q('SELECT COUNT(*) c FROM mundo_keys WHERE panel_code=? AND is_blocked=1', mP)).c || 0,
-        mPkgs: (await q('SELECT COUNT(*) c FROM mundo_key_bindings b JOIN mundo_keys k ON b.sdk_key_id=k.id WHERE k.panel_code=?', mP)).c || 0,
-        bTotal: (await q('SELECT COUNT(*) c FROM bcore_keys WHERE panel_code=?', mP)).c || 0,
-        bActive: (await q('SELECT COUNT(*) c FROM bcore_keys WHERE panel_code=? AND is_blocked=0', mP)).c || 0,
-        bBlocked: (await q('SELECT COUNT(*) c FROM bcore_keys WHERE panel_code=? AND is_blocked=1', mP)).c || 0,
-        bPkgs: (await q('SELECT COUNT(*) c FROM bcore_key_bindings b JOIN bcore_keys k ON b.sdk_key_id=k.id WHERE k.panel_code=?', mP)).c || 0,
-        recentM: (await db.prepare('SELECT * FROM mundo_keys WHERE panel_code=? ORDER BY id DESC LIMIT 5').bind(mP).all().catch(() => ({ results: [] }))).results || [],
-        recentB: (await db.prepare('SELECT * FROM bcore_keys WHERE panel_code=? ORDER BY id DESC LIMIT 5').bind(mP).all().catch(() => ({ results: [] }))).results || [],
-      };
-      return S('sdk', 'SDK Dashboard', dashboardPage(d));
+      const [stats, licenses, settings, config] = await Promise.all([
+        dashboardStats(db),
+        listLicenses(db, { q: '', status: 'ALL' }),
+        getSettings(db),
+        Promise.resolve(loadSigningConfig(env)),
+      ]);
+      return S('sdk', 'MAK Dashboard', dashboardPage({
+        stats,
+        recent: licenses.slice(0, 5),
+        server: {
+          enabled: settings.server_enabled,
+          signingReady: config.ok,
+          keyId: config.ok ? config.active.key_id : '',
+        },
+      }));
     }
+
     if (path === '/sdk/generate') {
       const g = sdkGate(); if (g) return g;
-      let success = '', error = '';
-      if (method === 'POST') {
-        const p = await formParams(request);
-        const engine = p.engine === 'BCORE' ? 'BCORE' : 'MUNDO';
-        let ck = String(p.sdk_key || '').trim();
-        const dur = parseInt(p.duration, 10), pkg = Math.max(1, parseInt(p.pkg_limit, 10) || 1), app = Math.max(1, parseInt(p.app_limit, 10) || 1);
-        const f1 = p.feature1 != null ? 1 : 0, f2 = p.feature2 != null ? 1 : 0;
-        const table = engine === 'BCORE' ? 'bcore_keys' : 'mundo_keys';
-        if (ck !== '' && ck.length < 5) error = 'Custom key must be at least 5 characters.';
-        else if (![7, 15, 30, 60].includes(dur)) error = 'Invalid duration.';
-        else if (pkg > 10 || app > 20) error = 'Limits too high.';
-        else {
-          if (!ck) ck = randomHexKey();
-          if (await db.prepare('SELECT id FROM ' + table + ' WHERE sdk_key=?').bind(ck).first().catch(() => null)) error = 'This SDK key already exists in ' + engine + '.';
-          else {
-            try { await db.prepare('INSERT INTO ' + table + ' (panel_code,sdk_key,duration_days,pkg_limit,app_limit,feature1,feature2,created_by) VALUES (?,?,?,?,?,?,?,?)').bind(myPanel, ck, dur, pkg, app, f1, f2, myId).run(); return redir('/sdk/generate?ok=1&e=' + encodeURIComponent(engine) + '&k=' + encodeURIComponent(ck)); }
-            catch (e) { error = 'Database error.'; }
-          }
-        }
-      } else if (url.searchParams.get('ok') === '1' && url.searchParams.get('k')) success = 'SDK Key Generated! Engine: ' + url.searchParams.get('e') + ' | Key: ' + url.searchParams.get('k');
-      return S('sdk/generate', 'Generate SDK', generatePage({ success, error }));
+      const admin = await sdkAdmin();
+      if (!admin) return redir('/login?next=' + encodeURIComponent('/sdk/generate'));
+      const settings = await getSettings(db);
+      const config = loadSigningConfig(env);
+      const server = { enabled: settings.server_enabled, signingReady: config.ok };
+      const guests = await listAllActiveGuests(db);
+
+      if (method === 'GET') {
+        return S('sdk/generate', 'Generate MAK', generatePage({
+          csrf: admin.csrf, guests, defaultExpiry: defaultExpiryDate(), server,
+        }));
+      }
+      if (method !== 'POST') return new Response('Method not allowed', { status: 405, headers: { Allow: 'GET, POST' } });
+      if (!sameOrigin(request)) return new Response('Cross-site request blocked.', { status: 403 });
+      const sp = await readFormAll(request);
+      if (!verifyCsrf(admin, sp.get('_csrf'))) return new Response('CSRF token rejected.', { status: 403 });
+
+      const values = {
+        label: String(sp.get('label') || ''),
+        user_ref: String(sp.get('user_ref') || ''),
+        expires_on: String(sp.get('expires_on') || ''),
+        max_devices: String(sp.get('max_devices') || ''),
+        max_activations: String(sp.get('max_activations') || ''),
+        session_ttl: String(sp.get('session_ttl') || ''),
+        host_package: String(sp.get('host_package') || ''),
+        host_cert: String(sp.get('host_cert') || ''),
+        host_bind_mode: String(sp.get('host_bind_mode') || 'FIRST_USE'),
+        notes: String(sp.get('notes') || ''),
+        guest_ids: sp.getAll('guest_ids'),
+      };
+
+      let issued;
+      try {
+        issued = await issueMak(db, sp, myId);
+      } catch (err) {
+        return S('sdk/generate', 'Generate MAK', generatePage({
+          csrf: admin.csrf, guests, values, error: 'Could not persist the MAK. Try again.',
+          defaultExpiry: defaultExpiryDate(), server,
+        }));
+      }
+      if (issued.error) {
+        return new Response(await S('sdk/generate', 'Generate MAK', generatePage({
+          csrf: admin.csrf, guests, values, error: issued.error,
+          defaultExpiry: defaultExpiryDate(), server,
+        })), { status: 400, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+      }
+
+      const license = await getLicenseById(db, issued.licenseId);
+      await logEvent(db, {
+        license_id: issued.licenseId,
+        event_type: 'LICENSE_ISSUED',
+        result: 'SUCCESS',
+        actor: sess.username,
+        detail: 'MAK issued from the SDK Panel',
+      }).catch(() => {});
+      return S('sdk/generate', 'MAK issued', generatePage({
+        csrf: admin.csrf, guests,
+        success: { credential: issued.credential, licenseId: issued.licenseId, license },
+        defaultExpiry: defaultExpiryDate(), server,
+      }));
     }
+
     if (path === '/sdk/keys') {
       const g = sdkGate(); if (g) return g;
-      if (method === 'POST') {
-        const p = await formParams(request);
-        const engine = p.engine === 'BCORE' ? 'BCORE' : 'MUNDO';
-        const kt = engine === 'BCORE' ? 'bcore_keys' : 'mundo_keys', bt = engine === 'BCORE' ? 'bcore_key_bindings' : 'mundo_key_bindings';
-        const kid = parseInt(p.key_id, 10) || 0, bid = parseInt(p.bind_id, 10) || 0;
-        const own = kid ? await db.prepare('SELECT id,pkg_limit,app_limit FROM ' + kt + ' WHERE id=? AND panel_code=?').bind(kid, myPanel).first().catch(() => null) : null;
-        if (own) {
-          const a = p.action;
-          if (a === 'block_key') await db.prepare('UPDATE ' + kt + ' SET is_blocked=1 WHERE id=?').bind(kid).run();
-          else if (a === 'unblock_key') await db.prepare('UPDATE ' + kt + ' SET is_blocked=0 WHERE id=?').bind(kid).run();
-          else if (a === 'delete_key') await db.prepare('DELETE FROM ' + kt + ' WHERE id=?').bind(kid).run();
-          else if (a === 'block_bind' && bid) await db.prepare('UPDATE ' + bt + ' SET is_blocked=1 WHERE id=? AND sdk_key_id=?').bind(bid, kid).run();
-          else if (a === 'unblock_bind' && bid) await db.prepare('UPDATE ' + bt + ' SET is_blocked=0 WHERE id=? AND sdk_key_id=?').bind(bid, kid).run();
-          else if (a === 'delete_bind' && bid) await db.prepare('DELETE FROM ' + bt + ' WHERE id=? AND sdk_key_id=?').bind(bid, kid).run();
-          else if (a === 'save_bind' && bid) {
-            const pn2 = String(p.pkg_name || '').trim(), an = String(p.app_name || '').trim();
-            if (pn2 && an) await db.prepare('UPDATE ' + bt + ' SET pkg_name=?,app_name=? WHERE id=? AND sdk_key_id=?').bind(pn2, an, bid, kid).run();
-          } else if (a === 'add_bind') {
-            const pn2 = String(p.pkg_name || '').trim(), an = String(p.app_name || '').trim();
-            if (pn2 && an) {
-              const c = await db.prepare('SELECT COUNT(*) c FROM ' + bt + ' WHERE sdk_key_id=?').bind(kid).first().catch(() => ({ c: 99 }));
-              if ((c?.c || 0) < own.pkg_limit * own.app_limit) await db.prepare('INSERT INTO ' + bt + ' (sdk_key_id,pkg_name,app_name) VALUES (?,?,?)').bind(kid, pn2, an).run();
-            }
-          }
-        }
-        return redir('/sdk/keys');
-      }
-      const fk = async (kt, bt) => {
-        const r = await db.prepare('SELECT * FROM ' + kt + ' WHERE panel_code=? ORDER BY id DESC').bind(myPanel).all().catch(() => ({ results: [] }));
-        const ks = r.results || [];
-        for (const k of ks) k.bindings = (await db.prepare('SELECT * FROM ' + bt + ' WHERE sdk_key_id=? ORDER BY id DESC').bind(k.id).all().catch(() => ({ results: [] }))).results || [];
-        return ks;
-      };
-      return S('sdk/keys', 'SDK Keys', keysPage(await fk('mundo_keys', 'mundo_key_bindings'), await fk('bcore_keys', 'bcore_key_bindings')));
+      const q = String(url.searchParams.get('q') || '').trim().slice(0, 120);
+      const status = String(url.searchParams.get('status') || 'ALL').toUpperCase();
+      const [licenses, counts] = await Promise.all([listLicenses(db, { q, status }), licenseCounts(db)]);
+      return S('sdk/keys', 'MAK Keys', keysPage({ licenses, counts, q, status }));
     }
+
     if (path === '/sdk/server') {
       const g = sdkGate(); if (g) return g;
+      const admin = await sdkAdmin();
+      if (!admin) return redir('/login?next=' + encodeURIComponent('/sdk/server'));
+
       if (method === 'POST') {
-        const p = await formParams(request);
-        if (p.toggle_maintenance) {
-          const e = p.engine === 'BCORE' ? 'BCORE' : 'MUNDO';
-          await db.prepare('INSERT INTO sdk_server_status (panel_code,engine,maintenance_mode,maintenance_message) VALUES (?,?,?,?) ON CONFLICT(panel_code,engine) DO UPDATE SET maintenance_mode=excluded.maintenance_mode,maintenance_message=excluded.maintenance_message').bind(myPanel, e, String(p.maintenance_mode) === '1' ? 1 : 0, String(p.maintenance_message || '').slice(0, 255)).run();
-          return redir('/sdk/server?toggled=' + e.toLowerCase());
+        if (!sameOrigin(request)) return new Response('Cross-site request blocked.', { status: 403 });
+        const sp = await readFormAll(request);
+        if (!verifyCsrf(admin, sp.get('_csrf'))) return new Response('CSRF token rejected.', { status: 403 });
+        if (String(sp.get('action') || '') === 'save') {
+          await setSettings(db, {
+            server_enabled: sp.has('server_enabled') ? '1' : '0',
+            maintenance_message: String(sp.get('maintenance_message') || '').slice(0, 300),
+          });
+          return redir('/sdk/server?ok=1');
         }
+        return redir('/sdk/server');
       }
-      const rows = (await db.prepare('SELECT engine,maintenance_mode,maintenance_message FROM sdk_server_status WHERE panel_code=?').bind(myPanel).all().catch(() => ({ results: [] }))).results || [];
-      let mM = 0, mS = '', bM = 0, bS = '';
-      for (const r of rows) { if (r.engine === 'MUNDO') { mM = r.maintenance_mode | 0; mS = r.maintenance_message || ''; } if (r.engine === 'BCORE') { bM = r.maintenance_mode | 0; bS = r.maintenance_message || ''; } }
-      return S('sdk/server', 'SDK Server', sdkServerPage({ mMaint: mM, mMsg: mS, bMaint: bM, bMsg: bS, host: url.host, panel: myPanel, toggled: url.searchParams.get('toggled') || '' }));
+
+      const [settings, stats] = await Promise.all([getSettings(db), dashboardStats(db)]);
+      const config = loadSigningConfig(env);
+      return S('sdk/server', 'Server & API', sdkServerPage({
+        enabled: settings.server_enabled,
+        settings,
+        stats,
+        signing: {
+          ok: config.ok,
+          reason: config.reason,
+          keyId: config.ok ? config.active.key_id : '',
+        },
+        host: url.host,
+        csrf: admin.csrf,
+        ok: url.searchParams.get('ok') === '1',
+      }));
     }
+
     if (path === '/sdk/hash') {
       const g = sdkGate(); if (g) return g;
+      const admin = await sdkAdmin();
+      if (!admin) return redir('/login?next=' + encodeURIComponent('/sdk/hash'));
+
       if (method === 'POST') {
-        const p = await formParams(request);
-        const e = p.engine === 'BCORE' ? 'BCORE' : 'MUNDO';
-        if (p.action === 'add_hash') {
-          const lb = String(p.hash_label || '').trim().slice(0, 100), vl = String(p.hash_value || '').trim().toLowerCase();
-          if (lb && /^[a-f0-9]{64}$/.test(vl)) await db.prepare('INSERT INTO sdk_hash_vault (panel_code,engine,hash_type,hash_label,hash_value) VALUES (?,?,?,?,?)').bind(myPanel, e, 'lib_signature', lb, vl).run();
-        } else if (p.action === 'delete_hash') await db.prepare('DELETE FROM sdk_hash_vault WHERE id=? AND panel_code=?').bind(parseInt(p.hash_id, 10) || 0, myPanel).run();
-        else if (p.action === 'toggle_hash') await db.prepare('UPDATE sdk_hash_vault SET is_active=1-is_active WHERE id=? AND panel_code=?').bind(parseInt(p.hash_id, 10) || 0, myPanel).run();
+        if (!sameOrigin(request)) return new Response('Cross-site request blocked.', { status: 403 });
+        const sp = await readFormAll(request);
+        if (!verifyCsrf(admin, sp.get('_csrf'))) return new Response('CSRF token rejected.', { status: 403 });
+        const action = String(sp.get('action') || '');
+        if (action === 'add_hash') {
+          const label = String(sp.get('hash_label') || '').trim().slice(0, 100);
+          const value = String(sp.get('hash_value') || '').trim().toLowerCase();
+          if (label && /^[a-f0-9]{64}$/.test(value)) {
+            await db.prepare('INSERT INTO sdk_hash_vault (panel_code,engine,hash_type,hash_label,hash_value) VALUES (?,?,?,?,?)')
+              .bind(myPanel, 'GENERAL', 'lib_signature', label, value).run();
+          }
+          return redir('/sdk/hash?ok=1');
+        }
+        if (action === 'delete_hash') {
+          await db.prepare('DELETE FROM sdk_hash_vault WHERE id=? AND panel_code=?')
+            .bind(parseInt(sp.get('hash_id'), 10) || 0, myPanel).run();
+          return redir('/sdk/hash?ok=1');
+        }
+        if (action === 'toggle_hash') {
+          await db.prepare('UPDATE sdk_hash_vault SET is_active=1-is_active WHERE id=? AND panel_code=?')
+            .bind(parseInt(sp.get('hash_id'), 10) || 0, myPanel).run();
+          return redir('/sdk/hash?ok=1');
+        }
         return redir('/sdk/hash');
       }
-      const mH = (await db.prepare('SELECT * FROM sdk_hash_vault WHERE panel_code=? AND engine=? ORDER BY id DESC').bind(myPanel, 'MUNDO').all().catch(() => ({ results: [] }))).results || [];
-      const bH = (await db.prepare('SELECT * FROM sdk_hash_vault WHERE panel_code=? AND engine=? ORDER BY id DESC').bind(myPanel, 'BCORE').all().catch(() => ({ results: [] }))).results || [];
-      return S('sdk/hash', 'SDK Hash', sdkHashPage({ mHashes: mH, bHashes: bH, mActive: mH.find(h => h.is_active) || null, bActive: bH.find(h => h.is_active) || null, salt: mundoSaltFromEnv(env), aesHex: mundoAesKeyHex(mundoSaltFromEnv(env)) }));
+
+      const hashes = (await db.prepare('SELECT * FROM sdk_hash_vault WHERE panel_code=? ORDER BY is_active DESC, id DESC')
+        .bind(myPanel).all().catch(() => ({ results: [] }))).results || [];
+      return S('sdk/hash', 'Hash Vault', hashPage({
+        hashes,
+        salt: mundoSaltFromEnv(env),
+        aesHex: mundoAesKeyHex(mundoSaltFromEnv(env)),
+        csrf: admin.csrf,
+        ok: url.searchParams.get('ok') === '1' ? 'Hash vault updated.' : '',
+      }));
     }
 
     // ---------- OPENCODE APP ----------

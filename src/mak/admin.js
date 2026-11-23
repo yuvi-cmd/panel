@@ -4,7 +4,7 @@
 
 import { getAdminSession, verifyCsrf } from './auth.js';
 import {
-  canonicalMak, clampInt, generateLicenseUid, generateMak, hashIp, nowS,
+  canonicalMak, clampInt, generateMak, hashIp, nowS,
   loadSigningConfig, makHash, normalizeHex64, signingPublicKeys, validPackageName,
 } from './crypto.js';
 import { getSettings, setSettings } from './settings.js';
@@ -15,7 +15,7 @@ import {
   clientIp, flashRedirect, formAll, html, sameOrigin, text,
 } from './http.js';
 import {
-  activeLicenseOptions, bindGuest, createGuest, createLicenseRecord, dashboardStats,
+  activeLicenseOptions, bindGuest, createGuest, dashboardStats,
   deleteDevice, deleteHost, deviceCounts, devicesForLicense, eventCounts, expiringLicenses,
   getDeviceById, getGuestById, getHostForLicense, getLicenseById, getSession,
   guestCounts, guestEvents, hostCounts, licenseCounts, listAllActiveGuests,
@@ -37,8 +37,9 @@ import { sessionsPage } from './pages/sessions.js';
 import { settingsPage } from './pages/settings.js';
 import { emptyState, icon, layout, pageHeader } from './ui.js';
 import { hashPassword as hashPanelPassword, verifyPassword as verifyPanelPassword } from '../backend/crypto.js';
+import { issueMak, parseLicensePolicy } from './issue.js';
 
-const PANEL_DEFAULT = 'MUNDO MAK';
+const PANEL_DEFAULT = 'MAK Activation';
 const FLASH_MAX = 380;
 
 function clipFlash(value) {
@@ -94,53 +95,6 @@ function notFoundResponse(env, request, admin, session, settings, config, messag
     content: `${pageHeader({ eyebrow: '404', title: 'Not found', subtitle: message })}
       ${emptyState('search', 'Nothing here', 'Check the address, or go back to the overview.', `<a class="btn btn-primary" href="/dashboard">${icon('grid', 15)} Dashboard</a>`)}`,
   });
-}
-
-function readPolicy(sp) {
-  const label = String(sp.get('label') || '').trim();
-  if (!label || label.length > 80) return { error: 'Label is required and must be 80 characters or fewer.' };
-  const userRef = String(sp.get('user_ref') || '').trim().slice(0, 120);
-  const notes = String(sp.get('notes') || '').trim().slice(0, 1000);
-  const expiresOn = String(sp.get('expires_on') || '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(expiresOn)) return { error: 'Choose a valid expiry date.' };
-  const parsed = Date.parse(expiresOn + 'T23:59:59+05:30');
-  if (!Number.isFinite(parsed)) return { error: 'Expiry date is invalid.' };
-  const expiresAt = Math.floor(parsed / 1000);
-  if (expiresAt <= nowS() + 60) return { error: 'Expiry must be in the future (IST end of day).' };
-
-  const maxDevices = clampInt(sp.get('max_devices'), 1, 100, 0);
-  const maxActivations = clampInt(sp.get('max_activations'), 1, 1000, 0);
-  const sessionTtl = clampInt(sp.get('session_ttl'), 300, 86400, 0);
-  if (!maxDevices || !maxActivations || !sessionTtl) {
-    return { error: 'Device, activation or session limits are outside the allowed range.' };
-  }
-  if (maxActivations < maxDevices) return { error: 'Max activations must be at least max devices.' };
-
-  const hostPackage = String(sp.get('host_package') || '').trim();
-  const hostCert = normalizeHex64(sp.get('host_cert'));
-  let host = null;
-  if (hostPackage || hostCert) {
-    if (!validPackageName(hostPackage)) return { error: 'Host package name is malformed.' };
-    if (!hostCert) return { error: 'Host signing certificate SHA-256 must be 64 hex characters.' };
-    host = { package_name: hostPackage, cert_sha256: hostCert };
-  }
-
-  const mode = String(sp.get('host_bind_mode') || '').toUpperCase();
-  const hostBindMode = mode === 'STRICT' ? 'STRICT' : mode === 'FIRST_USE' ? 'FIRST_USE' : '';
-  if (hostBindMode === 'STRICT' && !host) {
-    return { error: 'Strict host mode requires a pre-registered host package and certificate.' };
-  }
-
-  const guestIds = [...new Set(sp.getAll('guest_ids').map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0))];
-
-  const policy = {
-    label, user_ref: userRef, notes, expires_at: expiresAt,
-    max_devices: maxDevices, max_activations: maxActivations,
-    session_ttl: sessionTtl,
-  };
-  if (hostBindMode) policy.host_bind_mode = hostBindMode;
-
-  return { policy, host, guestIds };
 }
 
 function readGuestIdentity(sp) {
@@ -268,7 +222,7 @@ export async function handleMakAdmin(request, env, db) {
       notes: String(sp.get('notes') || ''),
       guest_ids: sp.getAll('guest_ids'),
     };
-    const parsed = readPolicy(sp);
+    const parsed = parseLicensePolicy(sp);
     const guests = await listAllActiveGuests(db);
     if (parsed.error) {
       return panelResponse(env, request, session, session, settings, config, {
@@ -282,22 +236,9 @@ export async function handleMakAdmin(request, env, db) {
         }),
       });
     }
-    const validGuestIds = new Set(guests.map((g) => Number(g.id)));
-    const guestIds = parsed.guestIds.filter((id) => validGuestIds.has(id));
-    const credential = generateMak();
-    const canonical = canonicalMak(credential);
-    const credentialHash = await makHash(canonical);
-    const licenseUid = generateLicenseUid();
-    let licenseId = 0;
+    let issued;
     try {
-      licenseId = await createLicenseRecord(db, {
-        license_uid: licenseUid,
-        credential_hash: credentialHash,
-        ...parsed.policy,
-        host: parsed.host,
-        guest_ids: guestIds,
-        created_by: session.id,
-      });
+      issued = await issueMak(db, sp, session.id);
     } catch (err) {
       return panelResponse(env, request, session, session, settings, config, {
         title: 'Issue MAK',
@@ -310,11 +251,24 @@ export async function handleMakAdmin(request, env, db) {
         }),
       });
     }
+    if (issued.error) {
+      return panelResponse(env, request, session, session, settings, config, {
+        title: 'Issue MAK',
+        active: 'licenses',
+        status: 400,
+        content: newLicensePage({
+          csrf: session.csrf, guests, error: issued.error, values,
+          defaultExpiry: defaultExpiryDate(),
+          server: { enabled: settings.server_enabled, signingReady: config.ok },
+        }),
+      });
+    }
+    const { credential, licenseId } = issued;
     const license = await getLicenseById(db, licenseId);
     await logEvent(db, {
       license_id: licenseId, event_type: 'LICENSE_ISSUED', result: 'SUCCESS',
       actor: session.username, ip_hash: ipHash,
-      detail: 'MAK issued for ' + (licenseUid || 'license'),
+      detail: 'MAK issued for ' + (license?.license_uid || 'license'),
     });
     return panelResponse(env, request, session, session, settings, config, {
       title: 'MAK issued',
@@ -361,7 +315,7 @@ export async function handleMakAdmin(request, env, db) {
       const fail = (message) => mkFlash(`/licenses/${id}`, '', message);
 
       if (action === 'update_policy') {
-        const parsed = readPolicy(sp);
+        const parsed = parseLicensePolicy(sp);
         if (parsed.error) return fail(parsed.error);
         await updateLicensePolicy(db, id, parsed.policy);
         await logEvent(db, { license_id: id, event_type: 'LICENSE_UPDATED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'License policy updated' });

@@ -93,7 +93,7 @@ export function professorDashboard(sess, data) {
 
   const quick = [
     ['New Tenant', '/create-panel', 'bi-server', 'Create, limit, auto-join'],
-    ['SDK Panel', '/sdk', 'bi-boxes', 'MUNDO + BCORE keys'],
+    ['SDK Panel', '/sdk', 'bi-boxes', 'MAK licenses + devices'],
     ['API Tester', '/api-test', 'bi-broadcast', 'Connect + encrypt live'],
     ['Set Mod/Loader', '/loader-manager', 'bi-box-seam-fill', 'Versions + tags'],
     ['Server & Mod', '/server', 'bi-hdd-fill', 'Maintenance + features'],

@@ -30,7 +30,6 @@ CREATE TABLE IF NOT EXISTS panels (
   is_active INTEGER NOT NULL DEFAULT 1,
   encryption_subscription INTEGER NOT NULL DEFAULT 0,
   tg_subscription INTEGER NOT NULL DEFAULT 0,
-  mundo_service INTEGER NOT NULL DEFAULT 0,
   admin_role INTEGER NOT NULL DEFAULT 0,
   reseller_role INTEGER NOT NULL DEFAULT 0,
   account_limit INTEGER NOT NULL DEFAULT 0,
@@ -153,60 +152,14 @@ CREATE TABLE IF NOT EXISTS mod_loaders (
 );
 
 -- ===== SDK tables (already live, yahi rehni chahiye) =====
-CREATE TABLE IF NOT EXISTS mundo_keys (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  panel_code TEXT NOT NULL DEFAULT 'YUVI_001',
-  sdk_key TEXT NOT NULL UNIQUE,
-  duration_days INTEGER NOT NULL DEFAULT 30,
-  pkg_limit INTEGER NOT NULL DEFAULT 1,
-  app_limit INTEGER NOT NULL DEFAULT 1,
-  feature1 INTEGER NOT NULL DEFAULT 0,
-  feature2 INTEGER NOT NULL DEFAULT 0,
-  is_blocked INTEGER NOT NULL DEFAULT 0,
-  created_by INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_mundo_panel ON mundo_keys(panel_code);
 
-CREATE TABLE IF NOT EXISTS mundo_key_bindings (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  sdk_key_id INTEGER NOT NULL,
-  pkg_name TEXT NOT NULL,
-  app_name TEXT NOT NULL,
-  is_blocked INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
 
-CREATE TABLE IF NOT EXISTS bcore_keys (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  panel_code TEXT NOT NULL DEFAULT 'YUVI_001',
-  sdk_key TEXT NOT NULL UNIQUE,
-  duration_days INTEGER NOT NULL DEFAULT 30,
-  pkg_limit INTEGER NOT NULL DEFAULT 1,
-  app_limit INTEGER NOT NULL DEFAULT 1,
-  feature1 INTEGER NOT NULL DEFAULT 0,
-  feature2 INTEGER NOT NULL DEFAULT 0,
-  is_blocked INTEGER NOT NULL DEFAULT 0,
-  created_by INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_bcore_panel ON bcore_keys(panel_code);
 
-CREATE TABLE IF NOT EXISTS bcore_key_bindings (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  sdk_key_id INTEGER NOT NULL,
-  pkg_name TEXT NOT NULL,
-  app_name TEXT NOT NULL,
-  is_blocked INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
 
 CREATE TABLE IF NOT EXISTS sdk_hash_vault (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   panel_code TEXT NOT NULL DEFAULT 'YUVI_001',
-  engine TEXT NOT NULL DEFAULT 'MUNDO',
+  engine TEXT NOT NULL DEFAULT 'GENERAL',
   hash_type TEXT NOT NULL DEFAULT 'lib_signature',
   hash_label TEXT NOT NULL,
   hash_value TEXT NOT NULL,
@@ -214,15 +167,6 @@ CREATE TABLE IF NOT EXISTS sdk_hash_vault (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS sdk_server_status (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  panel_code TEXT NOT NULL DEFAULT 'YUVI_001',
-  engine TEXT NOT NULL,
-  maintenance_mode INTEGER NOT NULL DEFAULT 0,
-  maintenance_message TEXT,
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE(panel_code, engine)
-);
 
 CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,

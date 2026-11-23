@@ -15,11 +15,9 @@ security audit. Re-test before production.
    code could create a panel OWNER. Now: generation coerces to
    ADMIN/RESELLER, registration coerces legacy OWNER codes to ADMIN.
    Tests: `OWNER referral coerced`, `legacy OWNER referral coerced`.
-3. **BCORE tenant-squatting.** `handleBcore` ran
-   `INSERT OR IGNORE INTO panels` for any path panel code, letting
-   unauthenticated callers create panel rows. Removed; unknown/inactive
-   panels get 404 like `/connect` and `/mundo`.
-   Tests: `bcore unknown panel rejected`, `does not auto-create panels`.
+3. **BCORE/MUNDO removed.** The legacy `/sdk/bcore/*` and `/sdk/mundo/*`
+   activation endpoints and their admin pages are gone; `/sdk` now issues
+   MAK/1 licenses. Tests assert both legacy endpoints return 404.
 4. **Reflected-XSS surface.** `alerts()` injected `error` unescaped (the
    device-lock message carried raw HTML), and `esc()` ignored single quotes,
    so `custom_key` values could break `onclick="doCopy('…')"` handlers.
@@ -45,7 +43,7 @@ security audit. Re-test before production.
 
 ## Deliberately NOT changed (compat)
 
-- **RC4 (BCORE), AES-128-ECB (MUNDO), MD5 tokens, single-round
+- **Legacy RC4/BCORE, AES-128-ECB/MUNDO helpers, MD5 tokens, single-round
   SHA-256(salt+password), `Vm8Lk7…` token salt.** These are client-visible
   protocols: rotating them breaks installed clients. Hardcoded values are now
   documented **legacy fallbacks** overridable without redeploy via encrypted

@@ -4,7 +4,7 @@ import { esc, fmtDateTime } from '../http.js';
 function csrfInput(csrf) { return `<input type="hidden" name="_csrf" value="${esc(csrf)}">`; }
 
 export function settingsPage({
-  admin, csrf, server, signing, settings, stats = {}, panelName = 'MUNDO MAK', error = '', ok = '',
+  admin, csrf, server, signing, settings, stats = {}, panelName = 'MAK Activation', error = '', ok = '',
 }) {
   const on = !!server.enabled;
   const keys = signing?.keys || [];
