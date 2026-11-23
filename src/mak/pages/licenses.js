@@ -254,7 +254,7 @@ export function licenseDetailPage({
               ${field('Max activations', `<input type="number" name="max_activations" min="1" max="1000" value="${license.max_activations}" required>`)}
               ${field('Max host packages', `<input type="number" name="max_packages" min="1" max="100" value="${license.max_packages || 1}" required>`, 'Kitne host APK package names is MAK se bind ho sakte hain.')}
               ${field('Max apps per package', `<input type="number" name="max_apps" min="1" max="100" value="${license.max_apps || 2}" required>`, 'Har host package ke liye kitne guest apps.')}
-              ${field('Max installs per package', `<input type="number" name="max_installs" min="1" max="100" value="${license.max_installs || 3}" required>`, 'Active grants (seats) per host package.')}
+              <input type="hidden" name="max_installs" value="${license.max_installs || 3}">
               ${field('Signature Bind', `<select name="signature_bind">
                 <option value="1" ${Number(license.signature_bind ?? 1) ? 'selected' : ''}>Yes — verify APK signature</option>
                 <option value="0" ${!Number(license.signature_bind ?? 1) ? 'selected' : ''}>No — package + app name only</option>
@@ -347,7 +347,12 @@ export function licenseDetailPage({
             <dt>Rotated</dt><dd>${license.rotated_at ? esc(fmtDate(license.rotated_at)) : 'Never'}</dd>
             <dt>Status</dt><dd>${effective}</dd>
           </dl>
-          <div class="notice" style="margin:14px 0 0">${icon('lock', 17)}<div>The MAK is not recoverable. Rotate to generate and reveal a new one.</div></div>
+          <div class="notice" style="margin:14px 0 0">${icon('lock', 17)}<div>The raw MAK is visible on MAK Keys. Rotate to replace it, or delete the MAK permanently below.</div></div>
+          <div class="divider"></div>
+          <form method="post" action="/licenses/${license.id}/action" onsubmit="return askConfirm(this.form,'Delete this MAK permanently?','The license and all of its host bindings, guest bindings, install grants, devices and sessions are removed. Security event history is kept. This cannot be undone.','danger')">
+            ${csrfInput(csrf)}<input type="hidden" name="action" value="delete">
+            <button class="btn btn-danger" style="width:100%" type="submit">${icon('trash', 15)} Delete MAK</button>
+          </form>
         </div>
       </div>
     </div>`;

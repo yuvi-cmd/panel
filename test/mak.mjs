@@ -587,6 +587,12 @@ async function main() {
     assert.equal(Number(raised.max_apps), 4);
     assert.equal(Number(raised.max_installs), 5);
 
+    // The Install Seats control is hidden from the UI. A limits update that
+    // omits the field must keep the existing backend seat policy untouched.
+    assert.equal((await action({ action: 'extend_limits', max_packages: '3', max_apps: '4' })).status, 303);
+    const kept = await env.DB.prepare('SELECT * FROM mak_licenses WHERE id=?').bind(license.id).first();
+    assert.equal(Number(kept.max_installs), 5);
+
     assert.equal((await action({ action: 'host_save', host_package: 'com.quick.host', host_app_name: 'Quick', host_cert: '' })).status, 303);
     const host = await env.DB.prepare('SELECT * FROM mak_hosts WHERE license_id=? ORDER BY id DESC LIMIT 1').bind(license.id).first();
     assert.equal(host.package_name, 'com.quick.host');
@@ -606,6 +612,70 @@ async function main() {
     assert.match(html, /MAK details &amp; quick actions/);
     assert.match(html, /Extend limits/);
     assert.match(html, /host_block|host_unblock/);
+    assert.match(html, /Delete MAK/);
+    assert.doesNotMatch(html, /INSTALL SEATS/);
+    assert.doesNotMatch(html, /Install seats \/ package/);
+
+    const detail = await call(env, '/sdk/keys/' + license.id, { cookie });
+    const detailHtml = await detail.text();
+    assert.equal(detail.status, 200);
+    assert.doesNotMatch(detailHtml, /Max installs per package/);
+    assert.match(detailHtml, /Delete MAK/);
+  });
+
+  await test('Delete MAK removes the license and all runtime rows', async () => {
+    const env = globalThis.__lastEnv;
+    const { cookie, token } = env.__test;
+    const issued = await issueLicense(env, cookie, token, {
+      label: 'Delete me', signature_bind: '0', max_installs: '5',
+    });
+    assert.ok(issued.mak, issued.html.slice(0, 500));
+    const license = await env.DB.prepare('SELECT * FROM mak_licenses ORDER BY id DESC LIMIT 1').first();
+
+    const activated = await activate(env, issued.mak, { hostPackage: 'com.delete.host', hostCert: '' });
+    assert.equal(activated.body.decision, 'ALLOW', JSON.stringify(activated.body));
+    const now = nowS();
+    await env.DB.prepare('INSERT INTO mak_bindings (license_id,host_id,guest_app_id,created_at,updated_at) VALUES (?,?,?,?,?)')
+      .bind(license.id, 0, 9999, now, now).run();
+    await env.DB.prepare('INSERT INTO mak_devices (device_uid,license_id,public_key,fingerprint,registered_at) VALUES (?,?,?,?,?)')
+      .bind('DEV-DELETE-TEST', license.id, 'spki:test', 'fp-delete', now).run();
+    await env.DB.prepare('INSERT INTO mak_sessions (id,license_id,device_id,issued_at,expires_at) VALUES (?,?,?,?,?)')
+      .bind('SESS-DELETE-TEST', license.id, 1, now, now + 3600).run();
+
+    const res = await call(env, '/sdk/keys/' + license.id + '/action', {
+      method: 'POST', cookie, body: form({ _csrf: token, action: 'delete' }),
+    });
+    assert.equal(res.status, 303);
+    assert.match(String(res.headers.get('Location') || ''), /^\/sdk\/keys\?ok=/);
+
+    for (const table of ['mak_hosts', 'mak_bindings', 'mak_grants', 'mak_devices', 'mak_sessions']) {
+      const row = await env.DB.prepare(`SELECT COUNT(*) AS c FROM ${table} WHERE license_id=?`).bind(license.id).first();
+      assert.equal(Number(row.c), 0, table + ' rows must be removed');
+    }
+    const gone = await env.DB.prepare('SELECT id FROM mak_licenses WHERE id=?').bind(license.id).first();
+    assert.equal(gone, null);
+
+    const event = await env.DB.prepare("SELECT * FROM mak_events WHERE event_type='LICENSE_DELETED' ORDER BY id DESC LIMIT 1").first();
+    assert.ok(event, 'deletion is written to the security log');
+    assert.equal(Number(event.license_id || 0), 0);
+    assert.match(event.detail, new RegExp(license.license_uid));
+
+    const page = await call(env, '/sdk/keys', { cookie });
+    const html = await page.text();
+    assert.ok(!html.includes(license.license_uid), 'deleted MAK is no longer listed');
+  });
+
+  await test('Guest Apps, Hosts, Devices, Sessions and Logs keep the original MAK shell', async () => {
+    const env = globalThis.__lastEnv;
+    const { cookie } = env.__test;
+    for (const path of ['/sdk/guests', '/sdk/hosts', '/sdk/devices', '/sdk/sessions', '/sdk/logs']) {
+      const res = await call(env, path, { cookie });
+      const html = await res.text();
+      assert.equal(res.status, 200, path);
+      assert.match(html, /<div class="app">/, path + ' uses the MAK admin shell');
+      assert.match(html, /SDK PANEL · MAK\/2/, path + ' shows the MAK sidebar brand');
+      assert.doesNotMatch(html, /glass-sidebar/, path + ' must not use the glass SDK shell');
+    }
   });
 
   await test('MAK/1 endpoints are removed', async () => {

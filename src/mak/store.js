@@ -171,6 +171,24 @@ export async function revokeLicense(db, id, reason, actor = 'ADMIN') {
   await recordRevocation(db, 'LICENSE', String(id), reason, actor);
 }
 
+// Hard delete. Unlike revoke (which keeps the row for audit), this removes the
+// MAK and every runtime row that belongs to it. Security events are kept on
+// purpose so the audit trail survives; they have no foreign key on license_id.
+export async function deleteLicense(db, id) {
+  const license = await getLicenseById(db, id);
+  if (!license) return null;
+  await db.batch([
+    db.prepare('DELETE FROM mak_sessions WHERE license_id=?').bind(Number(id)),
+    db.prepare('DELETE FROM mak_grants WHERE license_id=?').bind(Number(id)),
+    db.prepare('DELETE FROM mak_bindings WHERE license_id=?').bind(Number(id)),
+    db.prepare('DELETE FROM mak_hosts WHERE license_id=?').bind(Number(id)),
+    db.prepare('DELETE FROM mak_devices WHERE license_id=?').bind(Number(id)),
+    db.prepare('DELETE FROM mak_challenges WHERE license_id=?').bind(Number(id)),
+    db.prepare('DELETE FROM mak_licenses WHERE id=?').bind(Number(id)),
+  ]);
+  return license;
+}
+
 export async function rotateLicenseCredential(db, id, hash, plain = '') {
   await db.prepare('UPDATE mak_licenses SET credential_hash=?,credential_plain=?,rotated_at=?,updated_at=? WHERE id=?')
     .bind(hash, String(plain || '').slice(0, 120), nowS(), nowS(), Number(id)).run();

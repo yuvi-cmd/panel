@@ -17,7 +17,7 @@ import {
 } from './http.js';
 import {
   activeLicenseOptions, bindGuest, createGuest, dashboardStats,
-  deleteDevice, deleteHost, deviceCounts, devicesForLicense, eventCounts, expiringLicenses,
+  deleteDevice, deleteHost, deleteLicense, deviceCounts, devicesForLicense, eventCounts, expiringLicenses,
   getDeviceById, getGuestById, getHostById, getHostForLicense, getHostsForLicense, getLicenseById, getSession,
   guestCounts, guestEvents, hostCounts, licenseCounts, listAllActiveGuests,
   listBindingsForGuest, listBindingsForLicense, listDevices, listGuests, listHosts,
@@ -416,6 +416,17 @@ export async function handleMakAdmin(request, env, db, options = {}) {
         await revokeLicense(db, id, 'Permanent revocation from panel', session.username);
         await logEvent(db, { license_id: id, event_type: 'LICENSE_REVOKED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'License permanently revoked' });
         return done('License revoked permanently.');
+      }
+      if (action === 'delete' || action === 'license_delete') {
+        const deleted = await deleteLicense(db, id);
+        if (!deleted) return notFoundResponse(env, request, session, session, settings, config, 'That license does not exist.');
+        // The license row is gone, so log the deletion without a license_id.
+        // Events tied to the old license are intentionally kept as audit trail.
+        await logEvent(db, {
+          event_type: 'LICENSE_DELETED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash,
+          detail: 'MAK deleted permanently: ' + deleted.license_uid + (deleted.label ? ' (' + deleted.label + ')' : ''),
+        });
+        return flash('/licenses', 'MAK deleted permanently. Its hosts, bindings, grants, devices and sessions were removed.');
       }
       if (action === 'rotate') {
         const credential = generateMak();

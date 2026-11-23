@@ -56,7 +56,6 @@ export function keysPage(o) {
     const hosts = hostsByLicense.get(id) || [];
     const maxPackages = Number(l.max_packages || 1);
     const maxApps = Number(l.max_apps || 2);
-    const maxInstalls = Number(l.max_installs || 3);
 
     const hostList = hosts.length ? hosts.map((h) => {
       const blocked = String(h.status || '').toUpperCase() !== 'ACTIVE';
@@ -84,7 +83,6 @@ export function keysPage(o) {
       + infoRow('Expiry', esc(fmtDate(l.expires_at)))
       + infoRow('Package limit', pkgCount + ' / ' + maxPackages + ' used')
       + infoRow('App names / package', String(maxApps))
-      + infoRow('Install seats / package', String(maxInstalls))
       + infoRow('User ref', l.user_ref ? esc(l.user_ref) : '—')
       + '</div>'
       + '<div class="grid md:grid-cols-2 gap-3 mt-3">'
@@ -95,10 +93,9 @@ export function keysPage(o) {
         + '</select><button class="btn-premium px-3 py-2 rounded-xl text-[11px] font-extrabold">Extend</button></div>')
       + actionForm(csrf, id, '<p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-2">Extend limits</p>'
         + '<input type="hidden" name="action" value="extend_limits">'
-        + '<div class="grid grid-cols-4 gap-2 items-end">'
+        + '<div class="grid grid-cols-3 gap-2 items-end">'
         + '<div><p class="text-[9px] text-slate-400 font-bold mb-1">PKG</p><input type="number" name="max_packages" min="1" max="100" value="' + maxPackages + '" class="w-full clay-card px-2 py-2 text-xs rounded-lg"></div>'
         + '<div><p class="text-[9px] text-slate-400 font-bold mb-1">APPS</p><input type="number" name="max_apps" min="1" max="100" value="' + maxApps + '" class="w-full clay-card px-2 py-2 text-xs rounded-lg"></div>'
-        + '<div><p class="text-[9px] text-slate-400 font-bold mb-1">SEATS</p><input type="number" name="max_installs" min="1" max="100" value="' + maxInstalls + '" class="w-full clay-card px-2 py-2 text-xs rounded-lg"></div>'
         + '<button class="btn-premium px-2 py-2 rounded-lg text-[10px] font-extrabold">Save</button>'
         + '</div>')
       + '</div>'
@@ -112,6 +109,13 @@ export function keysPage(o) {
         + '<button class="clay-card px-3 py-2 rounded-lg text-[10px] font-extrabold text-purple-600">Add pkg</button></div>')
       + '<div class="mt-3"><p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">Bound packages</p>' + hostList + '</div>'
       + blockForms
+      + '<div class="mt-4 pt-3 border-t border-red-100">'
+      + '<p class="text-[10px] font-extrabold uppercase tracking-wider text-red-400 mb-1">Danger zone</p>'
+      + '<form method="post" action="/sdk/keys/' + id + '/action" onsubmit="return confirm(\'Delete this MAK permanently? All hosts, guest bindings, install grants, devices and sessions will be removed. This cannot be undone.\')">'
+      + '<input type="hidden" name="_csrf" value="' + esc(csrf) + '">'
+      + '<input type="hidden" name="action" value="delete">'
+      + '<button type="submit" class="w-full px-3 py-2 rounded-xl text-[11px] font-extrabold bg-red-50 text-red-600 hover:bg-red-100"><i class="bi bi-trash3 mr-1"></i> Delete MAK</button>'
+      + '</form></div>'
       + '</details>';
 
     const hostLine = l.host_package
@@ -135,15 +139,14 @@ export function keysPage(o) {
       + '<div class="mt-2">' + hostLine + '</div></div>'
       + '<button type="button" onclick="openMakDetails(' + id + ')" class="btn-premium px-4 py-2 rounded-xl text-xs font-bold">Details</button></div>'
       + secretBox
-      + '<div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-4">'
+      + '<div class="grid grid-cols-3 gap-2 mt-4">'
       + '<div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">PACKAGES</p><p class="text-xs font-black">' + pkgCount + ' / ' + maxPackages + '</p></div>'
       + '<div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">APPS / PKG</p><p class="text-xs font-black">' + Number(l.guest_count || 0) + ' / ' + maxApps + '</p></div>'
-      + '<div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">INSTALL SEATS</p><p class="text-xs font-black">' + maxInstalls + '</p></div>'
       + '<div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">DEVICES</p><p class="text-xs font-black">' + Number(l.device_count || 0) + ' / ' + Number(l.max_devices || 0) + '</p></div></div>'
       + details + '</div>';
   }).join('') : '<div class="glass-card p-10 text-center"><i class="bi bi-inbox text-5xl text-slate-300 mb-3"></i><p class="text-slate-500 text-sm">No MAK licenses found</p><a href="/sdk/generate" class="inline-block mt-3 btn-premium px-6 py-2.5 rounded-xl text-xs font-bold">Generate MAK</a></div>';
 
-  return '<div class="pagehead"><div class="ph-ic"><i class="bi bi-view-list"></i></div><div class="flex-1 min-w-0"><h1 class="truncate">MAK Keys</h1><p class="truncate">Tap a key card for full info, extend limits or block a package</p></div></div>'
+  return '<div class="pagehead"><div class="ph-ic"><i class="bi bi-view-list"></i></div><div class="flex-1 min-w-0"><h1 class="truncate">MAK Keys</h1><p class="truncate">Tap Details to extend limits, block a package or delete a MAK</p></div></div>'
     + '<div class="glass-card p-4 mb-4"><form method="GET" action="/sdk/keys" class="flex flex-wrap gap-2 items-center">'
     + '<input type="hidden" name="status" value="' + esc(status) + '">'
     + '<div class="clay-card px-3 py-2 flex items-center gap-2 flex-1 rounded-xl" style="min-width:220px"><i class="bi bi-search text-slate-400"></i><input name="q" value="' + esc(q) + '" placeholder="Search license ID, label, user or host package" class="bg-transparent text-sm flex-1 outline-none"></div>'
