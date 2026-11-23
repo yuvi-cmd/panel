@@ -1,238 +1,428 @@
-import { createCipheriv, createDecipheriv } from 'node:crypto';
+// MAK/1 cryptography helpers — WebCrypto + TweetNaCl Ed25519.
+// No static AES/master secret lives here. Server signing seeds are Worker
+// secrets (MAK_SIGNING_KEY / MAK_SIGNING_KEYS). MAK credentials are stored as
+// SHA-256 verifiers only.
 
-// ---------------------------------------------------------------------------
-// Secrets: DO NOT hardcode production secrets here.
-// These constants are legacy-compat fallbacks only (kept so existing clients
-// using RC4 / AES-128-ECB keep working). For new deployments set real secrets
-// via Cloudflare encrypted secrets:
-//
-//   wrangler secret put BCORE_SECRET
-//   wrangler secret put MUNDO_SALT
-//
-// The helpers below prefer env values when provided.
-// See SECURITY.md for the migration plan (do NOT silently rotate these or old
-// clients break).
-// ---------------------------------------------------------------------------
-export const BCORE_SECRET = 'YuviMatrix_Secure_2026'; // legacy fallback, NOT a production default
-export const MUNDO_SALT = 'https://mundo.cp.cheat/v2/api/verify'; // legacy fallback
+import nacl from 'tweetnacl';
 
-export function bcoreSecretFromEnv(env) {
-  const v = env && typeof env.BCORE_SECRET === 'string' ? env.BCORE_SECRET.trim() : '';
-  return v || BCORE_SECRET;
-}
+const TE = new TextEncoder();
+const TD = new TextDecoder();
 
-export function mundoSaltFromEnv(env) {
-  const v = env && typeof env.MUNDO_SALT === 'string' ? env.MUNDO_SALT.trim() : '';
-  return v || MUNDO_SALT;
-}
+export const PROTOCOL = 'MAK/1';
+export const MAK_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
-// ---------- RC4 (BCORE, same as PHP) ----------
-export function rc4(dataBuf, keyStr) {
-  const key = Buffer.from(keyStr, 'latin1');
-  const S = new Uint8Array(256);
-  for (let i = 0; i < 256; i++) S[i] = i;
-  let j = 0;
-  for (let i = 0; i < 256; i++) {
-    j = (j + S[i] + key[i % key.length]) % 256;
-    const t = S[i]; S[i] = S[j]; S[j] = t;
-  }
-  let i = 0; j = 0;
-  const out = Buffer.alloc(dataBuf.length);
-  for (let y = 0; y < dataBuf.length; y++) {
-    i = (i + 1) % 256;
-    j = (j + S[i]) % 256;
-    const t = S[i]; S[i] = S[j]; S[j] = t;
-    out[y] = dataBuf[y] ^ S[(S[i] + S[j]) % 256];
-  }
+export function utf8(s) { return TE.encode(String(s)); }
+export function fromUtf8(b) { return TD.decode(b); }
+
+export function randomBytes(n) {
+  const out = new Uint8Array(n);
+  crypto.getRandomValues(out);
   return out;
 }
 
-export function bcoreEncrypt(plain, secret) {
-  const enc = rc4(Buffer.from(plain, 'utf8'), secret || BCORE_SECRET);
-  return enc.toString('base64');
+export function bytesToHex(bytes) {
+  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export function bcoreDecrypt(b64, secret) {
-  try {
-    const raw = Buffer.from(String(b64 || '').trim(), 'base64');
-    if (!raw.length) return Buffer.alloc(0);
-    return rc4(raw, secret || BCORE_SECRET);
-  } catch { return Buffer.alloc(0); }
-}
-
-// CESU-8 (fancy unicode app label) -> proper UTF-8, same fix as PHP
-export function fixCesu8(buf) {
-  const out = [];
-  for (let i = 0; i < buf.length; i++) {
-    if (i + 5 < buf.length &&
-      buf[i] === 0xED && buf[i+1] >= 0xA0 && buf[i+1] <= 0xAF &&
-      buf[i+3] === 0xED && buf[i+4] >= 0xB0 && buf[i+4] <= 0xBF) {
-      const h = ((buf[i+1] & 0x0F) << 6) | (buf[i+2] & 0x3F);
-      const l = ((buf[i+4] & 0x0F) << 6) | (buf[i+5] & 0x3F);
-      const u = 0x10000 + ((h - 0xD800) << 10) + (l - 0xDC00);
-      out.push(0xF0 | ((u >> 18) & 0x07), 0x80 | ((u >> 12) & 0x3F), 0x80 | ((u >> 6) & 0x3F), 0x80 | (u & 0x3F));
-      i += 5;
-    } else out.push(buf[i]);
-  }
-  return Buffer.from(out);
-}
-
-// ---------- MUNDO AES-128-ECB (same as PHP openssl) ----------
-export function mundoAesKey(salt) {
-  const len = salt.length;
-  let key = '';
-  for (let i = 0; i < 16; i++) {
-    key += String.fromCharCode(salt.charCodeAt(i % len) ^ (len + i));
-  }
-  return key; // latin1 16 chars
-}
-
-export function aesEncryptRaw(plain, keyRaw) {
-  const cipher = createCipheriv('aes-128-ecb', Buffer.from(keyRaw, 'latin1'), null);
-  cipher.setAutoPadding(true);
-  return Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]).toString('base64');
-}
-
-export function aesDecryptRaw(b64, keyRaw) {
-  try {
-    const decipher = createDecipheriv('aes-128-ecb', Buffer.from(keyRaw, 'latin1'), null);
-    decipher.setAutoPadding(true);
-    const out = Buffer.concat([decipher.update(String(b64).trim(), 'base64'), decipher.final()]);
-    return out.toString('utf8');
-  } catch { return ''; }
-}
-
-export function mundoAesKeyHex(salt) {
-  const raw = mundoAesKey(salt);
-  return Buffer.from(raw, 'latin1').toString('hex');
-}
-
-// ---------- AES-256-CBC via WebCrypto (native in Workers AND Node) ----------
-// Identical wire format to a node:crypto AES-256-CBC+PKCS#7 implementation
-// (base64 ciphertext), so clients see zero protocol change — but with no
-// runtime-compat dependency on the hot path.
-function hexToBytes(hex) {
-  const s = String(hex || '').trim();
+export function hexToBytes(hex) {
+  const s = String(hex || '').replace(/[^0-9a-f]/gi, '');
+  if (s.length % 2) throw new Error('Invalid hex');
   const out = new Uint8Array(s.length / 2);
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(s.substr(i * 2, 2), 16);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(s.slice(i * 2, i * 2 + 2), 16);
   return out;
 }
 
-function bytesToB64(bytes) {
+export function b64encode(bytes) {
   let bin = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  for (let i = 0; i < arr.length; i += 0x8000) bin += String.fromCharCode(...arr.subarray(i, i + 0x8000));
   return btoa(bin);
 }
 
-function b64ToBytes(b64) {
-  const bin = atob(String(b64 || '').trim());
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-export async function aes256CbcEncrypt(json, keyHex, ivHex) {
-  const key = await crypto.subtle.importKey('raw', hexToBytes(keyHex), { name: 'AES-CBC' }, false, ['encrypt']);
-  const ct = await crypto.subtle.encrypt({ name: 'AES-CBC', iv: hexToBytes(ivHex) }, key, new TextEncoder().encode(String(json)));
-  return bytesToB64(new Uint8Array(ct));
-}
-
-export async function aes256CbcDecryptToString(payloadB64, keyHex, ivHex) {
-  const key = await crypto.subtle.importKey('raw', hexToBytes(keyHex), { name: 'AES-CBC' }, false, ['decrypt']);
-  const pt = await crypto.subtle.decrypt({ name: 'AES-CBC', iv: hexToBytes(ivHex) }, key, b64ToBytes(payloadB64));
-  return new TextDecoder().decode(pt);
-}
-
-// ---------- password (SHA-256 salt$hash, Worker-safe) ----------
-export async function sha256Hex(s) {
-  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
-  return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-export async function hashPassword(pw) {
-  const r = new Uint8Array(8);
-  crypto.getRandomValues(r);
-  const salt = [...r].map(b => b.toString(16).padStart(2, '0')).join('');
-  const h = await sha256Hex(salt + pw);
-  return salt + '$' + h;
-}
-
-export async function verifyPassword(pw, stored) {
-  const parts = String(stored || '').split('$');
-  if (parts.length !== 2) return false;
-  const h = await sha256Hex(parts[0] + pw);
-  return h === parts[1];
-}
-
-export function randomHexKey() {
-  const r = new Uint8Array(8);
-  crypto.getRandomValues(r);
-  return [...r].map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
-}
-
-// ---------- MD5 (pure JS, Workers-safe; ASCII+UTF8 input) ----------
-export function md5hex(input) {
-  function safeAdd(x, y) {
-    const lsw = (x & 0xffff) + (y & 0xffff);
-    const msw = (x >> 16) + (y >> 16) + (lsw >> 16);
-    return (msw << 16) | (lsw & 0xffff);
+export function b64decode(value) {
+  let s = String(value || '').trim().replace(/-/g, '+').replace(/_/g, '/').replace(/\s+/g, '');
+  if (!s) return new Uint8Array(0);
+  s = s.replace(/=+$/, '');
+  while (s.length % 4) s += '=';
+  try {
+    const bin = atob(s);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  } catch {
+    return new Uint8Array(0);
   }
-  function bitRol(n, c) { return (n << c) | (n >>> (32 - c)); }
-  function cmn(q, a, b, x, s, t) { return safeAdd(bitRol(safeAdd(safeAdd(a, q), safeAdd(x, t)), s), b); }
-  const ff = (a, b, c, d, x, s, t) => cmn((b & c) | (~b & d), a, b, x, s, t);
-  const gg = (a, b, c, d, x, s, t) => cmn((b & d) | (c & ~d), a, b, x, s, t);
-  const hh = (a, b, c, d, x, s, t) => cmn(b ^ c ^ d, a, b, x, s, t);
-  const ii = (a, b, c, d, x, s, t) => cmn(c ^ (b | ~d), a, b, x, s, t);
-  function binlMD5(x, len) {
-    x[len >> 5] |= 0x80 << (len % 32);
-    x[(((len + 64) >>> 9) << 4) + 14] = len;
-    let a = 1732584193, b = -271733879, c = -1732584194, d = 271733878;
-    for (let i = 0; i < x.length; i += 16) {
-      const oa = a, ob = b, oc = c, od = d;
-      a = ff(a, b, c, d, x[i], 7, -680876936); d = ff(d, a, b, c, x[i + 1], 12, -389564586);
-      c = ff(c, d, a, b, x[i + 2], 17, 606105819); b = ff(b, c, d, a, x[i + 3], 22, -1044525330);
-      a = ff(a, b, c, d, x[i + 4], 7, -176418897); d = ff(d, a, b, c, x[i + 5], 12, 1200080426);
-      c = ff(c, d, a, b, x[i + 6], 17, -1473231341); b = ff(b, c, d, a, x[i + 7], 22, -45705983);
-      a = ff(a, b, c, d, x[i + 8], 7, 1770035416); d = ff(d, a, b, c, x[i + 9], 12, -1958414417);
-      c = ff(c, d, a, b, x[i + 10], 17, -42063); b = ff(b, c, d, a, x[i + 11], 22, -1990404162);
-      a = ff(a, b, c, d, x[i + 12], 7, 1804603682); d = ff(d, a, b, c, x[i + 13], 12, -40341101);
-      c = ff(c, d, a, b, x[i + 14], 17, -1502002290); b = ff(b, c, d, a, x[i + 15], 22, 1236535329);
-      a = gg(a, b, c, d, x[i + 1], 5, -165796510); d = gg(d, a, b, c, x[i + 6], 9, -1069501632);
-      c = gg(c, d, a, b, x[i + 11], 14, 643717713); b = gg(b, c, d, a, x[i], 20, -373897302);
-      a = gg(a, b, c, d, x[i + 5], 5, -701558691); d = gg(d, a, b, c, x[i + 10], 9, 38016083);
-      c = gg(c, d, a, b, x[i + 15], 14, -660478335); b = gg(b, c, d, a, x[i + 4], 20, -405537848);
-      a = gg(a, b, c, d, x[i + 9], 5, 568446438); d = gg(d, a, b, c, x[i + 14], 9, -1019803690);
-      c = gg(c, d, a, b, x[i + 3], 14, -187363961); b = gg(b, c, d, a, x[i + 8], 20, 1163531501);
-      a = gg(a, b, c, d, x[i + 13], 5, -1444681467); d = gg(d, a, b, c, x[i + 2], 9, -51403784);
-      c = gg(c, d, a, b, x[i + 7], 14, 1735328473); b = gg(b, c, d, a, x[i + 12], 20, -1926607734);
-      a = hh(a, b, c, d, x[i + 5], 4, -378558); d = hh(d, a, b, c, x[i + 8], 11, -2022574463);
-      c = hh(c, d, a, b, x[i + 11], 16, 1839030562); b = hh(b, c, d, a, x[i + 14], 23, -35309556);
-      a = hh(a, b, c, d, x[i + 1], 4, -1530992060); d = hh(d, a, b, c, x[i + 4], 11, 1272893353);
-      c = hh(c, d, a, b, x[i + 7], 16, -155497632); b = hh(b, c, d, a, x[i + 10], 23, -1094730640);
-      a = hh(a, b, c, d, x[i + 13], 4, 681279174); d = hh(d, a, b, c, x[i], 11, -358537222);
-      c = hh(c, d, a, b, x[i + 3], 16, -722521979); b = hh(b, c, d, a, x[i + 6], 23, 76029189);
-      a = hh(a, b, c, d, x[i + 9], 4, -640364487); d = hh(d, a, b, c, x[i + 12], 11, -421815835);
-      c = hh(c, d, a, b, x[i + 15], 16, 530742520); b = hh(b, c, d, a, x[i + 2], 23, -995338651);
-      a = ii(a, b, c, d, x[i], 6, -198630844); d = ii(d, a, b, c, x[i + 7], 10, 1126891415);
-      c = ii(c, d, a, b, x[i + 14], 15, -1416354905); b = ii(b, c, d, a, x[i + 5], 21, -57434055);
-      a = ii(a, b, c, d, x[i + 12], 6, 1700485571); d = ii(d, a, b, c, x[i + 3], 10, -1894986606);
-      c = ii(c, d, a, b, x[i + 10], 15, -1051523); b = ii(b, c, d, a, x[i + 1], 21, -2054922799);
-      a = ii(a, b, c, d, x[i + 8], 6, 1873313359); d = ii(d, a, b, c, x[i + 15], 10, -30611744);
-      c = ii(c, d, a, b, x[i + 6], 15, -1560198380); b = ii(b, c, d, a, x[i + 13], 21, 1309151649);
-      a = ii(a, b, c, d, x[i + 4], 6, -145523070); d = ii(d, a, b, c, x[i + 11], 10, -1120210379);
-      c = ii(c, d, a, b, x[i + 2], 15, 718787259); b = ii(b, c, d, a, x[i + 9], 21, -343485551);
-      a = safeAdd(a, oa); b = safeAdd(b, ob); c = safeAdd(c, oc); d = safeAdd(d, od);
+}
+
+export function b64url(bytes) {
+  return b64encode(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+export function randomId(prefix = '', bytes = 18) {
+  return (prefix ? prefix + '_' : '') + b64url(randomBytes(bytes));
+}
+
+export async function sha256Bytes(data) {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', typeof data === 'string' ? utf8(data) : data));
+}
+
+export async function sha256Hex(data) {
+  return bytesToHex(await sha256Bytes(data));
+}
+
+// ---------------------------------------------------------------------------
+// Canonical JSON: lexicographically sorted object keys, compact output.
+// This is the exact representation we sign. Objects must not contain
+// undefined / functions / bigint values.
+// ---------------------------------------------------------------------------
+export function canonicalJson(value) {
+  const walk = (v) => {
+    if (v === null) return 'null';
+    if (v === true) return 'true';
+    if (v === false) return 'false';
+    if (typeof v === 'number') {
+      if (!Number.isFinite(v)) throw new Error('Non-finite number');
+      return JSON.stringify(v);
     }
-    return [a, b, c, d];
+    if (typeof v === 'string') return JSON.stringify(v);
+    if (Array.isArray(v)) return '[' + v.map(walk).join(',') + ']';
+    if (typeof v === 'object') {
+      const keys = Object.keys(v).filter((k) => v[k] !== undefined).sort();
+      return '{' + keys.map((k) => JSON.stringify(k) + ':' + walk(v[k])).join(',') + '}';
+    }
+    throw new Error('Unsupported canonical JSON value');
+  };
+  return walk(value);
+}
+
+export function safeEqual(a, b) {
+  const x = utf8(String(a));
+  const y = utf8(String(b));
+  if (x.length !== y.length) return false;
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
+}
+
+// ---------------------------------------------------------------------------
+// MAK credentials
+// ---------------------------------------------------------------------------
+export function generateMak() {
+  const bytes = randomBytes(20);
+  let raw = '';
+  for (let i = 0; i < 20; i++) raw += MAK_ALPHABET[bytes[i] & 31];
+  return 'MAK-' + raw.slice(0, 5) + '-' + raw.slice(5, 10) + '-' + raw.slice(10, 15) + '-' + raw.slice(15, 20);
+}
+
+// Accepts "MAK-XXXXX-...", lowercase, missing dashes, or extra whitespace.
+export function canonicalMak(value) {
+  let s = String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+  if (s.startsWith('MAK-')) s = s.slice(4);
+  else if (s.startsWith('MAK')) s = s.slice(3);
+  s = s.replace(/[^0-9A-Z]/g, '');
+  if (s.length !== 20) return '';
+  if ([...s].some((c) => !MAK_ALPHABET.includes(c))) return '';
+  return 'MAK-' + s.slice(0, 5) + '-' + s.slice(5, 10) + '-' + s.slice(10, 15) + '-' + s.slice(15, 20);
+}
+
+export async function makHash(canonical) {
+  return sha256Hex('MAK-VERIFIER-V1|' + canonical);
+}
+
+export function generateLicenseUid() {
+  const bytes = randomBytes(10);
+  let raw = '';
+  for (let i = 0; i < 10; i++) raw += MAK_ALPHABET[bytes[i] & 31];
+  return 'LIC-' + raw.slice(0, 5) + '-' + raw.slice(5, 10);
+}
+
+// ---------------------------------------------------------------------------
+// Password hashing — PBKDF2-SHA256 (Worker + Node).
+// ---------------------------------------------------------------------------
+const PBKDF2_ITERATIONS = 120000;
+
+export async function hashPassword(password) {
+  const salt = randomBytes(16);
+  const key = await crypto.subtle.importKey('raw', utf8(String(password)), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+    key,
+    256,
+  );
+  return `pbkdf2-sha256$${PBKDF2_ITERATIONS}$${b64encode(salt)}$${b64encode(new Uint8Array(bits))}`;
+}
+
+export async function verifyPassword(password, stored) {
+  const parts = String(stored || '').split('$');
+  if (parts.length !== 4 || parts[0] !== 'pbkdf2-sha256') return false;
+  const iterations = parseInt(parts[1], 10);
+  if (!Number.isFinite(iterations) || iterations < 10000 || iterations > 1000000) return false;
+  const salt = b64decode(parts[2]);
+  const expected = b64decode(parts[3]);
+  if (!salt.length || !expected.length) return false;
+  try {
+    const key = await crypto.subtle.importKey('raw', utf8(String(password)), 'PBKDF2', false, ['deriveBits']);
+    const bits = new Uint8Array(await crypto.subtle.deriveBits(
+      { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+      key,
+      expected.length * 8,
+    ));
+    if (bits.length !== expected.length) return false;
+    let diff = 0;
+    for (let i = 0; i < bits.length; i++) diff |= bits[i] ^ expected[i];
+    return diff === 0;
+  } catch {
+    return false;
   }
-  const bytes = new TextEncoder().encode(String(input));
-  let s = '';
-  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
-  const words = [];
-  for (let i = 0; i < s.length * 8; i += 8) words[i >> 5] |= (s.charCodeAt(i / 8) & 0xff) << (i % 32);
-  const out = binlMD5(words, s.length * 8);
-  const hex = '0123456789abcdef';
-  let res = '';
-  for (let i = 0; i < out.length * 4; i++) res += hex.charAt((out[i >> 2] >> ((i % 4) * 8 + 4)) & 0xf) + hex.charAt((out[i >> 2] >> ((i % 4) * 8)) & 0xf);
-  return res;
+}
+
+// ---------------------------------------------------------------------------
+// Server signing key ring (Ed25519)
+// ---------------------------------------------------------------------------
+function seedFromEnv(value) {
+  const raw = b64decode(value);
+  if (raw.length === 32) return raw;
+  const hex = String(value || '').trim();
+  if (/^[0-9a-f]{64}$/i.test(hex)) return hexToBytes(hex);
+  return null;
+}
+
+export function loadSigningConfig(env) {
+  const signingKeysRaw = String(env?.MAK_SIGNING_KEYS || '').trim();
+  const singleRaw = String(env?.MAK_SIGNING_KEY || '').trim();
+  const activeEnv = String(env?.MAK_SIGNING_KEY_ID || '').trim();
+  const cacheKey = `${signingKeysRaw}|${singleRaw}|${activeEnv}`;
+  const cached = globalThis.__makSigningCache;
+  if (cached && cached.cacheKey === cacheKey) return cached.config;
+
+  let entries = [];
+  if (signingKeysRaw) {
+    try {
+      const parsed = JSON.parse(signingKeysRaw);
+      if (Array.isArray(parsed)) {
+        entries = parsed.map((x) => ({
+          key_id: String(x.key_id || x.keyId || x.id || '').trim(),
+          seed: String(x.seed || x.key || x.private_key || '').trim(),
+        }));
+      }
+    } catch {
+      const config = { ok: false, reason: 'MAK_SIGNING_KEYS is not valid JSON', keys: [], active: null };
+      globalThis.__makSigningCache = { cacheKey, config };
+      return config;
+    }
+  }
+  if (!entries.length && singleRaw) {
+    entries = [{ key_id: activeEnv || 'MAK-ED25519-01', seed: singleRaw }];
+  }
+
+  const keys = [];
+  for (const e of entries) {
+    if (!e.key_id || !/^[A-Za-z0-9._:-]{3,64}$/.test(e.key_id)) continue;
+    const seed = seedFromEnv(e.seed);
+    if (!seed) continue;
+    const pair = nacl.sign.keyPair.fromSeed(seed);
+    keys.push({
+      key_id: e.key_id,
+      public_key: b64encode(pair.publicKey),
+      secret_key: pair.secretKey,
+      seed,
+    });
+  }
+  if (!keys.length) {
+    const config = {
+      ok: false,
+      reason: singleRaw || signingKeysRaw ? 'Signing key is invalid (expected base64 32-byte seed or 64-char hex)' : 'MAK_SIGNING_KEY is not configured',
+      keys: [],
+      active: null,
+    };
+    globalThis.__makSigningCache = { cacheKey, config };
+    return config;
+  }
+  const active = keys.find((k) => k.key_id === activeEnv) || keys[keys.length - 1];
+  const config = { ok: true, reason: '', keys, active };
+  globalThis.__makSigningCache = { cacheKey, config };
+  return config;
+}
+
+export function signingPublicKeys(config) {
+  if (!config?.ok) return [];
+  return config.keys.map((k) => ({ key_id: k.key_id, public_key: k.public_key, active: k.key_id === config.active.key_id }));
+}
+
+export function signPayload(payload, config, domain = 'RESPONSE') {
+  if (!config?.ok || !config.active) throw new Error('Signing key not configured');
+  const body = { ...payload, key_id: config.active.key_id };
+  const message = `${PROTOCOL}\n${domain}\n${canonicalJson(body)}`;
+  const signature = nacl.sign.detached(utf8(message), config.active.secret_key);
+  return { ...body, signature: b64encode(signature) };
+}
+
+export function verifySignedPayload(signed, config, domain = 'RESPONSE') {
+  if (!signed || typeof signed !== 'object' || !signed.signature) return false;
+  const key = config?.keys?.find((k) => k.key_id === signed.key_id);
+  if (!key) return false;
+  const { signature, ...body } = signed;
+  const message = `${PROTOCOL}\n${domain}\n${canonicalJson(body)}`;
+  try {
+    return nacl.sign.detached.verify(utf8(message), b64decode(signature), b64decode(key.public_key));
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Device identity: ECDSA P-256, SHA-256 signatures.
+// Public keys are normalised to SPKI DER and stored as "spki:<base64>".
+// Signatures accept Android DER (SHA256withECDSA) or raw r||s (64 bytes).
+// ---------------------------------------------------------------------------
+const P256_SPKI_PREFIX = hexToBytes('3059301306072a8648ce3d020106082a8648ce3d030107034200');
+
+function rawEcdsaToDer(sig) {
+  if (sig.length !== 64) return null;
+  const trim = (part) => {
+    let i = 0;
+    while (i < part.length - 1 && part[i] === 0) i++;
+    let out = part.slice(i);
+    if (out[0] & 0x80) out = Uint8Array.from([0, ...out]);
+    return out;
+  };
+  const r = trim(sig.slice(0, 32));
+  const s = trim(sig.slice(32));
+  const body = Uint8Array.from([0x02, r.length, ...r, 0x02, s.length, ...s]);
+  return Uint8Array.from([0x30, body.length, ...body]);
+}
+
+function derEcdsaToRaw(der) {
+  if (!der || der.length < 8 || der[0] !== 0x30) return null;
+  let offset = 1;
+  let length = der[offset++];
+  if (length & 0x80) {
+    const count = length & 0x7f;
+    if (count < 1 || count > 2) return null;
+    length = 0;
+    for (let i = 0; i < count; i++) length = (length << 8) | der[offset++];
+  }
+  if (offset + length !== der.length) return null;
+  if (der[offset++] !== 0x02) return null;
+  const rLen = der[offset++];
+  if (!rLen || offset + rLen > der.length) return null;
+  const r = der.slice(offset, offset + rLen);
+  offset += rLen;
+  if (der[offset++] !== 0x02) return null;
+  const sLen = der[offset++];
+  if (!sLen || offset + sLen !== der.length) return null;
+  const s = der.slice(offset, offset + sLen);
+  const pad = (part) => {
+    let i = 0;
+    while (i < part.length - 1 && part[i] === 0) i++;
+    const out = part.slice(i);
+    if (out.length > 32) return null;
+    const padded = new Uint8Array(32);
+    padded.set(out, 32 - out.length);
+    return padded;
+  };
+  const rr = pad(r);
+  const ss = pad(s);
+  if (!rr || !ss) return null;
+  return Uint8Array.from([...rr, ...ss]);
+}
+
+export function normalizeDevicePublicKey(value) {
+  let s = String(value || '').trim();
+  let kind = '';
+  if (s.startsWith('spki:')) { kind = 'spki'; s = s.slice(5); }
+  else if (s.startsWith('raw:')) { kind = 'raw'; s = s.slice(4); }
+  let bytes = b64decode(s);
+  if (!bytes.length) return { ok: false, error: 'empty public key' };
+
+  if (!kind) {
+    if (bytes.length === 65 && bytes[0] === 0x04) kind = 'raw';
+    else if (bytes.length > 65 && bytes[0] === 0x30) kind = 'spki';
+    else return { ok: false, error: 'unsupported public key encoding' };
+  }
+
+  if (kind === 'raw') {
+    if (bytes.length !== 65 || bytes[0] !== 0x04) return { ok: false, error: 'invalid uncompressed P-256 point' };
+    bytes = Uint8Array.from([...P256_SPKI_PREFIX, ...bytes]);
+  } else if (bytes.length < 65 || bytes[0] !== 0x30) {
+    return { ok: false, error: 'invalid SPKI DER' };
+  }
+
+  const spkiB64 = b64encode(bytes);
+  return { ok: true, spkiB64, storage: 'spki:' + spkiB64, spki: bytes };
+}
+
+export async function fingerprintDevicePublicKey(normalized) {
+  return 'SHA256:' + (await sha256Hex(normalized.spki)).toUpperCase();
+}
+
+export async function verifyDeviceProof(publicKeyValue, message, signatureB64) {
+  const norm = normalizeDevicePublicKey(publicKeyValue);
+  if (!norm.ok) return { ok: false, error: norm.error };
+  const sig = b64decode(signatureB64);
+  if (!sig.length) return { ok: false, error: 'empty signature', normalized: norm };
+
+  // WebCrypto uses raw r||s, while Android's SHA256withECDSA emits DER.
+  // Accept both by trying the wire form and its counterpart.
+  const candidates = [];
+  if (sig.length === 64) {
+    candidates.push(sig);
+    const der = rawEcdsaToDer(sig);
+    if (der) candidates.push(der);
+  } else if (sig[0] === 0x30) {
+    const raw = derEcdsaToRaw(sig);
+    if (raw) candidates.push(raw, sig);
+  } else {
+    candidates.push(sig);
+  }
+
+  try {
+    const key = await crypto.subtle.importKey(
+      'spki', norm.spki, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify'],
+    );
+    for (const candidate of candidates) {
+      try {
+        if (await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, candidate, utf8(message))) {
+          return { ok: true, normalized: norm };
+        }
+      } catch {
+        // Try the next encoding.
+      }
+    }
+    return { ok: false, error: 'invalid ECDSA signature', normalized: norm };
+  } catch (e) {
+    return { ok: false, error: 'device key verification failed', normalized: norm };
+  }
+}
+
+export function deviceProofMessage(kind, fields) {
+  return `${PROTOCOL}\n${String(kind).toUpperCase()}\n${fields.map((x) => String(x ?? '')).join('\n')}`;
+}
+
+// ---------------------------------------------------------------------------
+// Misc validation helpers
+// ---------------------------------------------------------------------------
+export function normalizeHex64(value) {
+  const s = String(value || '').trim().toLowerCase().replace(/^sha256:/, '').replace(/[^0-9a-f]/g, '');
+  return s.length === 64 ? s : '';
+}
+
+export function validPackageName(value) {
+  const s = String(value || '').trim();
+  if (s.length < 3 || s.length > 200) return '';
+  if (!/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/.test(s)) return '';
+  return s;
+}
+
+export function clampInt(value, min, max, fallback) {
+  const n = parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+export function nowS() { return Math.floor(Date.now() / 1000); }
+
+export async function hashIp(ip, env) {
+  const salt = String(env?.IP_HASH_SALT || 'mak-ip-v1');
+  return (await sha256Hex(salt + '|' + String(ip || 'unknown'))).slice(0, 32);
 }

@@ -1,15 +1,22 @@
 {
-  "name": "sdk-panel",
-  "version": "1.2.0",
+  "name": "mak-panel",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
+  "description": "MUNDO ACTIVATION KEY (MAK/1) control plane — Cloudflare Worker + D1",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "db:migrate": "wrangler d1 execute panel --file=schema.sql",
-    "test": "node test/smoke.mjs"
+    "db:migrate:local": "wrangler d1 execute panel --local --file=schema.sql",
+    "keys": "node scripts/generate-keys.mjs",
+    "test": "node test/unit.mjs",
+    "check": "node test/check.mjs"
+  },
+  "dependencies": {
+    "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
-    "wrangler": "^3.0.0"
+    "wrangler": "^4.0.0"
   }
 }
