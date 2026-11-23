@@ -75,6 +75,7 @@ export function generatePage(o) {
   const server = o.server || {};
   const maxApps = Math.max(1, Number(values.max_apps || 2));
   const signatureBind = String(values.signature_bind ?? '1') !== '0';
+  const manualBind = String(values.host_bind_mode || 'AUTO').toUpperCase() === 'MANUAL';
 
   let notice = '';
   if (o.success) {
@@ -117,13 +118,18 @@ export function generatePage(o) {
     + '<option value="0"' + (!signatureBind ? ' selected' : '') + '>No — package + app name only</option>'
     + '</select>';
 
-  const modeOptions = '<select name="host_bind_mode" class="w-full clay-card custom-select px-4 py-3 text-sm font-semibold rounded-2xl">'
-    + '<option value="AUTO"' + (String(values.host_bind_mode || 'AUTO') !== 'MANUAL' ? ' selected' : '') + '>AUTO — first use par bind</option>'
-    + '<option value="MANUAL"' + (String(values.host_bind_mode || 'AUTO') === 'MANUAL' ? ' selected' : '') + '>MANUAL — pre-registered only</option>'
-    + '</select>';
-
   const sigClass = signatureBind ? 'sig-field' : 'sig-field hidden';
-  const sigRequired = signatureBind ? 'required' : '';
+
+  const bindToggle = '<label class="clay-card flex items-center justify-between gap-3 px-4 py-3 rounded-2xl cursor-pointer">'
+    + '<span class="min-w-0"><span class="block text-sm font-bold text-slate-800">Manual bind</span><span class="block text-[10px] text-slate-400">OFF: pehla use khud bind hoga. ON: sirf niche diya package allow hoga.</span></span>'
+    + '<input type="checkbox" name="manual_bind" value="1" id="mak-manual-bind"' + (manualBind ? ' checked' : '') + ' onchange="toggleManualBind()" class="w-5 h-5 accent-purple-600 shrink-0">'
+    + '</label>';
+
+  const manualCard = '<div id="mak-manual-card" class="clay-card p-4 rounded-2xl space-y-3 ' + (manualBind ? '' : 'hidden') + '">'
+    + field('Host package', input('host_package', values.host_package, 'maxlength="200" placeholder="com.example.host"'))
+    + field('Host app name', input('host_app_name', values.host_app_name, 'maxlength="120" placeholder="Display name"'))
+    + '<div class="' + sigClass + '">' + field('Host signature (SHA-256)', input('host_cert', values.host_cert, 'maxlength="80" placeholder="64 hex characters"')) + '</div>'
+    + '</div>';
 
   const existingRows = Array.isArray(values.guest_rows) && values.guest_rows.length
     ? values.guest_rows
@@ -134,7 +140,7 @@ export function generatePage(o) {
     + '<div class="grid md:grid-cols-12 gap-3 items-end">'
     + '<div class="md:col-span-4"><label class="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">App name</label><input name="guest_app_name" value="' + esc(row.app_name || '') + '" maxlength="120" placeholder="e.g. WhatsApp" class="w-full clay-card px-3 py-2 text-sm rounded-xl"></div>'
     + '<div class="md:col-span-4"><label class="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">Package name</label><input name="guest_package" value="' + esc(row.package_name || '') + '" maxlength="200" placeholder="com.example.guest" class="w-full clay-card px-3 py-2 text-sm font-mono rounded-xl"></div>'
-    + '<div class="md:col-span-3 ' + sigClass + '"><label class="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">Signature (SHA-256)</label><input name="guest_cert" value="' + esc(row.cert_sha256 || '') + '" maxlength="80" placeholder="64 hex" ' + sigRequired + ' class="w-full clay-card px-3 py-2 text-sm font-mono rounded-xl"></div>'
+    + '<div class="md:col-span-3 ' + sigClass + '"><label class="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">Signature (SHA-256)</label><input name="guest_cert" value="' + esc(row.cert_sha256 || '') + '" maxlength="80" placeholder="64 hex" class="w-full clay-card px-3 py-2 text-sm font-mono rounded-xl"></div>'
     + '<div class="md:col-span-1 flex justify-end"><button type="button" onclick="removeGuestRow(this)" class="clay-card w-9 h-9 rounded-xl text-red-500 font-black" title="Remove">×</button></div>'
     + '</div></div>';
 
@@ -150,35 +156,33 @@ export function generatePage(o) {
     + field('Duration <span class="text-red-500">*</span>', durationSelect, 'Expiry grant me signed hoti hai; AAR device clock se check karega.')
     + '<div id="mak-custom-expiry" style="display:' + (String(values.duration || '30') === 'custom' ? 'block' : 'none') + '"><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Custom expiry date</label><input type="date" name="expires_on" value="' + esc(values.expires_on || o.defaultExpiry || '') + '" class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'
     + '<div class="grid grid-cols-2 gap-3">'
-    + field('Max host packages', '<input type="number" name="max_packages" id="mak-max-packages" min="1" max="100" value="' + esc(values.max_packages || 1) + '" required oninput="updateAppTotal()" class="w-full clay-card px-4 py-3 text-sm rounded-2xl">')
-    + field('Max apps / package', '<input type="number" name="max_apps" id="mak-max-apps" min="1" max="100" value="' + esc(values.max_apps || 2) + '" required oninput="updateAppTotal()" class="w-full clay-card px-4 py-3 text-sm rounded-2xl">')
+    + field('Package limit', '<input type="number" name="max_packages" id="mak-max-packages" min="1" max="100" value="' + esc(values.max_packages || 1) + '" required class="w-full clay-card px-4 py-3 text-sm rounded-2xl">', 'Kitne host packages is MAK par bind honge.')
+    + field('App names / package', '<input type="number" name="max_apps" id="mak-max-apps" min="1" max="100" value="' + esc(values.max_apps || 2) + '" required class="w-full clay-card px-4 py-3 text-sm rounded-2xl">', 'Ek package me kitne apps allow honge.')
     + '</div>'
-    + field('Max installs / package', '<input type="number" name="max_installs" min="1" max="100" value="' + esc(values.max_installs || 3) + '" required class="w-full clay-card px-4 py-3 text-sm rounded-2xl">', 'Seats: kitne active grants ek host package par. Total = <span id="mak-app-total" class="font-bold text-slate-600">' + (Number(values.max_packages || 1) * Number(values.max_apps || 2)) + '</span> app slots.')
+    + '<input type="hidden" name="max_installs" value="' + esc(values.max_installs || 3) + '">'
+    + '<input type="hidden" name="host_bind_mode" id="mak-bind-mode" value="' + (manualBind ? 'MANUAL' : 'AUTO') + '">'
     + '</div>'
     + '<div class="space-y-4">'
     + field('Signature Bind', signatureOptions, 'Yes = host aur har app ka signing certificate verify hoga. No = sirf package + app name.')
-    + field('Binding mode', modeOptions, 'AUTO me pehle N packages first-use par bind; MANUAL me sirf pre-registered.')
-    + field('Host package name', input('host_package', values.host_package, 'maxlength="200" placeholder="com.example.host"'))
-    + field('Host app name', input('host_app_name', values.host_app_name, 'maxlength="120" placeholder="Display name"'))
-    + '<div class="' + sigClass + '">' + field('Host signature (SHA-256)', input('host_cert', values.host_cert, 'maxlength="80" placeholder="64 hex characters" ' + sigRequired)) + '</div>'
-    + '<div class="clay-card p-3 rounded-2xl text-[11px] text-slate-500"><i class="bi bi-info-circle-fill text-purple-500"></i> 1 package + 2 app names = <b>2 alag signatures</b>. Har guest row ka apna certificate hota hai.</div>'
+    + bindToggle
+    + manualCard
     + '</div>'
     + '</div>'
-    + '<div class="mt-6 pt-5 border-t border-slate-200">'
-    + '<div class="flex items-center justify-between gap-3 mb-3"><div><h4 class="text-xs font-extrabold text-slate-500 uppercase tracking-wider">Guest apps / app names</h4><p class="text-[10px] text-slate-400">Optional pre-bind. AUTO me runtime par bhi bind ho sakte hain.</p></div>'
-    + '<button type="button" onclick="addGuestRow()" class="clay-card px-3 py-2 text-xs font-bold text-purple-600 rounded-xl"><i class="bi bi-plus-lg"></i> Add app</button></div>'
-    + '<div id="guest-rows">' + existingRows.map(guestRow).join('') + '</div>'
-    + '</div>'
+    + '<details class="mt-6 pt-5 border-t border-slate-200">'
+    + '<summary class="cursor-pointer flex items-center justify-between gap-3"><div><h4 class="text-xs font-extrabold text-slate-500 uppercase tracking-wider">App names pre-bind <span class="text-slate-300">(optional)</span></h4><p class="text-[10px] text-slate-400">AUTO me runtime par bhi bind ho sakte hain. Abhi bharna zaroori nahi.</p></div><span class="clay-card px-3 py-2 text-xs font-bold text-purple-600 rounded-xl"><i class="bi bi-chevron-down"></i></span></summary>'
+    + '<div class="mt-4"><div class="flex items-center justify-end mb-2"><button type="button" onclick="addGuestRow()" class="clay-card px-3 py-2 text-xs font-bold text-purple-600 rounded-xl"><i class="bi bi-plus-lg"></i> Add app</button></div>'
+    + '<div id="guest-rows">' + existingRows.map(guestRow).join('') + '</div></div>'
+    + '</details>'
     + '<div class="mt-5"><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Notes</label><textarea name="notes" maxlength="1000" placeholder="Internal note (never sent to the client)" class="w-full clay-card px-4 py-3 text-sm rounded-2xl">' + esc(values.notes || '') + '</textarea></div>'
     + '<button type="submit" class="btn-premium w-full py-4 rounded-2xl font-extrabold text-sm uppercase tracking-wider mt-6"><i class="bi bi-magic"></i> Generate MAK</button>'
     + '</form>'
     + '<script>'
     + 'function toggleCustomExpiry(){var d=document.getElementById("mak-duration");var box=document.getElementById("mak-custom-expiry");if(!d||!box)return;box.style.display=d.value==="custom"?"block":"none";}'
-    + 'function toggleSignatureBind(){var on=document.getElementById("mak-signature-bind").value==="1";document.querySelectorAll(".sig-field").forEach(function(el){el.classList.toggle("hidden",!on);el.querySelectorAll("input").forEach(function(i){i.required=on;});});}'
-    + 'function updateAppTotal(){var p=Number((document.getElementById("mak-max-packages")||{}).value||1);var a=Number((document.getElementById("mak-max-apps")||{}).value||1);var el=document.getElementById("mak-app-total");if(el)el.textContent=String(p*a);}'
+    + 'function toggleSignatureBind(){var el=document.getElementById("mak-signature-bind");var on=!el||el.value==="1";document.querySelectorAll(".sig-field").forEach(function(f){f.classList.toggle("hidden",!on);});}'
+    + 'function toggleManualBind(){var on=document.getElementById("mak-manual-bind").checked;var card=document.getElementById("mak-manual-card");var mode=document.getElementById("mak-bind-mode");if(card)card.classList.toggle("hidden",!on);if(mode)mode.value=on?"MANUAL":"AUTO";}'
     + 'function addGuestRow(){var box=document.getElementById("guest-rows");if(!box||!box.firstElementChild)return;var div=document.createElement("div");div.className="guest-row clay-card p-3 rounded-2xl mb-3";div.innerHTML=box.firstElementChild.innerHTML;div.querySelectorAll("input").forEach(function(i){i.value="";});box.appendChild(div);toggleSignatureBind();}'
     + 'function removeGuestRow(btn){var row=btn.closest(".guest-row");if(row)row.remove();}'
     + 'function copyMak(){const el=document.getElementById("new-mak");if(!el)return;navigator.clipboard.writeText(el.textContent.trim()).then(function(){alert("MAK copied");});}'
-    + 'document.addEventListener("DOMContentLoaded",function(){toggleSignatureBind();});'
+    + 'document.addEventListener("DOMContentLoaded",function(){toggleSignatureBind();toggleManualBind();});'
     + '</script>';
 }

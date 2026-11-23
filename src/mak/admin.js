@@ -24,7 +24,7 @@ import {
   listLicenses, listSessions, revokeAllSessions, revokeDevice, revokeLicense,
   revokeSession, revokeSessionsForLicense, resetLicenseDevices,
   rotateLicenseCredential, sessionCounts, sessionsForLicense, setHostStatus,
-  setLicenseStatus, unbindGuest, updateGuest, updateLicensePolicy, upsertHost,
+  setLicenseStatus, unbindGuest, updateGuest, updateLicensePolicy, updateLicenseQuota, upsertHost,
 } from './store.js';
 import { dashboardPage } from './pages/dashboard.js';
 import { devicesPage } from './pages/devices.js';
@@ -365,6 +365,48 @@ export async function handleMakAdmin(request, env, db, options = {}) {
         await logEvent(db, { license_id: id, event_type: 'LICENSE_UPDATED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'License policy updated' });
         return done('License policy saved.');
       }
+      if (action === 'extend_duration') {
+        const raw = String(sp.get('extend_days') || '30');
+        let expiresAt = null;
+        if (raw !== 'lifetime') {
+          const days = Math.max(1, Math.min(3650, Number(raw) || 30));
+          const base = Math.max(nowS(), Number(license.expires_at) || 0);
+          expiresAt = base + days * 86400;
+        }
+        await updateLicenseQuota(db, id, { expires_at: expiresAt });
+        await logEvent(db, {
+          license_id: id, event_type: 'LICENSE_EXTENDED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash,
+          detail: raw === 'lifetime' ? 'Expiry set to lifetime' : 'Expiry extended by ' + raw + ' day(s)',
+        });
+        return done(raw === 'lifetime' ? 'Expiry set to lifetime.' : 'Expiry extended by ' + raw + ' day(s).');
+      }
+      if (action === 'extend_limits') {
+        const hosts = await getHostsForLicense(db, id);
+        const maxPackages = clampInt(sp.get('max_packages'), 1, 100, Number(license.max_packages || 1));
+        const maxApps = clampInt(sp.get('max_apps'), 1, 100, Number(license.max_apps || 2));
+        const maxInstalls = clampInt(sp.get('max_installs'), 1, 100, Number(license.max_installs || 3));
+        if (!maxPackages || !maxApps || !maxInstalls) return fail('Limits must be between 1 and 100.');
+        if (maxPackages < hosts.length) return fail('Package limit cannot be lower than the ' + hosts.length + ' package(s) already saved.');
+        await updateLicenseQuota(db, id, { max_packages: maxPackages, max_apps: maxApps, max_installs: maxInstalls });
+        await logEvent(db, {
+          license_id: id, event_type: 'LIMITS_EXTENDED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash,
+          detail: 'Limits set to packages=' + maxPackages + ' apps=' + maxApps + ' installs=' + maxInstalls,
+        });
+        return done('Limits updated.');
+      }
+      if (action === 'host_block' || action === 'host_unblock') {
+        const host = await getHostById(db, Number(sp.get('host_id') || 0));
+        if (!host || Number(host.license_id) !== id) return fail('Host package not found for this license.');
+        const blocking = action === 'host_block';
+        await setHostStatus(db, id, blocking ? 'SUSPENDED' : 'ACTIVE', host.id);
+        await revokeSessionsForLicense(db, id);
+        await logEvent(db, {
+          license_id: id, event_type: blocking ? 'HOST_BLOCKED' : 'HOST_UNBLOCKED', result: 'SUCCESS',
+          actor: session.username, ip_hash: ipHash,
+          detail: (blocking ? 'Host package blocked: ' : 'Host package unblocked: ') + host.package_name,
+        });
+        return done(blocking ? 'Host package blocked.' : 'Host package unblocked.');
+      }
       if (action === 'suspend' || action === 'reactivate') {
         await setLicenseStatus(db, id, action === 'suspend' ? 'SUSPENDED' : 'ACTIVE');
         await logEvent(db, { license_id: id, event_type: action === 'suspend' ? 'LICENSE_SUSPENDED' : 'LICENSE_REACTIVATED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'License status changed by administrator' });
@@ -393,13 +435,15 @@ export async function handleMakAdmin(request, env, db, options = {}) {
       if (action === 'host_save') {
         const hostPackage = String(sp.get('host_package') || '').trim();
         const hostAppName = String(sp.get('host_app_name') || '').trim().slice(0, 120);
-        const hostCert = normalizeHex64(sp.get('host_cert'));
+        const hostCertRaw = String(sp.get('host_cert') || '').trim();
+        const hostCert = normalizeHex64(hostCertRaw);
         if (!validPackageName(hostPackage)) return fail('Host package name is malformed.');
-        if (!hostCert) return fail('Host certificate must be 64 hex characters.');
+        if (hostCertRaw && !hostCert) return fail('Host certificate must be 64 hex characters.');
+        if (!hostCert && Number(license.signature_bind ?? 1) === 1) return fail('Signature Bind is ON: host certificate is required.');
         const hosts = await getHostsForLicense(db, id);
         const existing = hosts.find((h) => String(h.package_name) === hostPackage);
         if (!existing && hosts.length >= Number(license.max_packages || 1)) {
-          return fail('Host package limit reached. Increase Max host packages before adding another.');
+          return fail('Host package limit reached. Increase Package limit before adding another.');
         }
         await upsertHost(db, id, { package_name: hostPackage, app_name: hostAppName, cert_sha256: hostCert });
         await revokeSessionsForLicense(db, id);

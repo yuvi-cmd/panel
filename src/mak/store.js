@@ -131,6 +131,18 @@ export async function updateLicensePolicy(db, id, patch) {
   }
 }
 
+// Extending duration or raising quotas does not invalidate any existing grant:
+// nothing that was previously allowed becomes denied. Keep active seats alive.
+export async function updateLicenseQuota(db, id, patch) {
+  const allowed = new Set(['expires_at', 'max_packages', 'max_apps', 'max_installs']);
+  const keys = Object.keys(patch).filter((k) => allowed.has(k));
+  if (!keys.length) return;
+  const sets = keys.map((k) => `${k}=?`).join(',');
+  const args = keys.map((k) => patch[k]);
+  await db.prepare(`UPDATE mak_licenses SET ${sets},updated_at=? WHERE id=?`)
+    .bind(...args, nowS(), Number(id)).run();
+}
+
 export async function setLicenseStatus(db, id, status) {
   await db.prepare('UPDATE mak_licenses SET status=?,updated_at=? WHERE id=?')
     .bind(status, nowS(), Number(id)).run();

@@ -316,7 +316,7 @@ async function main() {
     assert.equal(newPage.status, 200);
     assert.match(newHtml, /Custom MAK key/);
     assert.match(newHtml, /Signature Bind/);
-    assert.match(newHtml, /Max installs \/ package/);
+    assert.match(newHtml, /name="max_installs"/);
     assert.match(newHtml, /name="guest_cert"/);
 
     const issued = await issueLicense(env, cookie, token);
@@ -534,6 +534,52 @@ async function main() {
     const res = await activate(env, issued.mak, { hostPackage: 'com.expired.host' });
     assert.equal(res.body.decision, 'DENY');
     assert.equal(res.body.code, 'LICENSE_EXPIRED');
+  });
+
+  await test('MAK keys quick actions: extend duration, raise limits, block package', async () => {
+    const env = globalThis.__lastEnv;
+    const { cookie, token } = env.__test;
+    const issued = await issueLicense(env, cookie, token, {
+      label: 'Quick actions', signature_bind: '0',
+      max_packages: '1', max_apps: '2', max_installs: '3',
+    });
+    assert.ok(issued.mak);
+    const license = await env.DB.prepare('SELECT * FROM mak_licenses ORDER BY id DESC LIMIT 1').first();
+
+    const action = (fields) => call(env, '/sdk/keys/' + license.id + '/action', {
+      method: 'POST', cookie, body: form({ _csrf: token, ...fields }),
+    });
+
+    const before = Number(license.expires_at);
+    assert.equal((await action({ action: 'extend_duration', extend_days: '7' })).status, 303);
+    const extended = await env.DB.prepare('SELECT * FROM mak_licenses WHERE id=?').bind(license.id).first();
+    assert.ok(Number(extended.expires_at) >= before + 7 * 86400 - 5, 'expiry extended by 7 days');
+
+    assert.equal((await action({ action: 'extend_limits', max_packages: '3', max_apps: '4', max_installs: '5' })).status, 303);
+    const raised = await env.DB.prepare('SELECT * FROM mak_licenses WHERE id=?').bind(license.id).first();
+    assert.equal(Number(raised.max_packages), 3);
+    assert.equal(Number(raised.max_apps), 4);
+    assert.equal(Number(raised.max_installs), 5);
+
+    assert.equal((await action({ action: 'host_save', host_package: 'com.quick.host', host_app_name: 'Quick', host_cert: '' })).status, 303);
+    const host = await env.DB.prepare('SELECT * FROM mak_hosts WHERE license_id=? ORDER BY id DESC LIMIT 1').bind(license.id).first();
+    assert.equal(host.package_name, 'com.quick.host');
+    assert.equal(host.status, 'ACTIVE');
+
+    assert.equal((await action({ action: 'host_block', host_id: String(host.id) })).status, 303);
+    const blocked = await env.DB.prepare('SELECT * FROM mak_hosts WHERE id=?').bind(host.id).first();
+    assert.equal(blocked.status, 'SUSPENDED');
+
+    assert.equal((await action({ action: 'host_unblock', host_id: String(host.id) })).status, 303);
+    const unblocked = await env.DB.prepare('SELECT * FROM mak_hosts WHERE id=?').bind(host.id).first();
+    assert.equal(unblocked.status, 'ACTIVE');
+
+    const page = await call(env, '/sdk/keys', { cookie });
+    const html = await page.text();
+    assert.equal(page.status, 200);
+    assert.match(html, /MAK details &amp; quick actions/);
+    assert.match(html, /Extend limits/);
+    assert.match(html, /host_block|host_unblock/);
   });
 
   await test('MAK/1 endpoints are removed', async () => {

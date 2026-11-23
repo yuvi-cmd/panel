@@ -117,7 +117,7 @@ export function parseLicensePolicy(sp, opts = {}) {
     host = { package_name: hostPackage, app_name: hostAppName, cert_sha256: signatureBind ? hostCert : '' };
   }
 
-  const modeRaw = String(sp.get('host_bind_mode') || '').toUpperCase();
+  const modeRaw = String(sp.get('manual_bind') ? 'MANUAL' : (sp.get('host_bind_mode') || '')).toUpperCase();
   const hostBindMode = ['MANUAL', 'STRICT'].includes(modeRaw) ? 'MANUAL'
     : ['AUTO', 'FIRST_USE', ''].includes(modeRaw) ? 'AUTO' : '';
   if (!hostBindMode) return { error: 'Choose AUTO or MANUAL binding mode.' };

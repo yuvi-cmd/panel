@@ -47,7 +47,7 @@ import { formAll as readFormAll, sameOrigin } from '../mak/http.js';
 import { defaultExpiryDate, issueMak } from '../mak/issue.js';
 import { getSettings, setSettings } from '../mak/settings.js';
 import { handleMakAdmin } from '../mak/admin.js';
-import { dashboardStats, getLicenseById, licenseCounts, listAllActiveGuests, listLicenses } from '../mak/store.js';
+import { dashboardStats, getLicenseById, licenseCounts, listAllActiveGuests, listHosts, listLicenses } from '../mak/store.js';
 
 
 export default {
@@ -879,7 +879,7 @@ export default {
         host_package: String(sp.get('host_package') || ''),
         host_app_name: String(sp.get('host_app_name') || ''),
         host_cert: String(sp.get('host_cert') || ''),
-        host_bind_mode: String(sp.get('host_bind_mode') || 'AUTO'),
+        host_bind_mode: String(sp.get('manual_bind') ? 'MANUAL' : (sp.get('host_bind_mode') || 'AUTO')),
         notes: String(sp.get('notes') || ''),
         guest_ids: sp.getAll('guest_ids'),
         guest_rows: guestRows,
@@ -919,10 +919,12 @@ export default {
 
     if (path === '/sdk/keys') {
       const g = sdkGate(); if (g) return g;
+      const admin = await sdkAdmin();
+      if (!admin) return redir('/login?next=' + encodeURIComponent('/sdk/keys'));
       const q = String(url.searchParams.get('q') || '').trim().slice(0, 120);
       const status = String(url.searchParams.get('status') || 'ALL').toUpperCase();
-      const [licenses, counts] = await Promise.all([listLicenses(db, { q, status }), licenseCounts(db)]);
-      return S('sdk/keys', 'MAK Keys', keysPage({ licenses, counts, q, status }));
+      const [licenses, counts, hosts] = await Promise.all([listLicenses(db, { q, status }), licenseCounts(db), listHosts(db)]);
+      return S('sdk/keys', 'MAK Keys', keysPage({ licenses, counts, hosts, q, status, csrf: admin.csrf }));
     }
 
     if (path === '/sdk/keys/new') return redir('/sdk/generate');
