@@ -1,10 +1,12 @@
 // D1 repository. Every query is prepared; no user-controlled SQL fragments.
 
 import { nowS, randomId } from './crypto.js';
+import { bumpLicenseEpoch, revokeGrantsForLicense } from './store-v2.js';
 
 const LICENSE_POLICY_KEYS = new Set([
   'label', 'user_ref', 'max_devices', 'max_activations', 'session_ttl',
-  'max_packages', 'max_apps', 'host_bind_mode', 'notes', 'expires_at',
+  'max_packages', 'max_apps', 'max_installs', 'signature_bind',
+  'host_bind_mode', 'notes', 'expires_at',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -75,8 +77,8 @@ export async function createLicenseRecord(db, input) {
     `INSERT INTO mak_licenses
       (license_uid,label,user_ref,credential_hash,status,created_at,updated_at,expires_at,
        max_devices,max_activations,activation_count,session_ttl,max_packages,max_apps,
-       host_bind_mode,notes,created_by)
-     VALUES (?,?,?,?, 'ACTIVE', ?,?,?,?,?,0,?,?,?,?,?,?)
+       max_installs,signature_bind,host_bind_mode,epoch,notes,created_by)
+     VALUES (?,?,?,?, 'ACTIVE', ?,?,?,?,?,0,?,?,?,?,?,?,1,?,?)
      RETURNING id`,
   ).bind(
     input.license_uid,
@@ -84,10 +86,13 @@ export async function createLicenseRecord(db, input) {
     input.user_ref || '',
     input.credential_hash,
     now, now, input.expires_at || null,
-    input.max_devices, input.max_activations,
-    input.session_ttl,
+    input.max_devices || 1, input.max_activations || 1,
+    input.session_ttl || 3600,
     input.max_packages || 1, input.max_apps || 2,
-    input.host_bind_mode || 'AUTO', input.notes || '', input.created_by || null,
+    input.max_installs || 3,
+    input.signature_bind ? 1 : 0,
+    input.host_bind_mode || 'AUTO',
+    input.notes || '', input.created_by || null,
   ).first();
   const id = Number(inserted?.id);
   if (!id) throw new Error('license insert did not return id');
@@ -119,18 +124,29 @@ export async function updateLicensePolicy(db, id, patch) {
   const args = keys.map((k) => patch[k]);
   await db.prepare(`UPDATE mak_licenses SET ${sets},updated_at=? WHERE id=?`)
     .bind(...args, nowS(), Number(id)).run();
+  const securityKeys = keys.filter((k) => !['label', 'user_ref', 'notes'].includes(k));
+  if (securityKeys.length) {
+    await revokeGrantsForLicense(db, id, 'license policy changed', 'ADMIN');
+    await bumpLicenseEpoch(db, id);
+  }
 }
 
 export async function setLicenseStatus(db, id, status) {
   await db.prepare('UPDATE mak_licenses SET status=?,updated_at=? WHERE id=?')
     .bind(status, nowS(), Number(id)).run();
-  if (status !== 'ACTIVE') await revokeSessionsForLicense(db, id);
+  if (status !== 'ACTIVE') {
+    await revokeSessionsForLicense(db, id);
+    await revokeGrantsForLicense(db, id, 'license ' + String(status).toLowerCase(), 'ADMIN');
+    await bumpLicenseEpoch(db, id);
+  }
 }
 
 export async function revokeLicense(db, id, reason, actor = 'ADMIN') {
   const now = nowS();
   await db.prepare("UPDATE mak_licenses SET status='REVOKED',updated_at=? WHERE id=?").bind(now, Number(id)).run();
   await revokeSessionsForLicense(db, id);
+  await revokeGrantsForLicense(db, id, reason, actor);
+  await bumpLicenseEpoch(db, id);
   await recordRevocation(db, 'LICENSE', String(id), reason, actor);
 }
 
@@ -138,6 +154,8 @@ export async function rotateLicenseCredential(db, id, hash) {
   await db.prepare('UPDATE mak_licenses SET credential_hash=?,rotated_at=?,updated_at=? WHERE id=?')
     .bind(hash, nowS(), nowS(), Number(id)).run();
   await revokeSessionsForLicense(db, id);
+  await revokeGrantsForLicense(db, id, 'credential rotated', 'ADMIN');
+  await bumpLicenseEpoch(db, id);
 }
 
 export async function touchLicense(db, id) {

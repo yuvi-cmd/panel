@@ -1,15 +1,23 @@
-// Shared MAK issuance helpers. Both the SDK Generate MAK page (/sdk/generate) and the
-// SDK Panel's Generate MAK page (/sdk/generate) use this module, so validation
-// and credential handling stay identical.
+// MAK issuance helpers for the clean SDK Generate MAK form.
+//
+// The form supports:
+//   - optional custom MAK (blank = random)
+//   - duration dropdown
+//   - max host packages / max apps per package / max installs per package
+//   - Signature Bind Yes/No (per-app signing certificate enforcement)
+//   - AUTO / MANUAL host binding
+//   - optional host + guest app rows, each with its own signature
 
 import {
   canonicalMak, clampInt, generateLicenseUid, generateMak, makHash,
   normalizeHex64, nowS, validPackageName,
 } from './crypto.js';
-import { createLicenseRecord, listAllActiveGuests } from './store.js';
+import {
+  createLicenseRecord, bindGuest, findHostForLicensePackage, getLicenseByHash,
+  listAllActiveGuests,
+} from './store.js';
+import { createGuestV2 } from './store-v2.js';
 
-// Duration is a dropdown in the panel. Values are days; "lifetime" removes the
-// expiry, and "custom" falls back to the date picker (IST end of day).
 export const DURATION_OPTIONS = [
   { value: '1', label: '1 day' },
   { value: '3', label: '3 days' },
@@ -35,7 +43,6 @@ function resolveExpiry(sp) {
   }
   if (raw && raw !== 'custom') return { error: 'Choose a valid duration.' };
 
-  // Backward compatible path: custom date or an old form without `duration`.
   const expiresOn = String(sp.get('expires_on') || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(expiresOn)) return { error: 'Choose a valid expiry date.' };
   const parsed = Date.parse(expiresOn + 'T23:59:59+05:30');
@@ -43,6 +50,38 @@ function resolveExpiry(sp) {
   const expiresAt = Math.floor(parsed / 1000);
   if (expiresAt <= nowS() + 60) return { error: 'Expiry must be in the future (IST end of day).' };
   return { expiresAt };
+}
+
+function yes(value, fallback = true) {
+  const s = String(value ?? '').trim().toLowerCase();
+  if (!s) return fallback;
+  return ['1', 'yes', 'true', 'on', 'y'].includes(s);
+}
+
+function parseGuestRows(sp, signatureBind) {
+  const packages = sp.getAll('guest_package');
+  const names = sp.getAll('guest_app_name');
+  const certs = sp.getAll('guest_cert');
+  const rows = [];
+  const seen = new Set();
+  const count = Math.max(packages.length, names.length, certs.length);
+  for (let i = 0; i < count; i++) {
+    const packageName = String(packages[i] || '').trim();
+    const appName = String(names[i] || '').trim().slice(0, 120);
+    const cert = normalizeHex64(certs[i]);
+    if (!packageName && !appName && !cert) continue;
+    if (!validPackageName(packageName)) {
+      return { error: 'Guest package name is malformed (row ' + (i + 1) + ').' };
+    }
+    if (signatureBind && !cert) {
+      return { error: 'Signature Bind is ON: guest signature is required for ' + packageName + '.' };
+    }
+    const key = packageName + '|' + cert;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push({ package_name: packageName, app_name: appName, cert_sha256: cert });
+  }
+  return { rows };
 }
 
 // opts.hasHost lets the license edit form keep MANUAL mode without re-entering
@@ -56,35 +95,38 @@ export function parseLicensePolicy(sp, opts = {}) {
   const expiry = resolveExpiry(sp);
   if (expiry.error) return { error: expiry.error };
 
-  const maxDevices = clampInt(sp.get('max_devices'), 1, 100, 0);
-  const maxActivations = clampInt(sp.get('max_activations'), 1, 1000, 0);
-  const sessionTtl = clampInt(sp.get('session_ttl'), 300, 86400, 0);
+  const maxDevices = clampInt(sp.get('max_devices'), 1, 100, 1);
+  const maxActivations = clampInt(sp.get('max_activations'), 1, 1000, 1);
+  const sessionTtl = clampInt(sp.get('session_ttl'), 300, 86400, 3600);
   const maxPackages = clampInt(sp.get('max_packages'), 1, 100, 1);
   const maxApps = clampInt(sp.get('max_apps'), 1, 100, 2);
-  if (!maxDevices || !maxActivations || !sessionTtl || !maxPackages || !maxApps) {
-    return { error: 'Device, activation, session, package or app limits are outside the allowed range.' };
+  const maxInstalls = clampInt(sp.get('max_installs'), 1, 100, 3);
+  if (!maxDevices || !maxActivations || !sessionTtl || !maxPackages || !maxApps || !maxInstalls) {
+    return { error: 'One or more limits are outside the allowed range.' };
   }
   if (maxActivations < maxDevices) return { error: 'Max activations must be at least max devices.' };
 
+  const signatureBind = yes(sp.get('signature_bind'), true);
   const hostPackage = String(sp.get('host_package') || '').trim();
   const hostCert = normalizeHex64(sp.get('host_cert'));
   const hostAppName = String(sp.get('host_app_name') || '').trim().slice(0, 120);
   let host = null;
-  if (hostPackage || hostCert) {
+  if (hostPackage || hostCert || hostAppName) {
     if (!validPackageName(hostPackage)) return { error: 'Host package name is malformed.' };
-    if (!hostCert) return { error: 'Host signing certificate SHA-256 must be 64 hex characters.' };
-    host = { package_name: hostPackage, app_name: hostAppName, cert_sha256: hostCert };
+    if (signatureBind && !hostCert) return { error: 'Signature Bind is ON: host signature is required.' };
+    host = { package_name: hostPackage, app_name: hostAppName, cert_sha256: signatureBind ? hostCert : '' };
   }
 
-  // AUTO: a new host package binds on first authenticated use, up to
-  // max_packages. MANUAL: only pre-registered packages may bind.
   const modeRaw = String(sp.get('host_bind_mode') || '').toUpperCase();
   const hostBindMode = ['MANUAL', 'STRICT'].includes(modeRaw) ? 'MANUAL'
     : ['AUTO', 'FIRST_USE', ''].includes(modeRaw) ? 'AUTO' : '';
   if (!hostBindMode) return { error: 'Choose AUTO or MANUAL binding mode.' };
   if (hostBindMode === 'MANUAL' && !host && !opts.hasHost) {
-    return { error: 'MANUAL mode requires a pre-registered host package and certificate.' };
+    return { error: 'MANUAL mode requires a pre-registered host package and signature.' };
   }
+
+  const guestRows = parseGuestRows(sp, signatureBind);
+  if (guestRows.error) return { error: guestRows.error };
 
   const guestIds = [...new Set(sp.getAll('guest_ids').map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0))];
 
@@ -94,31 +136,74 @@ export function parseLicensePolicy(sp, opts = {}) {
     session_ttl: sessionTtl,
     max_packages: maxPackages,
     max_apps: maxApps,
+    max_installs: maxInstalls,
+    signature_bind: signatureBind ? 1 : 0,
     host_bind_mode: hostBindMode,
   };
 
-  return { policy, host, guestIds };
+  return { policy, host, guests: guestRows.rows, guestIds };
 }
 
 export async function issueMak(db, sp, createdBy) {
   const parsed = parseLicensePolicy(sp);
   if (parsed.error) return { error: parsed.error };
 
+  const customRaw = String(sp.get('custom_key') || '').trim();
+  let credential;
+  if (customRaw) {
+    credential = canonicalMak(customRaw);
+    if (!credential) return { error: 'Custom MAK must be 20 Crockford characters (MAK-XXXXX-XXXXX-XXXXX-XXXXX).' };
+  } else {
+    credential = generateMak();
+  }
+  const credentialHash = await makHash(credential);
+  if (customRaw) {
+    const existing = await getLicenseByHash(db, credentialHash);
+    if (existing) return { error: 'This custom MAK is already in use. Choose another key.' };
+  }
+
   const guests = await listAllActiveGuests(db);
   const validGuestIds = new Set(guests.map((g) => Number(g.id)));
   const guestIds = parsed.guestIds.filter((id) => validGuestIds.has(id));
 
-  const credential = generateMak();
-  const credentialHash = await makHash(canonicalMak(credential));
   const licenseUid = generateLicenseUid();
-  const licenseId = await createLicenseRecord(db, {
-    license_uid: licenseUid,
-    credential_hash: credentialHash,
-    ...parsed.policy,
-    host: parsed.host,
-    guest_ids: guestIds,
-    created_by: createdBy || null,
-  });
+  let licenseId;
+  try {
+    licenseId = await createLicenseRecord(db, {
+      license_uid: licenseUid,
+      credential_hash: credentialHash,
+      ...parsed.policy,
+      host: parsed.host,
+      guest_ids: guestIds,
+      created_by: createdBy || null,
+    });
+  } catch (err) {
+    if (/UNIQUE|constraint/i.test(String(err))) {
+      return { error: 'This MAK is already in use. Choose another key.' };
+    }
+    throw err;
+  }
+
+  // Pre-registered guest rows: one signature per app row. AUTO mode may leave
+  // them empty; MANUAL mode requires them at issuance time.
+  let hostId = 0;
+  if (parsed.host?.package_name) {
+    const hostRow = await findHostForLicensePackage(db, licenseId, parsed.host.package_name);
+    hostId = Number(hostRow?.id || 0);
+  }
+  for (const row of parsed.guests) {
+    const guest = await createGuestV2(db, {
+      package_name: row.package_name,
+      app_name: row.app_name,
+      apk_sha256: '',
+      cert_sha256: parsed.policy.signature_bind ? row.cert_sha256 : '',
+      version_code: 0,
+    });
+    if (guest?.id) {
+      await bindGuest(db, licenseId, guest.id, { install: true, launch: true, update: true, restart: true }, hostId);
+    }
+  }
+
   return { credential, licenseId, licenseUid };
 }
 

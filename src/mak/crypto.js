@@ -9,6 +9,7 @@ const TE = new TextEncoder();
 const TD = new TextDecoder();
 
 export const PROTOCOL = 'MAK/1';
+export const PROTOCOL_V2 = 'MAK/2';
 export const MAK_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
 export function utf8(s) { return TE.encode(String(s)); }
@@ -249,12 +250,29 @@ export function signingPublicKeys(config) {
   return config.keys.map((k) => ({ key_id: k.key_id, public_key: k.public_key, active: k.key_id === config.active.key_id }));
 }
 
-export function signPayload(payload, config, domain = 'RESPONSE') {
+export function signWithProtocol(payload, config, protocol, domain = 'RESPONSE') {
   if (!config?.ok || !config.active) throw new Error('Signing key not configured');
   const body = { ...payload, key_id: config.active.key_id };
-  const message = `${PROTOCOL}\n${domain}\n${canonicalJson(body)}`;
+  const message = `${protocol}\n${domain}\n${canonicalJson(body)}`;
   const signature = nacl.sign.detached(utf8(message), config.active.secret_key);
   return { ...body, signature: b64encode(signature) };
+}
+
+export function verifyWithProtocol(signed, config, protocol, domain = 'RESPONSE') {
+  if (!signed || typeof signed !== 'object' || !signed.signature) return false;
+  const key = config?.keys?.find((k) => k.key_id === signed.key_id);
+  if (!key) return false;
+  const { signature, ...body } = signed;
+  const message = `${protocol}\n${domain}\n${canonicalJson(body)}`;
+  try {
+    return nacl.sign.detached.verify(utf8(message), b64decode(signature), b64decode(key.public_key));
+  } catch {
+    return false;
+  }
+}
+
+export function signPayload(payload, config, domain = 'RESPONSE') {
+  return signWithProtocol(payload, config, PROTOCOL, domain);
 }
 
 export function verifySignedPayload(signed, config, domain = 'RESPONSE') {
@@ -421,6 +439,66 @@ export function clampInt(value, min, max, fallback) {
 }
 
 export function nowS() { return Math.floor(Date.now() / 1000); }
+
+// ---------------------------------------------------------------------------
+// MAK/2 identifiers and encrypted-envelope helpers
+// ---------------------------------------------------------------------------
+export function generateGrantId() {
+  return 'GRT-' + bytesToHex(randomBytes(12)).toUpperCase();
+}
+
+export function generateTicketId(prefix = 'TKT') {
+  return String(prefix).toUpperCase() + '-' + bytesToHex(randomBytes(12)).toUpperCase();
+}
+
+export function secureEqualBytes(a, b) {
+  const x = a instanceof Uint8Array ? a : new Uint8Array(a || []);
+  const y = b instanceof Uint8Array ? b : new Uint8Array(b || []);
+  if (x.length !== y.length) return false;
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
+}
+
+export async function hkdfSha256(ikm, salt, info, length = 32) {
+  const key = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'HKDF', hash: 'SHA-256', salt, info: utf8(info) },
+    key,
+    length * 8,
+  );
+  return new Uint8Array(bits);
+}
+
+// Server static X25519 keypair for the NaCl box envelope. The secret is a
+// Worker secret (MAK_ENC_KEY); the public key is safe to publish.
+export function loadEncryptionConfig(env) {
+  const raw = String(env?.MAK_ENC_KEY || '').trim();
+  const keyId = String(env?.MAK_ENC_KEY_ID || 'MAK-ENC-01').trim();
+  const cached = globalThis.__makEncryptionCache;
+  if (cached && cached.raw === raw && cached.keyId === keyId) return cached.config;
+
+  let secret = null;
+  if (raw) {
+    const b64 = b64decode(raw);
+    if (b64.length === 32) secret = b64;
+    else if (/^[0-9a-f]{64}$/i.test(raw)) secret = hexToBytes(raw);
+  }
+  let config;
+  if (!secret) {
+    config = { ok: false, reason: raw ? 'MAK_ENC_KEY must be a base64/hex 32-byte X25519 secret' : 'MAK_ENC_KEY is not configured', key_id: keyId };
+  } else {
+    const pair = nacl.box.keyPair.fromSecretKey(secret);
+    config = {
+      ok: true,
+      key_id: keyId,
+      secret_key: pair.secretKey,
+      public_key: b64encode(pair.publicKey),
+    };
+  }
+  globalThis.__makEncryptionCache = { raw, keyId, config };
+  return config;
+}
 
 export async function hashIp(ip, env) {
   const salt = String(env?.IP_HASH_SALT || 'mak-ip-v1');

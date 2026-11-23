@@ -125,10 +125,15 @@ console.log('json api auth');
 // ---------- 2b. MAK mounted inside the SDK Panel ----------
 console.log('mak integration');
 {
-  const st = await call(env, 'GET', '/mak/v1/status');
+  const st = await call(env, 'GET', '/mak/v2/status');
   const stb = await st.json().catch(() => ({}));
-  ok(st.status === 200 && stb.protocol === 'MAK/1', 'GET /mak/v1/status speaks MAK/1');
+  ok(st.status === 200 && stb.protocol === 'MAK/2', 'GET /mak/v2/status speaks MAK/2');
   ok(stb.decision === 'INFO' && stb.signing_ready === false, 'status reports missing signing key without crashing');
+  ok(stb.encryption_ready === false, 'status reports missing encryption key without crashing');
+
+  const legacy = await call(env, 'GET', '/mak/v1/status');
+  const legacyBody = await legacy.json().catch(() => ({}));
+  ok(legacy.status === 410 && legacyBody.code === 'PROTOCOL_REMOVED', 'MAK/1 status is removed (410)');
 
   const anon = await call(env, 'GET', '/mak');
   ok(anon.status === 302 && String(anon.headers.get('Location') || '') === '/sdk', 'anonymous /mak is retired and redirects to /sdk');

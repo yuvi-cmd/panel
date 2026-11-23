@@ -240,15 +240,18 @@ export async function handleMakAdmin(request, env, db, options = {}) {
     const sp = await formAll(request);
     if (!verifyCsrf(session, sp.get('_csrf'))) return text('CSRF token rejected.', 403);
     const values = {
+      custom_key: String(sp.get('custom_key') || ''),
       label: String(sp.get('label') || ''),
       user_ref: String(sp.get('user_ref') || ''),
       duration: String(sp.get('duration') || '30'),
       expires_on: String(sp.get('expires_on') || ''),
-      max_devices: String(sp.get('max_devices') || ''),
-      max_activations: String(sp.get('max_activations') || ''),
-      session_ttl: String(sp.get('session_ttl') || ''),
-      max_packages: String(sp.get('max_packages') || ''),
-      max_apps: String(sp.get('max_apps') || ''),
+      max_devices: String(sp.get('max_devices') || '1'),
+      max_activations: String(sp.get('max_activations') || '1'),
+      session_ttl: String(sp.get('session_ttl') || '3600'),
+      max_packages: String(sp.get('max_packages') || '1'),
+      max_apps: String(sp.get('max_apps') || '2'),
+      max_installs: String(sp.get('max_installs') || '3'),
+      signature_bind: String(sp.get('signature_bind') ?? '1'),
       host_package: String(sp.get('host_package') || ''),
       host_app_name: String(sp.get('host_app_name') || ''),
       host_cert: String(sp.get('host_cert') || ''),

@@ -73,7 +73,8 @@ export function dashboardPage(d) {
 export function generatePage(o) {
   const values = o.values || {};
   const server = o.server || {};
-  const guests = o.guests || [];
+  const maxApps = Math.max(1, Number(values.max_apps || 2));
+  const signatureBind = String(values.signature_bind ?? '1') !== '0';
 
   let notice = '';
   if (o.success) {
@@ -93,41 +94,91 @@ export function generatePage(o) {
     notice += '<div class="glass-card p-4 mb-6" style="border-left:4px solid #f59e0b"><p class="text-xs text-amber-700"><i class="bi bi-shield-exclamation mr-1"></i> Signing key is not configured. You can issue MAKs, but activation decisions will be denied until <code>MAK_SIGNING_KEY</code> is set.</p></div>';
   }
 
-  const guestCards = guests.length ? guests.map((g) =>
-    '<label class="feature-card' + ((values.guest_ids || []).includes(String(g.id)) ? ' checked' : '') + '"><input type="checkbox" name="guest_ids" value="' + Number(g.id) + '" ' + ((values.guest_ids || []).includes(String(g.id)) ? 'checked' : '') + ' onchange="toggleFeature(this)"><span class="text-sm font-bold text-slate-700">' + esc(g.app_name || g.package_name) + '</span></label>'
-  ).join('') : '<p class="text-xs text-slate-400 italic">No approved guest apps. You can bind them later from the MAK settings.</p>';
+  const field = (label, input, hint) =>
+    '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">' + label + '</label>'
+    + input
+    + (hint ? '<p class="text-[10px] text-slate-400 mt-1">' + hint + '</p>' : '') + '</div>';
+
+  const input = (name, value, attrs = '') =>
+    '<input name="' + name + '" value="' + esc(value || '') + '" ' + attrs + ' class="w-full clay-card px-4 py-3 text-sm rounded-2xl">';
+
+  const durationOptions = [
+    ['1', '1 day'], ['3', '3 days'], ['7', '7 days'], ['14', '14 days'],
+    ['30', '30 days'], ['60', '60 days'], ['90', '90 days'], ['180', '180 days'],
+    ['365', '1 year'], ['730', '2 years'], ['lifetime', 'Lifetime (no expiry)'],
+    ['custom', 'Custom date…'],
+  ];
+  const durationSelect = '<select name="duration" id="mak-duration" onchange="toggleCustomExpiry()" class="w-full clay-card custom-select px-4 py-3 text-sm font-semibold rounded-2xl">'
+    + durationOptions.map(([v, label]) => '<option value="' + v + '"' + (String(values.duration || '30') === v ? ' selected' : '') + '>' + label + '</option>').join('')
+    + '</select>';
+
+  const signatureOptions = '<select name="signature_bind" id="mak-signature-bind" onchange="toggleSignatureBind()" class="w-full clay-card custom-select px-4 py-3 text-sm font-semibold rounded-2xl">'
+    + '<option value="1"' + (signatureBind ? ' selected' : '') + '>Yes — verify APK signature</option>'
+    + '<option value="0"' + (!signatureBind ? ' selected' : '') + '>No — package + app name only</option>'
+    + '</select>';
+
+  const modeOptions = '<select name="host_bind_mode" class="w-full clay-card custom-select px-4 py-3 text-sm font-semibold rounded-2xl">'
+    + '<option value="AUTO"' + (String(values.host_bind_mode || 'AUTO') !== 'MANUAL' ? ' selected' : '') + '>AUTO — first use par bind</option>'
+    + '<option value="MANUAL"' + (String(values.host_bind_mode || 'AUTO') === 'MANUAL' ? ' selected' : '') + '>MANUAL — pre-registered only</option>'
+    + '</select>';
+
+  const sigClass = signatureBind ? 'sig-field' : 'sig-field hidden';
+  const sigRequired = signatureBind ? 'required' : '';
+
+  const existingRows = Array.isArray(values.guest_rows) && values.guest_rows.length
+    ? values.guest_rows
+    : Array.from({ length: maxApps }, () => ({ app_name: '', package_name: '', cert_sha256: '' }));
+
+  const guestRow = (row) =>
+    '<div class="guest-row clay-card p-3 rounded-2xl mb-3">'
+    + '<div class="grid md:grid-cols-12 gap-3 items-end">'
+    + '<div class="md:col-span-4"><label class="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">App name</label><input name="guest_app_name" value="' + esc(row.app_name || '') + '" maxlength="120" placeholder="e.g. WhatsApp" class="w-full clay-card px-3 py-2 text-sm rounded-xl"></div>'
+    + '<div class="md:col-span-4"><label class="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">Package name</label><input name="guest_package" value="' + esc(row.package_name || '') + '" maxlength="200" placeholder="com.example.guest" class="w-full clay-card px-3 py-2 text-sm font-mono rounded-xl"></div>'
+    + '<div class="md:col-span-3 ' + sigClass + '"><label class="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">Signature (SHA-256)</label><input name="guest_cert" value="' + esc(row.cert_sha256 || '') + '" maxlength="80" placeholder="64 hex" ' + sigRequired + ' class="w-full clay-card px-3 py-2 text-sm font-mono rounded-xl"></div>'
+    + '<div class="md:col-span-1 flex justify-end"><button type="button" onclick="removeGuestRow(this)" class="clay-card w-9 h-9 rounded-xl text-red-500 font-black" title="Remove">×</button></div>'
+    + '</div></div>';
 
   return notice
-    + '<div class="pagehead"><div class="ph-ic"><i class="bi bi-key-fill"></i></div><div class="flex-1 min-w-0"><h1 class="truncate">Generate MAK</h1><p class="truncate">Issue a new activation credential for a host application</p></div></div>'
-    + '<form method="POST" action="/sdk/generate" class="glass-card p-5 md:p-7">'
+    + '<div class="pagehead"><div class="ph-ic"><i class="bi bi-key-fill"></i></div><div class="flex-1 min-w-0"><h1 class="truncate">Generate MAK</h1><p class="truncate">Clean app-locked license for MUNDO</p></div></div>'
+    + '<form method="POST" action="/sdk/generate" class="glass-card p-5 md:p-7" id="mak-form">'
     + '<input type="hidden" name="_csrf" value="' + esc(o.csrf || '') + '">'
-    + '<div class="flex items-center gap-3 mb-6 pb-4 border-b border-slate-200"><div class="w-12 h-12 rounded-2xl avatar-premium flex items-center justify-center text-white shadow-lg"><i class="bi bi-cpu-fill text-xl"></i></div><div><h3 class="font-black text-slate-800">MAK /1 License</h3><p class="text-xs text-slate-500">Raw credential is shown once and stored only as a SHA-256 verifier.</p></div></div>'
-    + '<div class="grid md:grid-cols-2 gap-4">'
-    + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Label <span class="text-red-500">*</span></label><input name="label" value="' + esc(values.label || '') + '" required maxlength="80" placeholder="e.g. Rahul monthly" class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'
-    + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">User reference</label><input name="user_ref" value="' + esc(values.user_ref || '') + '" maxlength="120" placeholder="Name, email or order ID" class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'
-    + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Duration <span class="text-red-500">*</span></label><select name="duration" id="mak-duration" onchange="toggleCustomExpiry()" class="w-full clay-card custom-select px-4 py-3 text-sm font-semibold rounded-2xl">'
-    + ['1','3','7','14','30','60','90','180','365','730','lifetime','custom'].map(function (v) {
-      var labels = { '1': '1 day', '3': '3 days', '7': '7 days', '14': '14 days', '30': '30 days', '60': '60 days', '90': '90 days', '180': '180 days', '365': '1 year', '730': '2 years', lifetime: 'Lifetime (no expiry)', custom: 'Custom date…' };
-      return '<option value="' + v + '"' + (String(values.duration || '30') === v ? ' selected' : '') + '>' + labels[v] + '</option>';
-    }).join('')
-    + '</select></div>'
+    + '<div class="flex items-center gap-3 mb-6 pb-4 border-b border-slate-200"><div class="w-12 h-12 rounded-2xl avatar-premium flex items-center justify-center text-white shadow-lg"><i class="bi bi-cpu-fill text-xl"></i></div><div><h3 class="font-black text-slate-800">MAK /2 License</h3><p class="text-xs text-slate-500">App-locked grant. Raw key shown once; server stores only a SHA-256 verifier.</p></div></div>'
+    + '<div class="grid lg:grid-cols-2 gap-5">'
+    + '<div class="space-y-4">'
+    + field('Custom MAK key', input('custom_key', values.custom_key, 'maxlength="32" placeholder="Blank = random key"'), 'Blank chhodo to random `MAK-XXXXX-...` generate hoga.')
+    + field('Label <span class="text-red-500">*</span>', input('label', values.label, 'required maxlength="80" placeholder="e.g. Rahul monthly"'))
+    + field('Duration <span class="text-red-500">*</span>', durationSelect, 'Expiry grant me signed hoti hai; AAR device clock se check karega.')
     + '<div id="mak-custom-expiry" style="display:' + (String(values.duration || '30') === 'custom' ? 'block' : 'none') + '"><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Custom expiry date</label><input type="date" name="expires_on" value="' + esc(values.expires_on || o.defaultExpiry || '') + '" class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'
-    + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Session TTL (seconds)</label><input type="number" name="session_ttl" min="300" max="86400" value="' + esc(values.session_ttl || 3600) + '" required class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'
-    + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Max devices</label><input type="number" name="max_devices" min="1" max="100" value="' + esc(values.max_devices || 1) + '" required class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'
-    + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Max activations</label><input type="number" name="max_activations" min="1" max="1000" value="' + esc(values.max_activations || 2) + '" required class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'
-    + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Max host packages</label><input type="number" name="max_packages" id="mak-max-packages" min="1" max="100" value="' + esc(values.max_packages || 1) + '" required oninput="updateAppTotal()" class="w-full clay-card px-4 py-3 text-sm rounded-2xl"><p class="text-[10px] text-slate-400 mt-1">Kitne host APK package names is MAK se bind ho sakte hain.</p></div>'
-    + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Max apps per package</label><input type="number" name="max_apps" id="mak-max-apps" min="1" max="100" value="' + esc(values.max_apps || 2) + '" required oninput="updateAppTotal()" class="w-full clay-card px-4 py-3 text-sm rounded-2xl"><p class="text-[10px] text-slate-400 mt-1">Har host package ke liye kitne guest apps. Total = <span id="mak-app-total" class="font-bold text-slate-600">' + (Number(values.max_packages || 1) * Number(values.max_apps || 2)) + '</span> apps.</p></div>'
+    + '<div class="grid grid-cols-2 gap-3">'
+    + field('Max host packages', '<input type="number" name="max_packages" id="mak-max-packages" min="1" max="100" value="' + esc(values.max_packages || 1) + '" required oninput="updateAppTotal()" class="w-full clay-card px-4 py-3 text-sm rounded-2xl">')
+    + field('Max apps / package', '<input type="number" name="max_apps" id="mak-max-apps" min="1" max="100" value="' + esc(values.max_apps || 2) + '" required oninput="updateAppTotal()" class="w-full clay-card px-4 py-3 text-sm rounded-2xl">')
+    + '</div>'
+    + field('Max installs / package', '<input type="number" name="max_installs" min="1" max="100" value="' + esc(values.max_installs || 3) + '" required class="w-full clay-card px-4 py-3 text-sm rounded-2xl">', 'Seats: kitne active grants ek host package par. Total = <span id="mak-app-total" class="font-bold text-slate-600">' + (Number(values.max_packages || 1) * Number(values.max_apps || 2)) + '</span> app slots.')
+    + '</div>'
+    + '<div class="space-y-4">'
+    + field('Signature Bind', signatureOptions, 'Yes = host aur har app ka signing certificate verify hoga. No = sirf package + app name.')
+    + field('Binding mode', modeOptions, 'AUTO me pehle N packages first-use par bind; MANUAL me sirf pre-registered.')
+    + field('Host package name', input('host_package', values.host_package, 'maxlength="200" placeholder="com.example.host"'))
+    + field('Host app name', input('host_app_name', values.host_app_name, 'maxlength="120" placeholder="Display name"'))
+    + '<div class="' + sigClass + '">' + field('Host signature (SHA-256)', input('host_cert', values.host_cert, 'maxlength="80" placeholder="64 hex characters" ' + sigRequired)) + '</div>'
+    + '<div class="clay-card p-3 rounded-2xl text-[11px] text-slate-500"><i class="bi bi-info-circle-fill text-purple-500"></i> 1 package + 2 app names = <b>2 alag signatures</b>. Har guest row ka apna certificate hota hai.</div>'
+    + '</div>'
+    + '</div>'
+    + '<div class="mt-6 pt-5 border-t border-slate-200">'
+    + '<div class="flex items-center justify-between gap-3 mb-3"><div><h4 class="text-xs font-extrabold text-slate-500 uppercase tracking-wider">Guest apps / app names</h4><p class="text-[10px] text-slate-400">Optional pre-bind. AUTO me runtime par bhi bind ho sakte hain.</p></div>'
+    + '<button type="button" onclick="addGuestRow()" class="clay-card px-3 py-2 text-xs font-bold text-purple-600 rounded-xl"><i class="bi bi-plus-lg"></i> Add app</button></div>'
+    + '<div id="guest-rows">' + existingRows.map(guestRow).join('') + '</div>'
     + '</div>'
     + '<div class="mt-5"><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Notes</label><textarea name="notes" maxlength="1000" placeholder="Internal note (never sent to the client)" class="w-full clay-card px-4 py-3 text-sm rounded-2xl">' + esc(values.notes || '') + '</textarea></div>'
-    + '<div class="mt-5 pt-5 border-t border-slate-200"><h4 class="text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-3">Host binding</h4>'
-    + '<div class="grid md:grid-cols-2 gap-4">'
-    + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Host package name</label><input name="host_package" value="' + esc(values.host_package || '') + '" maxlength="200" placeholder="com.example.host" class="w-full clay-card px-4 py-3 text-sm font-mono rounded-2xl"></div>'
-    + '<div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Host app name</label><input name="host_app_name" value="' + esc(values.host_app_name || '') + '" maxlength="120" placeholder="Display name (optional)" class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'
-    + '<div class="md:col-span-2"><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Certificate SHA-256</label><input name="host_cert" value="' + esc(values.host_cert || '') + '" maxlength="80" placeholder="64 hex characters" class="w-full clay-card px-4 py-3 text-sm font-mono rounded-2xl"></div>'
-    + '<div class="md:col-span-2"><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Binding mode</label><select name="host_bind_mode" class="w-full clay-card custom-select px-4 py-3 text-sm font-semibold rounded-2xl"><option value="AUTO"' + (values.host_bind_mode !== 'MANUAL' ? ' selected' : '') + '>AUTO — pkg name + app name first use par khud bind</option><option value="MANUAL"' + (values.host_bind_mode === 'MANUAL' ? ' selected' : '') + '>MANUAL — sirf pre-registered host packages</option></select></div>'
-    + '</div><p class="text-[11px] text-slate-500 mt-2"><i class="bi bi-shield-lock-fill"></i> AUTO me pehle <b>' + esc(values.max_packages || 1) + '</b> host packages khud bind honge; MANUAL me neeche package + cert dena zaroori hai.</p></div>'
-    + '<div class="mt-5 pt-5 border-t border-slate-200"><h4 class="text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-3">Guest access</h4><div class="grid grid-cols-2 gap-3">' + guestCards + '</div></div>'
     + '<button type="submit" class="btn-premium w-full py-4 rounded-2xl font-extrabold text-sm uppercase tracking-wider mt-6"><i class="bi bi-magic"></i> Generate MAK</button>'
     + '</form>'
-    + '<script>function toggleFeature(cb){const c=cb.closest(".feature-card");if(cb.checked)c.classList.add("checked");else c.classList.remove("checked");}function toggleCustomExpiry(){var d=document.getElementById("mak-duration");var box=document.getElementById("mak-custom-expiry");if(!d||!box)return;box.style.display=d.value==="custom"?"block":"none";}function updateAppTotal(){var p=Number((document.getElementById("mak-max-packages")||{}).value||1);var a=Number((document.getElementById("mak-max-apps")||{}).value||1);var el=document.getElementById("mak-app-total");if(el)el.textContent=String(p*a);}function copyMak(){const el=document.getElementById("new-mak");if(!el)return;navigator.clipboard.writeText(el.textContent.trim()).then(function(){alert("MAK copied");});}</script>';
+    + '<script>'
+    + 'function toggleCustomExpiry(){var d=document.getElementById("mak-duration");var box=document.getElementById("mak-custom-expiry");if(!d||!box)return;box.style.display=d.value==="custom"?"block":"none";}'
+    + 'function toggleSignatureBind(){var on=document.getElementById("mak-signature-bind").value==="1";document.querySelectorAll(".sig-field").forEach(function(el){el.classList.toggle("hidden",!on);el.querySelectorAll("input").forEach(function(i){i.required=on;});});}'
+    + 'function updateAppTotal(){var p=Number((document.getElementById("mak-max-packages")||{}).value||1);var a=Number((document.getElementById("mak-max-apps")||{}).value||1);var el=document.getElementById("mak-app-total");if(el)el.textContent=String(p*a);}'
+    + 'function addGuestRow(){var box=document.getElementById("guest-rows");if(!box||!box.firstElementChild)return;var div=document.createElement("div");div.className="guest-row clay-card p-3 rounded-2xl mb-3";div.innerHTML=box.firstElementChild.innerHTML;div.querySelectorAll("input").forEach(function(i){i.value="";});box.appendChild(div);toggleSignatureBind();}'
+    + 'function removeGuestRow(btn){var row=btn.closest(".guest-row");if(row)row.remove();}'
+    + 'function copyMak(){const el=document.getElementById("new-mak");if(!el)return;navigator.clipboard.writeText(el.textContent.trim()).then(function(){alert("MAK copied");});}'
+    + 'document.addEventListener("DOMContentLoaded",function(){toggleSignatureBind();});'
+    + '</script>';
 }

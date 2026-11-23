@@ -851,22 +851,35 @@ export default {
       const sp = await readFormAll(request);
       if (!verifyCsrf(admin, sp.get('_csrf'))) return new Response('CSRF token rejected.', { status: 403 });
 
+      const guestPackages = sp.getAll('guest_package');
+      const guestNames = sp.getAll('guest_app_name');
+      const guestCerts = sp.getAll('guest_cert');
+      const guestRowCount = Math.max(guestPackages.length, guestNames.length, guestCerts.length);
+      const guestRows = Array.from({ length: guestRowCount }, (_, i) => ({
+        package_name: String(guestPackages[i] || ''),
+        app_name: String(guestNames[i] || ''),
+        cert_sha256: String(guestCerts[i] || ''),
+      }));
       const values = {
+        custom_key: String(sp.get('custom_key') || ''),
         label: String(sp.get('label') || ''),
         user_ref: String(sp.get('user_ref') || ''),
         duration: String(sp.get('duration') || '30'),
         expires_on: String(sp.get('expires_on') || ''),
-        max_devices: String(sp.get('max_devices') || ''),
-        max_activations: String(sp.get('max_activations') || ''),
-        session_ttl: String(sp.get('session_ttl') || ''),
-        max_packages: String(sp.get('max_packages') || ''),
-        max_apps: String(sp.get('max_apps') || ''),
+        max_devices: String(sp.get('max_devices') || '1'),
+        max_activations: String(sp.get('max_activations') || '1'),
+        session_ttl: String(sp.get('session_ttl') || '3600'),
+        max_packages: String(sp.get('max_packages') || '1'),
+        max_apps: String(sp.get('max_apps') || '2'),
+        max_installs: String(sp.get('max_installs') || '3'),
+        signature_bind: String(sp.get('signature_bind') ?? '1'),
         host_package: String(sp.get('host_package') || ''),
         host_app_name: String(sp.get('host_app_name') || ''),
         host_cert: String(sp.get('host_cert') || ''),
         host_bind_mode: String(sp.get('host_bind_mode') || 'AUTO'),
         notes: String(sp.get('notes') || ''),
         guest_ids: sp.getAll('guest_ids'),
+        guest_rows: guestRows,
       };
 
       let issued;
@@ -879,10 +892,11 @@ export default {
         }));
       }
       if (issued.error) {
-        return new Response(await S('sdk/generate', 'Generate MAK', generatePage({
+        const page = await S('sdk/generate', 'Generate MAK', generatePage({
           csrf: admin.csrf, guests, values, error: issued.error,
           defaultExpiry: defaultExpiryDate(), server,
-        })), { status: 400, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+        }));
+        return new Response(await page.text(), { status: 400, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
       }
 
       const license = await getLicenseById(db, issued.licenseId);

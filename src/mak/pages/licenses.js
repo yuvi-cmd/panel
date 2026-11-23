@@ -254,6 +254,11 @@ export function licenseDetailPage({
               ${field('Max activations', `<input type="number" name="max_activations" min="1" max="1000" value="${license.max_activations}" required>`)}
               ${field('Max host packages', `<input type="number" name="max_packages" min="1" max="100" value="${license.max_packages || 1}" required>`, 'Kitne host APK package names is MAK se bind ho sakte hain.')}
               ${field('Max apps per package', `<input type="number" name="max_apps" min="1" max="100" value="${license.max_apps || 2}" required>`, 'Har host package ke liye kitne guest apps.')}
+              ${field('Max installs per package', `<input type="number" name="max_installs" min="1" max="100" value="${license.max_installs || 3}" required>`, 'Active grants (seats) per host package.')}
+              ${field('Signature Bind', `<select name="signature_bind">
+                <option value="1" ${Number(license.signature_bind ?? 1) ? 'selected' : ''}>Yes — verify APK signature</option>
+                <option value="0" ${!Number(license.signature_bind ?? 1) ? 'selected' : ''}>No — package + app name only</option>
+              </select>`, 'Yes par host aur har app ka certificate verify hoga.')}
               ${field('Binding mode', `<select name="host_bind_mode">
                 <option value="AUTO" ${String(license.host_bind_mode || 'AUTO') !== 'MANUAL' ? 'selected' : ''}>AUTO — first use par bind</option>
                 <option value="MANUAL" ${String(license.host_bind_mode || 'AUTO') === 'MANUAL' ? 'selected' : ''}>MANUAL — sirf pre-registered</option>

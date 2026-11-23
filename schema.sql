@@ -302,7 +302,10 @@ CREATE TABLE IF NOT EXISTS mak_licenses (
   session_ttl      INTEGER NOT NULL DEFAULT 3600,
   max_packages     INTEGER NOT NULL DEFAULT 1, -- host APK package names this MAK may bind
   max_apps         INTEGER NOT NULL DEFAULT 2, -- guest apps allowed PER host package
+  max_installs     INTEGER NOT NULL DEFAULT 3, -- active grants (seats) per host package
+  signature_bind   INTEGER NOT NULL DEFAULT 1, -- 1 = verify APK signing cert per app
   host_bind_mode   TEXT NOT NULL DEFAULT 'AUTO', -- AUTO | MANUAL
+  epoch            INTEGER NOT NULL DEFAULT 1, -- monotonic policy/revocation version
   notes            TEXT NOT NULL DEFAULT '',
   created_by       INTEGER,
   last_used_at     INTEGER,
@@ -373,7 +376,41 @@ CREATE INDEX IF NOT EXISTS idx_mak_bindings_host ON mak_bindings(license_id, hos
 CREATE INDEX IF NOT EXISTS idx_mak_bindings_guest ON mak_bindings(guest_app_id);
 
 -- ---------------------------------------------------------------------------
--- Devices: ECDSA P-256 public keys registered against a license
+-- Grants (MAK/2 seats). A grant is a random installation/seat token, not a
+-- hardware identifier. The client stores it encrypted; revocation is per grant.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS mak_grants (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  grant_id      TEXT NOT NULL UNIQUE,
+  license_id    INTEGER NOT NULL,
+  host_id       INTEGER NOT NULL,
+  package_name  TEXT NOT NULL,
+  app_name      TEXT NOT NULL DEFAULT '',
+  cert_sha256   TEXT NOT NULL DEFAULT '',
+  status        TEXT NOT NULL DEFAULT 'ACTIVE', -- ACTIVE | REVOKED
+  epoch         INTEGER NOT NULL DEFAULT 1,
+  created_at    INTEGER NOT NULL,
+  last_seen     INTEGER,
+  revoked_at    INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_mak_grants_license ON mak_grants(license_id);
+CREATE INDEX IF NOT EXISTS idx_mak_grants_host ON mak_grants(license_id, host_id);
+CREATE INDEX IF NOT EXISTS idx_mak_grants_status ON mak_grants(status);
+
+-- ---------------------------------------------------------------------------
+-- Replay cache for MAK/2 request nonces (server time; 5 minute window).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS mak_nonces (
+  nonce_hash  TEXT PRIMARY KEY,
+  endpoint    TEXT NOT NULL DEFAULT '',
+  grant_id    TEXT NOT NULL DEFAULT '',
+  created_at  INTEGER NOT NULL,
+  expires_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mak_nonces_expiry ON mak_nonces(expires_at);
+
+-- ---------------------------------------------------------------------------
+-- Legacy MAK/1 devices (kept for old databases; MAK/2 does not use this table)
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS mak_devices (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,

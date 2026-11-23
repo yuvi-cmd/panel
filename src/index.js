@@ -4,20 +4,19 @@
 
 import router from './backend/router.js';
 import { ensureDB } from './backend/db.js';
-import { handleMak } from './mak/protocol.js';
+import { handleMakV2 } from './mak/protocol-v2.js';
 import { json } from './mak/http.js';
-import { PROTOCOL, nowS, randomId } from './mak/crypto.js';
+import { PROTOCOL_V2, nowS, randomId } from './mak/crypto.js';
 
-const BUILD = '2026-11-23.6';
+const BUILD = '2026-11-23.7';
 
 function makFailure(error) {
   console.error('mak_request_failed', String(error && error.stack ? error.stack : error));
   return json({
-    protocol: PROTOCOL,
+    protocol: PROTOCOL_V2,
     decision: 'DENY',
     code: 'SERVER_ERROR',
     request_id: randomId('REQ', 12),
-    permissions: { install: false, launch: false, update: false, restart: false },
     message: 'Activation service unavailable',
     server_time: nowS(),
   }, 503, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type' });
@@ -39,18 +38,28 @@ export default {
       }, 200, { 'Access-Control-Allow-Origin': '*' });
     }
 
-    // MAK/1 protocol endpoints stay at the stable /mak/v1 base. The old MAK
-    // admin console (/mak, /mak/licenses, ...) is retired; every management
-    // screen now lives inside the SDK Panel under /sdk.
-    if (url.pathname === '/mak/v1' || url.pathname.startsWith('/mak/v1/')) {
+    // MAK/2 is the only public protocol. MAK/1 endpoints were removed.
+    // Every management screen lives inside the SDK Panel under /sdk.
+    if (url.pathname === '/mak/v2' || url.pathname.startsWith('/mak/v2/')) {
       const db = env.DB;
       if (!db) return new Response('Database binding DB is not configured.', { status: 500 });
       try {
         await ensureDB(db, env.PANEL_CODE || 'YUVI_001');
-        return await handleMak(request, env, db);
+        return await handleMakV2(request, env, db);
       } catch (error) {
         return makFailure(error);
       }
+    }
+
+    // Removed MAK/1 base: answer explicitly so old clients fail closed.
+    if (url.pathname === '/mak/v1' || url.pathname.startsWith('/mak/v1/')) {
+      return json({
+        protocol: PROTOCOL_V2,
+        decision: 'DENY',
+        code: 'PROTOCOL_REMOVED',
+        message: 'MAK/1 was removed. Use MAK/2.',
+        server_time: nowS(),
+      }, 410, { 'Access-Control-Allow-Origin': '*' });
     }
 
     if (url.pathname === '/mak' || url.pathname.startsWith('/mak/')) {
