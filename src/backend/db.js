@@ -56,6 +56,9 @@ export const MIGRATE_COLS = [
   ['api_keys', 'created_by', 'INTEGER NOT NULL DEFAULT 1'],
   ['key_devices', 'key_id', 'INTEGER'], ['key_devices', 'device_uuid', 'TEXT'],
   ['key_devices', 'panel_code', 'TEXT'], ['key_devices', 'last_seen', 'TEXT'],
+  // MAK/2 numeric duration lifecycle migration.
+  ['mak_licenses', 'duration_days', 'INTEGER'],
+  ['mak_licenses', 'started_at', 'INTEGER'],
 ];
 
 // Split a SQL script into complete statements. D1's exec() treats input as

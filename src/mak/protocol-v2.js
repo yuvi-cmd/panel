@@ -30,6 +30,7 @@ import {
   findHostForLicensePackage,
   findLicenseByCredential,
   getBinding,
+  startLicenseDurationAtomic,
   touchHost,
   touchLicense,
 } from './store.js';
@@ -293,7 +294,7 @@ export async function handleMakV2(request, env, db) {
       const body = read.payload;
       const requestId = cleanRequestId(body.request_id);
 
-      const license = await findLicenseByCredential(db, body.mak);
+      let license = await findLicenseByCredential(db, body.mak);
       if (!license) throw new HttpError(403, 'INVALID_LICENSE', 'Invalid MAK credential');
       const licProblem = licenseProblem(license);
       if (licProblem) throw new HttpError(403, licProblem, 'License is not active');
@@ -353,6 +354,20 @@ export async function handleMakV2(request, env, db) {
         });
         if (!created.ok) throw new HttpError(403, 'INSTALL_LIMIT_REACHED', 'Seat limit reached for this host package');
         grant = created.grant;
+      }
+
+      // First successful runtime app bind starts a numeric duration exactly
+      // once. Later binds reuse the original started_at / expires_at values.
+      if (Number(license.duration_days) > 0 && !license.started_at) {
+        const started = await startLicenseDurationAtomic(db, license.id);
+        if (started) {
+          license = { ...license, ...started };
+          await log(db, {
+            license_id: license.id, host_id: host.id, event_type: 'LICENSE_STARTED',
+            result: 'SUCCESS', request_id: requestId, ip_hash: ipHash,
+            detail: 'Duration started on first app bind; expires ' + Number(license.expires_at),
+          });
+        }
       }
 
       await touchLicense(db, license.id);

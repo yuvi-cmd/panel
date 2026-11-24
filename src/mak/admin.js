@@ -16,15 +16,15 @@ import {
   clientIp, flashRedirect, formAll, html, sameOrigin, text,
 } from './http.js';
 import {
-  activeLicenseOptions, bindGuest, createGuest, dashboardStats,
-  deleteDevice, deleteHost, deleteLicense, deviceCounts, devicesForLicense, eventCounts, expiringLicenses,
+  activeLicenseOptions, bindGuestAtomic, createGuest, dashboardStats,
+  deleteBinding, deleteDevice, deleteGuestApp, deleteHostCascade, deleteLicense, deviceCounts, devicesForLicense, eventCounts, expiringLicenses,
   getDeviceById, getGuestById, getHostById, getHostForLicense, getHostsForLicense, getLicenseById, getSession,
   guestCounts, guestEvents, hostCounts, licenseCounts, listAllActiveGuests,
   listBindingsForGuest, listBindingsForLicense, listDevices, listGuests, listHosts,
   listLicenses, listSessions, revokeAllSessions, revokeDevice, revokeLicense,
   revokeSession, revokeSessionsForLicense, resetLicenseDevices,
   rotateLicenseCredential, sessionCounts, sessionsForLicense, setHostStatus,
-  setLicenseStatus, unbindGuest, updateGuest, updateLicensePolicy, updateLicenseQuota, upsertHost,
+  setLicenseStatus, updateGuest, updateLicensePolicy, updateLicenseQuota, upsertHost,
 } from './store.js';
 import { dashboardPage } from './pages/dashboard.js';
 import { devicesPage } from './pages/devices.js';
@@ -36,7 +36,9 @@ import { logsPage } from './pages/logs.js';
 import { hostsPage } from './pages/hosts.js';
 import { sessionsPage } from './pages/sessions.js';
 import { settingsPage } from './pages/settings.js';
-import { emptyState, icon, layout, pageHeader } from './ui.js';
+import { emptyState, flashHtml, icon, pageHeader } from './ui.js';
+import { layout as sdkLayout } from '../frontend/ui.js';
+import { MAK_ADMIN_CSS, MAK_ADMIN_JS, makAdminContent } from '../frontend/sdk/admin-ui.js';
 import { hashPassword as hashPanelPassword, verifyPassword as verifyPanelPassword } from '../backend/crypto.js';
 import { issueMak, parseLicensePolicy } from './issue.js';
 
@@ -98,22 +100,48 @@ function mountMakLinks(out, mount = '/mak') {
   return value;
 }
 
+// Block/suspend/delete actions must land back on the same filtered URL. The
+// form carries an internal return path; Referer is only a fallback because the
+// query string (q/status) is otherwise lost.
+function samePagePath(sp, request, mount, fallback = '/hosts') {
+  let raw = String(sp.get('return') || '').trim();
+  if (!raw) {
+    const ref = String(request.headers.get('Referer') || '');
+    try {
+      const target = new URL(ref);
+      const here = new URL(request.url);
+      if (target.origin === here.origin) raw = target.pathname + target.search;
+    } catch {}
+  }
+  if (!raw.startsWith('/') || raw.startsWith('//')) raw = fallback;
+  const [pathPart, ...queryRest] = raw.split('?');
+  const query = queryRest.join('?');
+  const path = pathPart.startsWith(mount + '/') || pathPart.startsWith('/sdk/')
+    ? pathPart
+    : publicAdminPath(mount, pathPart || fallback);
+  return path + (query ? '?' + query : '');
+}
+
 function panelResponse(env, request, admin, session, settings, config, opts = {}) {
   const url = new URL(request.url);
   const mount = adminMount(request);
-  return html(mountMakLinks(layout({
+  const active = String(opts.active || '');
+  const route = active === 'dashboard' ? 'sdk'
+    : active === 'licenses' ? 'sdk/keys'
+      : active ? 'sdk/' + active : 'sdk';
+  const content = mountMakLinks(`${flashHtml(opts.ok ?? clipFlash(url.searchParams.get('ok')), opts.err ?? clipFlash(url.searchParams.get('err')))}
+    ${opts.content || ''}`, mount);
+  return html(sdkLayout({
     title: opts.title || 'Panel',
-    active: opts.active || '',
-    admin,
-    server: { enabled: settings.server_enabled },
-    csrf: session.csrf,
-    signingReady: config.ok,
+    route,
+    username: admin?.username || session?.username || 'admin',
+    panelCode: env.PANEL_CODE || 'SDK',
     panelName: panelName(env),
-    version: settings.server_version,
-    ok: opts.ok ?? clipFlash(url.searchParams.get('ok')),
-    err: opts.err ?? clipFlash(url.searchParams.get('err')),
-    content: opts.content || '',
-  }), mount), opts.status || 200);
+    content: makAdminContent(content),
+    theme: 'emerald',
+    extraCss: MAK_ADMIN_CSS,
+    extraScript: MAK_ADMIN_JS,
+  }), opts.status || 200);
 }
 
 function notFoundResponse(env, request, admin, session, settings, config, message = 'The page or record you requested does not exist.') {
@@ -350,16 +378,22 @@ export async function handleMakAdmin(request, env, db, options = {}) {
       const license = await getLicenseById(db, id);
       if (!license) return notFoundResponse(env, request, session, session, settings, config, 'That license does not exist.');
       const action = String(sp.get('action') || '');
-      const done = (message) => flash(`/licenses/${id}`, message);
-      const fail = (message) => flash(`/licenses/${id}`, '', message);
+      const back = samePagePath(sp, request, mount, `/licenses/${id}`);
+      const done = (message) => flashRedirect(back, message);
+      const fail = (message) => flashRedirect(back, '', message);
 
       if (action === 'update_policy') {
         const hosts = await getHostsForLicense(db, id);
         const parsed = parseLicensePolicy(sp, { hasHost: hosts.length > 0 });
         if (parsed.error) return fail(parsed.error);
-        const activeHosts = hosts.filter((h) => String(h.status).toUpperCase() === 'ACTIVE').length;
-        if (Number(parsed.policy.max_packages) < activeHosts) {
-          return fail('Max host packages cannot be lower than the ' + activeHosts + ' active package(s) already bound.');
+        // Suspended/blocked packages still occupy slots; only explicit delete
+        // releases a package limit slot.
+        const boundHosts = hosts.length;
+        if (Number(parsed.policy.max_packages) < boundHosts) {
+          return fail('Max host packages cannot be lower than the ' + boundHosts + ' package(s) already bound.');
+        }
+        if (Number(parsed.policy.duration_days) > 0 && license.started_at) {
+          parsed.policy.expires_at = Number(license.started_at) + Number(parsed.policy.duration_days) * 86400;
         }
         await updateLicensePolicy(db, id, parsed.policy);
         await logEvent(db, { license_id: id, event_type: 'LICENSE_UPDATED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'License policy updated' });
@@ -367,13 +401,17 @@ export async function handleMakAdmin(request, env, db, options = {}) {
       }
       if (action === 'extend_duration') {
         const raw = String(sp.get('extend_days') || '30');
-        let expiresAt = null;
-        if (raw !== 'lifetime') {
+        if (raw === 'lifetime') {
+          await updateLicenseQuota(db, id, { expires_at: null, duration_days: null, started_at: null });
+        } else if (Number(license.duration_days) > 0 && !license.started_at) {
+          // Not started yet: extend the reserved duration without starting it.
+          const days = Math.max(1, Math.min(3650, Number(raw) || 30));
+          await updateLicenseQuota(db, id, { duration_days: Number(license.duration_days) + days });
+        } else {
           const days = Math.max(1, Math.min(3650, Number(raw) || 30));
           const base = Math.max(nowS(), Number(license.expires_at) || 0);
-          expiresAt = base + days * 86400;
+          await updateLicenseQuota(db, id, { expires_at: base + days * 86400 });
         }
-        await updateLicenseQuota(db, id, { expires_at: expiresAt });
         await logEvent(db, {
           license_id: id, event_type: 'LICENSE_EXTENDED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash,
           detail: raw === 'lifetime' ? 'Expiry set to lifetime' : 'Expiry extended by ' + raw + ' day(s)',
@@ -461,26 +499,28 @@ export async function handleMakAdmin(request, env, db, options = {}) {
         await logEvent(db, { license_id: id, event_type: 'HOST_BOUND', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Host package saved by administrator: ' + hostPackage });
         return done('Host package saved. Sessions revoked.');
       }
-      if (action === 'host_reset') {
+      if (action === 'host_reset' || action === 'host_delete') {
         const hostId = Number(sp.get('host_id') || 0);
-        await deleteHost(db, id, hostId);
+        const deleted = await deleteHostCascade(db, id, hostId);
+        if (hostId && !deleted) return fail('Host package not found for this license.');
         await revokeSessionsForLicense(db, id);
-        await logEvent(db, { license_id: id, event_type: 'HOST_RESET', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: hostId ? 'Host package removed by administrator' : 'All host packages reset by administrator' });
-        return done(hostId ? 'Host package removed.' : 'All host packages reset.');
+        await logEvent(db, { license_id: id, host_id: hostId || null, event_type: 'HOST_DELETED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: deleted ? 'Host package deleted with bindings and grants: ' + deleted.package_name : 'All host packages deleted with their bindings and grants' });
+        return done(hostId ? 'Host package deleted. Its slot is free again.' : 'All host packages deleted.');
       }
       if (action === 'binding_add') {
         const guestId = Number(sp.get('guest_id') || 0);
         const guest = await getGuestById(db, guestId);
         if (!guest) return fail('Choose an approved guest app.');
-        await bindGuest(db, id, guestId, permissionsFrom(sp));
+        const bound = await bindGuestAtomic(db, id, 0, guestId, guest.package_name, permissionsFrom(sp), license.max_apps);
+        if (!bound.ok) return fail('App limit reached for this license. Delete an app binding to free a slot.');
         await logEvent(db, { license_id: id, guest_app_id: guestId, event_type: 'BINDING_ADDED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Guest bound to license' });
         return done('Guest app bound.');
       }
       if (action === 'binding_remove') {
         const guestId = Number(sp.get('guest_id') || 0);
-        await unbindGuest(db, id, guestId);
-        await logEvent(db, { license_id: id, guest_app_id: guestId, event_type: 'BINDING_REMOVED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Guest unbound from license' });
-        return done('Guest access removed.');
+        await deleteBinding(db, id, guestId);
+        await logEvent(db, { license_id: id, guest_app_id: guestId, event_type: 'BINDING_REMOVED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Guest binding deleted from license' });
+        return done('Guest app removed. Its app slot is free again.');
       }
       if (action === 'device_revoke') {
         const device = await getDeviceById(db, Number(sp.get('device_id') || 0));
@@ -611,7 +651,8 @@ export async function handleMakAdmin(request, env, db, options = {}) {
         const licenseId = Number(sp.get('license_id') || 0);
         const license = await getLicenseById(db, licenseId);
         if (!license) return fail('Choose a license.');
-        await bindGuest(db, licenseId, id, permissionsFrom(sp));
+        const bound = await bindGuestAtomic(db, licenseId, 0, id, guest.package_name, permissionsFrom(sp), license.max_apps);
+        if (!bound.ok) return fail('App limit reached for this license. Delete an app binding to free a slot.');
         await logEvent(db, { license_id: licenseId, guest_app_id: id, event_type: 'BINDING_ADDED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Guest bound to license' });
         return done('Guest bound to license.');
       }
@@ -619,9 +660,18 @@ export async function handleMakAdmin(request, env, db, options = {}) {
         const licenseId = Number(sp.get('license_id') || 0);
         const binding = await listBindingsForGuest(db, id);
         if (!binding.some((b) => Number(b.license_id) === licenseId)) return fail('Binding not found.');
-        await unbindGuest(db, licenseId, id);
-        await logEvent(db, { license_id: licenseId, guest_app_id: id, event_type: 'BINDING_REMOVED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Guest unbound from license' });
-        return done('Guest binding removed.');
+        await deleteBinding(db, licenseId, id);
+        await logEvent(db, { license_id: licenseId, guest_app_id: id, event_type: 'BINDING_REMOVED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Guest binding deleted from license' });
+        return done('Guest binding removed. Its app slot is free again.');
+      }
+      if (action === 'delete') {
+        const deleted = await deleteGuestApp(db, id);
+        if (!deleted) return notFoundResponse(env, request, session, session, settings, config, 'That guest app does not exist.');
+        await logEvent(db, {
+          guest_app_id: id, event_type: 'GUEST_DELETED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash,
+          detail: 'Guest app deleted permanently: ' + deleted.package_name + ' v' + deleted.version_code,
+        });
+        return flash('/guests', 'Guest app deleted. Its license bindings and app slots were removed.');
       }
       return fail('Unknown guest action.');
     }
@@ -645,28 +695,30 @@ export async function handleMakAdmin(request, env, db, options = {}) {
     if (!sameOrigin(request)) return text('Cross-site request blocked.', 403);
     const sp = await formAll(request);
     if (!verifyCsrf(session, sp.get('_csrf'))) return text('CSRF token rejected.', 403);
+    const back = samePagePath(sp, request, mount, '/hosts');
     const licenseId = Number(sp.get('license_id') || 0);
     const action = String(sp.get('action') || '');
     const license = await getLicenseById(db, licenseId);
-    if (!license) return flash('/hosts', '', 'Host binding not found.');
+    if (!license) return flashRedirect(back, '', 'Host binding not found.');
     const hostId = Number(sp.get('host_id') || 0);
     const host = hostId ? await getHostById(db, hostId) : await getHostForLicense(db, licenseId);
-    if (!host || Number(host.license_id) !== licenseId) return flash('/hosts', '', 'Host binding not found.');
+    if (!host || Number(host.license_id) !== licenseId) return flashRedirect(back, '', 'Host binding not found.');
 
     if (action === 'suspend' || action === 'activate') {
       const status = action === 'suspend' ? 'SUSPENDED' : 'ACTIVE';
       await setHostStatus(db, licenseId, status, host.id);
       if (status !== 'ACTIVE') await revokeSessionsForLicense(db, licenseId);
       await logEvent(db, { license_id: licenseId, host_id: host.id, event_type: action === 'suspend' ? 'HOST_SUSPENDED' : 'HOST_REACTIVATED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Host package ' + host.package_name + ' status changed by administrator' });
-      return flash('/hosts', action === 'suspend' ? 'Host package suspended. Sessions revoked.' : 'Host package reactivated.');
+      return flashRedirect(back, action === 'suspend' ? 'Host package suspended. Its package slot stays reserved.' : 'Host package reactivated.');
     }
-    if (action === 'reset') {
-      await deleteHost(db, licenseId, host.id);
+    if (action === 'delete' || action === 'reset') {
+      const deleted = await deleteHostCascade(db, licenseId, host.id);
+      if (!deleted) return flashRedirect(back, '', 'Host package not found for this license.');
       await revokeSessionsForLicense(db, licenseId);
-      await logEvent(db, { license_id: licenseId, host_id: host.id, event_type: 'HOST_RESET', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Host package ' + host.package_name + ' reset from hosts page' });
-      return flash('/hosts', 'Host package removed.');
+      await logEvent(db, { license_id: licenseId, event_type: 'HOST_DELETED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Host package deleted with bindings and grants: ' + host.package_name });
+      return flashRedirect(back, 'Host package deleted. Its slot is free again.');
     }
-    return flash('/hosts', '', 'Unknown host action.');
+    return flashRedirect(back, '', 'Unknown host action.');
   }
 
   // -------------------------------------------------------------------------

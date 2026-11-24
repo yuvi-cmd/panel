@@ -1,5 +1,30 @@
 # CHANGES.md
 
+## Pass 2026-11-24 — MAK/2 lifecycle, slot-safe deletes, one green SDK shell
+
+- Numeric duration ab **first successful app bind** par start hota hai:
+  `duration_days` issue time par reserve hota hai, `started_at` pehle
+  `/activate` par set hota hai, aur `expires_at = started_at + duration`.
+  Later binds expiry ko reset/forward nahi karte. Custom-date aur lifetime
+  behaviour backward-compatible hai.
+- New effective status **NOT YET STARTED** MAK detail, key card, list aur
+  expiry labels me dikhta hai.
+- Package limit ab **all saved host rows** count karta hai, including
+  suspended/blocked. Slot sirf explicit package delete se free hota hai.
+  Host delete grants, sessions and host-scoped bindings cascade karta hai.
+- App bindings ab hard-delete hoti hain, isliye delete ke baad `max_apps`
+  slot turant free hai. Global guest-app delete sab license bindings
+  cascade karta hai; security events audit ke liye retain rehte hain.
+- Block/suspend/delete actions same filtered `/sdk/hosts` URL par return
+  karte hain; alag page redirect nahi hota.
+- Guest Apps, Hosts, Devices, Sessions, Security Logs aur license detail ab
+  ek hi production glass SDK shell + emerald theme me render hote hain
+  (legacy MAK sidebar/theme duplicate removed). `max_installs` UI hidden,
+  backend default 3 policy retained.
+- Regression tests: duration start/no-reset, suspended-slot accounting,
+  cascade deletes, app-slot delete, same-page redirects, legacy durations,
+  and shell unification. **270/270 passing**.
+
 ## Pass 2026-11-20 — PROFESSOR-only console design
 
 - Naya `GET /professor` route **sirf PROFESSOR role** ke liye. OWNER/ADMIN/

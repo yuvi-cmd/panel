@@ -10,9 +10,24 @@ function fmtDate(seconds) {
 function statusChip(status) {
   const s = String(status || '').toUpperCase();
   const cls = s === 'ACTIVE' ? 'bg-emerald-50 text-emerald-600'
-    : s === 'SUSPENDED' ? 'bg-amber-50 text-amber-600'
+    : s === 'SUSPENDED' || s === 'NOT YET STARTED' ? 'bg-amber-50 text-amber-600'
       : 'bg-red-50 text-red-600';
   return '<span class="text-[10px] font-extrabold px-2 py-1 rounded-lg uppercase ' + cls + '">' + esc(s || 'UNKNOWN') + '</span>';
+}
+
+function effectiveLicenseStatus(l) {
+  const status = String(l.status || 'ACTIVE').toUpperCase();
+  if (status === 'SUSPENDED' || status === 'REVOKED') return status;
+  if (Number(l.duration_days) > 0 && !l.started_at) return 'NOT YET STARTED';
+  if (l.expires_at && Number(l.expires_at) <= Math.floor(Date.now() / 1000)) return 'EXPIRED';
+  return 'ACTIVE';
+}
+
+function expiryLabel(l) {
+  if (Number(l.duration_days) > 0 && !l.started_at) {
+    return 'Not started · ' + Number(l.duration_days) + 'd';
+  }
+  return fmtDate(l.expires_at);
 }
 
 const EXTEND_OPTIONS = [
@@ -47,7 +62,7 @@ export function keysPage(o) {
 
   const filters = [['ALL', 'All', counts.total], ['ACTIVE', 'Active', counts.active], ['SUSPENDED', 'Suspended', counts.suspended], ['EXPIRED', 'Expired', counts.expired], ['REVOKED', 'Revoked', counts.revoked]];
   const filterHtml = '<div class="flex flex-wrap gap-2 mb-4">' + filters.map(([value, label, count]) =>
-    '<a href="/sdk/keys?status=' + encodeURIComponent(value) + (q ? '&q=' + encodeURIComponent(q) : '') + '" class="clay-card px-3 py-1.5 text-xs font-bold rounded-xl ' + (status === value ? 'text-purple-600' : 'text-slate-500') + '">' + esc(label) + ' <span class="opacity-60">' + Number(count || 0) + '</span></a>'
+    '<a href="/sdk/keys?status=' + encodeURIComponent(value) + (q ? '&q=' + encodeURIComponent(q) : '') + '" class="clay-card px-3 py-1.5 text-xs font-bold rounded-xl ' + (status === value ? 'text-emerald-600' : 'text-slate-500') + '">' + esc(label) + ' <span class="opacity-60">' + Number(count || 0) + '</span></a>'
   ).join('') + '</div>';
 
   const rows = licenses.length ? licenses.map((l) => {
@@ -63,7 +78,8 @@ export function keysPage(o) {
         + '<div class="min-w-0"><p class="text-[11px] font-bold font-mono text-slate-700 break-all">' + esc(h.package_name) + '</p>'
         + '<p class="text-[10px] text-slate-400 break-all">' + esc(h.app_name || '—') + (h.cert_sha256 ? ' · ' + esc(String(h.cert_sha256).slice(0, 12)) + '…' : '') + '</p></div>'
         + '<div class="flex items-center gap-2">' + statusChip(h.status)
-        + '<button form="block-' + Number(h.id) + '" class="px-2.5 py-1 rounded-lg text-[10px] font-extrabold ' + (blocked ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600') + '">' + (blocked ? 'Unblock' : 'Block') + '</button></div></div>';
+        + '<button form="block-' + Number(h.id) + '" class="px-2.5 py-1 rounded-lg text-[10px] font-extrabold ' + (blocked ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600') + '">' + (blocked ? 'Unblock' : 'Block') + '</button>'
+        + '<button form="delete-host-' + Number(h.id) + '" class="px-2.5 py-1 rounded-lg text-[10px] font-extrabold bg-red-50 text-red-600">Delete</button></div></div>';
     }).join('') : '<p class="text-[11px] text-slate-400">Abhi koi package bind nahi hua.</p>';
 
     const blockForms = hosts.map((h) => {
@@ -71,16 +87,20 @@ export function keysPage(o) {
       return '<form id="block-' + Number(h.id) + '" method="post" action="/sdk/keys/' + id + '/action" class="hidden">'
         + '<input type="hidden" name="_csrf" value="' + esc(csrf) + '">'
         + '<input type="hidden" name="action" value="' + (blocked ? 'host_unblock' : 'host_block') + '">'
+        + '<input type="hidden" name="host_id" value="' + Number(h.id) + '"></form>'
+        + '<form id="delete-host-' + Number(h.id) + '" method="post" action="/sdk/keys/' + id + '/action" class="hidden" onsubmit="return confirm(\'Delete this host package? Its grants, sessions and host-scoped guest bindings are removed, and its package slot becomes free.\')">'
+        + '<input type="hidden" name="_csrf" value="' + esc(csrf) + '">'
+        + '<input type="hidden" name="action" value="host_delete">'
         + '<input type="hidden" name="host_id" value="' + Number(h.id) + '"></form>';
     }).join('');
 
     const details = '<details id="mak-details-' + id + '" class="mt-3">'
-      + '<summary class="cursor-pointer text-[11px] font-extrabold uppercase tracking-wider text-purple-600 select-none">MAK details &amp; quick actions</summary>'
+      + '<summary class="cursor-pointer text-[11px] font-extrabold uppercase tracking-wider text-emerald-600 select-none">MAK details &amp; quick actions</summary>'
       + '<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">'
       + infoRow('License ID', '<span class="font-mono">' + esc(l.license_uid) + '</span>')
       + infoRow('Binding', esc(String(l.host_bind_mode || 'AUTO') === 'MANUAL' ? 'Manual' : 'AUTO (first use)'))
       + infoRow('Signature', Number(l.signature_bind ?? 1) ? 'Verify cert' : 'Package + app name')
-      + infoRow('Expiry', esc(fmtDate(l.expires_at)))
+      + infoRow('Expiry', esc(expiryLabel(l)))
       + infoRow('Package limit', pkgCount + ' / ' + maxPackages + ' used')
       + infoRow('App names / package', String(maxApps))
       + infoRow('User ref', l.user_ref ? esc(l.user_ref) : '—')
@@ -106,7 +126,7 @@ export function keysPage(o) {
         + '<input name="host_app_name" maxlength="120" placeholder="App name" class="clay-card px-3 py-2 text-xs rounded-lg">'
         + '</div>'
         + '<div class="flex gap-2"><input name="host_cert" maxlength="80" placeholder="Certificate SHA-256 (64 hex)" class="clay-card px-3 py-2 text-xs font-mono rounded-lg flex-1">'
-        + '<button class="clay-card px-3 py-2 rounded-lg text-[10px] font-extrabold text-purple-600">Add pkg</button></div>')
+        + '<button class="clay-card px-3 py-2 rounded-lg text-[10px] font-extrabold text-emerald-600">Add pkg</button></div>')
       + '<div class="mt-3"><p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">Bound packages</p>' + hostList + '</div>'
       + blockForms
       + '<div class="mt-4 pt-3 border-t border-red-100">'
@@ -126,14 +146,14 @@ export function keysPage(o) {
     const secretBox = secret
       ? '<div class="clay-card p-2.5 mt-3 flex items-center gap-2 rounded-2xl">'
         + '<code id="mak-key-' + id + '" data-hidden="1" class="flex-1 text-xs font-mono font-bold text-slate-700 break-all" style="filter:blur(5px);user-select:none">' + esc(secret) + '</code>'
-        + '<button type="button" onclick="toggleMakKey(' + id + ')" class="w-8 h-8 shrink-0 rounded-lg text-slate-500 hover:text-purple-600" title="Show / hide key"><i id="mak-eye-' + id + '" class="bi bi-eye"></i></button>'
-        + '<button type="button" onclick="copyMakKey(' + id + ')" class="w-8 h-8 shrink-0 rounded-lg text-slate-500 hover:text-purple-600" title="Copy key"><i class="bi bi-clipboard"></i></button>'
+        + '<button type="button" onclick="toggleMakKey(' + id + ')" class="w-8 h-8 shrink-0 rounded-lg text-slate-500 hover:text-emerald-600" title="Show / hide key"><i id="mak-eye-' + id + '" class="bi bi-eye"></i></button>'
+        + '<button type="button" onclick="copyMakKey(' + id + ')" class="w-8 h-8 shrink-0 rounded-lg text-slate-500 hover:text-emerald-600" title="Copy key"><i class="bi bi-clipboard"></i></button>'
         + '</div>'
       : '<div class="clay-card p-2.5 mt-3 rounded-2xl text-[10px] text-slate-400">Raw key is not stored for this older MAK. Rotate it to get a copyable key here.</div>';
 
     return '<div class="glass-card p-4 md:p-5"><div class="flex flex-wrap items-start justify-between gap-3">'
-      + '<div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2 mb-1">' + statusChip(l.status)
-      + '<span class="text-[10px] font-extrabold px-2 py-1 rounded-lg bg-purple-50 text-purple-600">' + esc(fmtDate(l.expires_at)) + '</span></div>'
+      + '<div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2 mb-1">' + statusChip(effectiveLicenseStatus(l))
+      + '<span class="text-[10px] font-extrabold px-2 py-1 rounded-lg bg-emerald-50 text-emerald-600">' + esc(expiryLabel(l)) + '</span></div>'
       + '<p class="text-sm md:text-base font-bold text-slate-800 truncate">' + esc(l.label || l.license_uid) + '</p>'
       + '<p class="text-[10px] font-mono text-slate-400 mt-0.5 break-all">' + esc(l.license_uid) + (l.user_ref ? ' · ' + esc(l.user_ref) : '') + '</p>'
       + '<div class="mt-2">' + hostLine + '</div></div>'

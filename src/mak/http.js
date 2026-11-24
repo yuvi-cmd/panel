@@ -220,6 +220,7 @@ export function licenseEffectiveStatus(license, now = Math.floor(Date.now() / 10
   const status = String(license?.status || 'ACTIVE').toUpperCase();
   if (status === 'SUSPENDED') return 'SUSPENDED';
   if (status === 'REVOKED') return 'REVOKED';
+  if (Number(license?.duration_days) > 0 && !license?.started_at) return 'NOT YET STARTED';
   if (license?.expires_at && Number(license.expires_at) <= now) return 'EXPIRED';
   return 'ACTIVE';
 }

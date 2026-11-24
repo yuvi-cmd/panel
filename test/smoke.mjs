@@ -185,7 +185,7 @@ console.log('mak integration');
 
   const detail = await call(env, 'GET', '/sdk/keys/' + issuedRow.id, { cookie: ownerCookie });
   const detailBody = await detail.text();
-  ok(detail.status === 200 && detailBody.includes('SDK issued license') && detailBody.includes('Back to SDK Panel'), 'SDK license detail is served inside the MAK panel');
+  ok(detail.status === 200 && detailBody.includes('SDK issued license') && detailBody.includes('glass-sidebar') && detailBody.includes('MAK Keys'), 'SDK license detail is served inside the MAK panel');
 
   const legacyDetail = await call(env, 'GET', '/mak/licenses/' + issuedRow.id, { cookie: ownerCookie });
   ok(legacyDetail.status === 302 && String(legacyDetail.headers.get('Location') || '') === '/sdk/keys/' + issuedRow.id, 'legacy /mak/licenses/:id redirects to /sdk/keys/:id');

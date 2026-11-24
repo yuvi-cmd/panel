@@ -576,10 +576,15 @@ async function main() {
       method: 'POST', cookie, body: form({ _csrf: token, ...fields }),
     });
 
-    const before = Number(license.expires_at);
+    // Numeric durations start on the first successful app bind, so an
+    // extension before that point increases the reserved duration instead of
+    // writing an expiry timestamp.
+    const beforeDays = Number(license.duration_days);
+    assert.ok(beforeDays > 0, 'issued license carries a reserved duration');
     assert.equal((await action({ action: 'extend_duration', extend_days: '7' })).status, 303);
     const extended = await env.DB.prepare('SELECT * FROM mak_licenses WHERE id=?').bind(license.id).first();
-    assert.ok(Number(extended.expires_at) >= before + 7 * 86400 - 5, 'expiry extended by 7 days');
+    assert.equal(Number(extended.duration_days), beforeDays + 7, 'reserved duration extended by 7 days');
+    assert.equal(extended.expires_at, null, 'expiry is not written before the first app bind');
 
     assert.equal((await action({ action: 'extend_limits', max_packages: '3', max_apps: '4', max_installs: '5' })).status, 303);
     const raised = await env.DB.prepare('SELECT * FROM mak_licenses WHERE id=?').bind(license.id).first();
@@ -665,17 +670,183 @@ async function main() {
     assert.ok(!html.includes(license.license_uid), 'deleted MAK is no longer listed');
   });
 
-  await test('Guest Apps, Hosts, Devices, Sessions and Logs keep the original MAK shell', async () => {
+  await test('Guest Apps, Hosts, Devices, Sessions and Logs share one green SDK shell', async () => {
     const env = globalThis.__lastEnv;
     const { cookie } = env.__test;
     for (const path of ['/sdk/guests', '/sdk/hosts', '/sdk/devices', '/sdk/sessions', '/sdk/logs']) {
       const res = await call(env, path, { cookie });
       const html = await res.text();
       assert.equal(res.status, 200, path);
-      assert.match(html, /<div class="app">/, path + ' uses the MAK admin shell');
-      assert.match(html, /SDK PANEL · MAK\/2/, path + ' shows the MAK sidebar brand');
-      assert.doesNotMatch(html, /glass-sidebar/, path + ' must not use the glass SDK shell');
+      assert.match(html, /glass-sidebar/, path + ' uses the glass SDK shell');
+      assert.match(html, /class="mak-admin"/, path + ' wraps MAK content for the shared shell');
+      assert.match(html, /data-theme="emerald"/, path + ' uses the single green theme');
+      assert.doesNotMatch(html, /SDK PANEL · MAK\/2/, path + ' has no duplicate MAK theme');
     }
+  });
+
+  await test('numeric duration starts on first app bind and never resets', async () => {
+    const env = globalThis.__lastEnv;
+    const { cookie, token } = env.__test;
+    const issued = await issueLicense(env, cookie, token, {
+      label: 'Duration lifecycle', signature_bind: '0', max_packages: '2', duration: '30',
+    });
+    assert.ok(issued.mak);
+    const license = await env.DB.prepare('SELECT * FROM mak_licenses ORDER BY id DESC LIMIT 1').first();
+    assert.equal(license.started_at, null);
+    assert.equal(license.expires_at, null);
+    assert.equal(Number(license.duration_days), 30);
+
+    const before = await call(env, '/sdk/keys?q=' + encodeURIComponent(license.license_uid), { cookie });
+    assert.match(await before.text(), /NOT YET STARTED/, 'MAK Keys shows the pending lifecycle');
+
+    const first = await activate(env, issued.mak, { hostPackage: 'com.duration.one', hostCert: '' });
+    assert.equal(first.body.decision, 'ALLOW', JSON.stringify(first.body));
+    const started = await env.DB.prepare('SELECT * FROM mak_licenses WHERE id=?').bind(license.id).first();
+    assert.ok(Number(started.started_at) > 0, 'first app bind records started_at');
+    assert.equal(Number(started.expires_at), Number(started.started_at) + 30 * 86400);
+
+    const second = await activate(env, issued.mak, { hostPackage: 'com.duration.two', hostCert: '' });
+    assert.equal(second.body.decision, 'ALLOW', JSON.stringify(second.body));
+    const after = await env.DB.prepare('SELECT * FROM mak_licenses WHERE id=?').bind(license.id).first();
+    assert.equal(Number(after.started_at), Number(started.started_at), 'later binds keep the original start');
+    assert.equal(Number(after.expires_at), Number(started.expires_at), 'later binds never push expiry forward');
+  });
+
+  await test('suspended packages keep their slot; delete frees it and cascades state', async () => {
+    const env = globalThis.__lastEnv;
+    const { cookie, token } = env.__test;
+    const issued = await issueLicense(env, cookie, token, {
+      label: 'Slot accounting', signature_bind: '0', max_packages: '1',
+    });
+    assert.ok(issued.mak);
+    const license = await env.DB.prepare('SELECT * FROM mak_licenses ORDER BY id DESC LIMIT 1').first();
+
+    const first = await activate(env, issued.mak, { hostPackage: 'com.slot.one', hostCert: '' });
+    assert.equal(first.body.decision, 'ALLOW', JSON.stringify(first.body));
+    const host = await env.DB.prepare('SELECT * FROM mak_hosts WHERE license_id=?').bind(license.id).first();
+
+    const action = (fields) => call(env, '/sdk/keys/' + license.id + '/action', {
+      method: 'POST', cookie, body: form({ _csrf: token, ...fields }),
+    });
+
+    // Suspend keeps the package row, so the single slot must stay consumed.
+    assert.equal((await action({ action: 'host_block', host_id: String(host.id) })).status, 303);
+    const blocked = await env.DB.prepare('SELECT * FROM mak_hosts WHERE id=?').bind(host.id).first();
+    assert.equal(blocked.status, 'SUSPENDED');
+    const denied = await activate(env, issued.mak, { hostPackage: 'com.slot.two', hostCert: '' });
+    assert.equal(denied.body.decision, 'DENY', JSON.stringify(denied.body));
+    assert.equal(denied.body.code, 'PACKAGE_LIMIT_REACHED');
+    const count = await env.DB.prepare('SELECT COUNT(*) AS c FROM mak_hosts WHERE license_id=?').bind(license.id).first();
+    assert.equal(Number(count.c), 1, 'suspended row still occupies the package slot');
+
+    // Explicit delete removes host-scoped runtime state and frees the slot.
+    assert.equal((await action({ action: 'host_delete', host_id: String(host.id) })).status, 303);
+    const hosts = await env.DB.prepare('SELECT COUNT(*) AS c FROM mak_hosts WHERE license_id=?').bind(license.id).first();
+    const grants = await env.DB.prepare('SELECT COUNT(*) AS c FROM mak_grants WHERE license_id=?').bind(license.id).first();
+    assert.equal(Number(hosts.c), 0);
+    assert.equal(Number(grants.c), 0, 'host grants are cascade-deleted');
+    const rebound = await activate(env, issued.mak, { hostPackage: 'com.slot.two', hostCert: '' });
+    assert.equal(rebound.body.decision, 'ALLOW', JSON.stringify(rebound.body));
+  });
+
+  await test('host suspend/delete actions return to the same filtered page', async () => {
+    const env = globalThis.__lastEnv;
+    const { cookie, token } = env.__test;
+    const issued = await issueLicense(env, cookie, token, {
+      label: 'Same page redirect', signature_bind: '0', max_packages: '1',
+    });
+    assert.ok(issued.mak);
+    const license = await env.DB.prepare('SELECT * FROM mak_licenses ORDER BY id DESC LIMIT 1').first();
+    const activated = await activate(env, issued.mak, { hostPackage: 'com.redirect.host', hostCert: '' });
+    assert.equal(activated.body.decision, 'ALLOW');
+    const host = await env.DB.prepare('SELECT * FROM mak_hosts WHERE license_id=?').bind(license.id).first();
+
+    const res = await call(env, '/sdk/hosts/action', {
+      method: 'POST', cookie,
+      body: form({
+        _csrf: token, license_id: license.id, host_id: host.id,
+        action: 'suspend', return: '/hosts?status=SUSPENDED&q=com.redirect',
+      }),
+    });
+    assert.equal(res.status, 303);
+    const location = String(res.headers.get('Location') || '');
+    assert.ok(location.startsWith('/sdk/hosts?status=SUSPENDED&q=com.redirect'), location);
+
+    const deleted = await call(env, '/sdk/hosts/action', {
+      method: 'POST', cookie,
+      body: form({
+        _csrf: token, license_id: license.id, host_id: host.id,
+        action: 'delete', return: '/hosts?status=SUSPENDED&q=com.redirect',
+      }),
+    });
+    assert.equal(deleted.status, 303);
+    assert.ok(String(deleted.headers.get('Location') || '').startsWith('/sdk/hosts?status=SUSPENDED&q=com.redirect'));
+  });
+
+  await test('deleting a guest app removes every binding and frees app slots', async () => {
+    const env = globalThis.__lastEnv;
+    const { cookie, token } = env.__test;
+    const now = nowS();
+    const guest = await env.DB.prepare(
+      'INSERT INTO mak_guest_apps (package_name,app_name,apk_sha256,cert_sha256,version_code,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?) RETURNING id',
+    ).bind('com.delete.guest', 'Delete Guest', '1'.repeat(64), '2'.repeat(64), 1, 'ACTIVE', now, now).first();
+    assert.ok(guest?.id);
+
+    const issued = await issueLicense(env, cookie, token, {
+      label: 'App slot delete', signature_bind: '0', max_apps: '1',
+    });
+    assert.ok(issued.mak);
+    const license = await env.DB.prepare('SELECT * FROM mak_licenses ORDER BY id DESC LIMIT 1').first();
+    const licenseAction = (fields) => call(env, '/sdk/keys/' + license.id + '/action', {
+      method: 'POST', cookie, body: form({ _csrf: token, ...fields }),
+    });
+
+    assert.equal((await licenseAction({ action: 'binding_add', guest_id: String(guest.id) })).status, 303);
+    let bound = await env.DB.prepare('SELECT COUNT(*) AS c FROM mak_bindings WHERE license_id=?').bind(license.id).first();
+    assert.equal(Number(bound.c), 1);
+
+    // A second bind must be rejected while the one app slot is occupied.
+    assert.equal((await licenseAction({ action: 'binding_add', guest_id: String(guest.id) })).status, 303);
+    bound = await env.DB.prepare('SELECT COUNT(*) AS c FROM mak_bindings WHERE license_id=?').bind(license.id).first();
+    assert.equal(Number(bound.c), 1, 'max_apps is enforced');
+
+    assert.equal((await licenseAction({ action: 'binding_remove', guest_id: String(guest.id) })).status, 303);
+    bound = await env.DB.prepare('SELECT COUNT(*) AS c FROM mak_bindings WHERE license_id=?').bind(license.id).first();
+    assert.equal(Number(bound.c), 0, 'explicit app removal frees the slot');
+    assert.equal((await licenseAction({ action: 'binding_add', guest_id: String(guest.id) })).status, 303);
+
+    const del = await call(env, '/sdk/guests/' + guest.id + '/action', {
+      method: 'POST', cookie, body: form({ _csrf: token, action: 'delete' }),
+    });
+    assert.equal(del.status, 303);
+    const gone = await env.DB.prepare('SELECT id FROM mak_guest_apps WHERE id=?').bind(guest.id).first();
+    assert.equal(gone, null);
+    bound = await env.DB.prepare('SELECT COUNT(*) AS c FROM mak_bindings WHERE guest_app_id=?').bind(guest.id).first();
+    assert.equal(Number(bound.c), 0, 'global app delete cascades its bindings');
+    const event = await env.DB.prepare("SELECT * FROM mak_events WHERE event_type='GUEST_DELETED' ORDER BY id DESC LIMIT 1").first();
+    assert.ok(event, 'guest deletion is retained in the security log');
+  });
+
+  await test('custom-date and lifetime policies stay backward compatible', async () => {
+    const env = globalThis.__lastEnv;
+    const { cookie, token } = env.__test;
+    const future = new Date(Date.now() + 45 * 86400000).toISOString().slice(0, 10);
+    const custom = await issueLicense(env, cookie, token, {
+      label: 'Legacy custom date', signature_bind: '0', duration: 'custom', expires_on: future,
+    });
+    assert.ok(custom.mak);
+    const customRow = await env.DB.prepare('SELECT * FROM mak_licenses ORDER BY id DESC LIMIT 1').first();
+    assert.equal(customRow.duration_days, null);
+    assert.ok(Number(customRow.expires_at) > nowS());
+
+    const life = await issueLicense(env, cookie, token, {
+      label: 'Legacy lifetime', signature_bind: '0', duration: 'lifetime',
+    });
+    assert.ok(life.mak);
+    const lifeRow = await env.DB.prepare('SELECT * FROM mak_licenses ORDER BY id DESC LIMIT 1').first();
+    assert.equal(lifeRow.duration_days, null);
+    assert.equal(lifeRow.expires_at, null);
+    assert.equal(lifeRow.started_at, null);
   });
 
   await test('MAK/1 endpoints are removed', async () => {

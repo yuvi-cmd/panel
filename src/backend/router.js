@@ -308,7 +308,7 @@ export default {
     const isOA = myRole === 'OWNER' || myRole === 'ADMIN' || myRole === 'PROFESSOR';
     const isOwnerLike = myRole === 'OWNER' || myRole === 'PROFESSOR';
     const P = async (route, title, content) => html(panelLayout({ title, route, sess, panelName: await panelName(db, myPanel, envName), content, theme: await getTheme(db, myPanel), accent: await getAccent(db, myPanel) }));
-    const S = async (route, title, content) => html(layout({ title, route, username: sess.username, panelCode: myPanel, panelName: envName, content, theme: await getTheme(db, myPanel), accent: await getAccent(db, myPanel) }));
+    const S = async (route, title, content) => html(layout({ title, route, username: sess.username, panelCode: myPanel, panelName: envName, content, theme: 'emerald', accent: null }));
     const needOA = () => { if (!isOA) return deny(); return null; };
     const needOwner = () => { if (!isOwnerLike) return deny(); return null; };
 

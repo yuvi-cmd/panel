@@ -306,7 +306,7 @@ export function layout(o) {
     + '<script src="https://cdn.tailwindcss.com"></script>'
     + '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">'
     + '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">'
-    + '<style>' + CSS + '</style>' + MODE_EARLY + '</head>'
+    + '<style>' + CSS + '</style>' + (o.extraCss || '') + MODE_EARLY + '</head>'
     + '<body class="flex h-screen overflow-hidden relative" data-theme="' + esc(th) + '"' + accentStyle(accent) + '>'
     + '<div class="droplet drop-1"></div><div class="droplet drop-2"></div><div class="droplet drop-3"></div><div class="droplet drop-4"></div><div class="droplet drop-5"></div><div class="droplet drop-6"></div><div class="droplet drop-7"></div><div class="droplet drop-8"></div>'
     + '<div id="sidebar-overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40 hidden md:hidden"></div>'
@@ -345,7 +345,7 @@ export function layout(o) {
     + '</div></div></div></header>'
     + '<main class="p-4 md:p-8 pb-20 relative z-10"><div class="mx-auto w-full max-w-6xl">' + content + '</div></main></div>'
     + PAL_SHELL + '<script>window.PGS=[["Back to main panel","/dashboard","bi-arrow-left-short"],["MAK dashboard","/sdk","bi-speedometer2"],["Generate MAK","/sdk/generate","bi-key-fill"],["MAK keys","/sdk/keys","bi-view-list"],["Guest apps","/sdk/guests","bi-app-indicator"],["Hosts","/sdk/hosts","bi-hdd-stack-fill"],["Devices","/sdk/devices","bi-phone-fill"],["Sessions","/sdk/sessions","bi-broadcast-pin"],["Security logs","/sdk/logs","bi-activity"],["MAK settings","/sdk/settings","bi-sliders"],["MAK server","/sdk/server","bi-hdd-network-fill"],["Hash vault","/sdk/hash","bi-fingerprint"]];</script>'
-    + '<script>' + BASE_JS + '</script></body></html>';
+    + '<script>' + BASE_JS + '</script>' + (o.extraScript || '') + '</body></html>';
 }
 
 export function authPage(o) {

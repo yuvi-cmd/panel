@@ -4,6 +4,9 @@ import { esc, truncate } from '../http.js';
 function csrfInput(csrf) { return `<input type="hidden" name="_csrf" value="${esc(csrf)}">`; }
 
 export function hostsPage({ hosts = [], counts = {}, q = '', status = 'ALL', csrf, server }) {
+  const returnTo = '/hosts' + (q || status !== 'ALL'
+    ? '?' + new URLSearchParams({ ...(q ? { q } : {}), ...(status !== 'ALL' ? { status } : {}) }).toString()
+    : '');
   const rows = hosts.length ? hosts.map((h) => {
     const active = String(h.status).toUpperCase() === 'ACTIVE';
     return `
@@ -21,19 +24,21 @@ export function hostsPage({ hosts = [], counts = {}, q = '', status = 'ALL', csr
         <form method="post" action="/hosts/action" style="display:inline">
           ${csrfInput(csrf)}<input type="hidden" name="license_id" value="${h.license_id}">
           <input type="hidden" name="host_id" value="${h.id}">
+          <input type="hidden" name="return" value="${esc(returnTo)}">
           <input type="hidden" name="action" value="${active ? 'suspend' : 'activate'}">
           <button class="btn btn-sm ${active ? 'btn-danger' : 'btn-primary'}" type="submit"
-            onclick="return askConfirm(this.form,'${active ? 'Suspend' : 'Reactivate'} this host package?','${active ? 'Active sessions are revoked and this package is denied until reactivated.' : 'The stored package + certificate will be accepted again.'}','${active ? 'danger' : ''}')">
+            onclick="return askConfirm(this.form,'${active ? 'Suspend' : 'Reactivate'} this host package?','${active ? 'Active sessions are revoked and this package is denied until reactivated. Its package slot stays reserved.' : 'The stored package + certificate will be accepted again.'}','${active ? 'danger' : ''}')">
             ${icon(active ? 'ban' : 'check', 13)} ${active ? 'Suspend' : 'Activate'}
           </button>
         </form>
         <form method="post" action="/hosts/action" style="display:inline">
           ${csrfInput(csrf)}<input type="hidden" name="license_id" value="${h.license_id}">
           <input type="hidden" name="host_id" value="${h.id}">
-          <input type="hidden" name="action" value="reset">
-          <button class="btn btn-sm btn-ghost" type="submit"
-            onclick="return askConfirm(this.form,'Remove this host package?','The package + certificate pin is removed and active sessions are revoked. It can bind again in AUTO mode.','danger')">
-            ${icon('rotate', 13)} Remove
+          <input type="hidden" name="return" value="${esc(returnTo)}">
+          <input type="hidden" name="action" value="delete">
+          <button class="btn btn-sm btn-danger" type="submit"
+            onclick="return askConfirm(this.form,'Delete this host package?','The package + certificate pin, its sessions, grants and host-scoped guest bindings are removed. The package slot becomes free. This cannot be undone.','danger')">
+            ${icon('trash', 13)} Delete
           </button>
         </form>
       </td>
@@ -77,9 +82,9 @@ export function hostsPage({ hosts = [], counts = {}, q = '', status = 'ALL', csr
         </div>
       </div>
       <div class="card">
-        ${sectionHead('Reset guidance')}
-        <p class="muted small" style="margin:0 0 10px">Reset the binding when the host is rebuilt with a new signing certificate, or when the pin was created by a bad request.</p>
-        <div class="notice" style="margin:0">${icon('shield-alert', 17)}<div>Resetting does not change the MAK. Rotate the credential too if you suspect the key leaked.</div></div>
+        ${sectionHead('Delete guidance')}
+        <p class="muted small" style="margin:0 0 10px">Delete a package when you want to free its package slot, or when the host moved to a different package name. Suspending keeps the slot reserved.</p>
+        <div class="notice" style="margin:0">${icon('shield-alert', 17)}<div>Deletion removes the package pin, its grants, sessions and host-scoped guest bindings. Security events are retained for audit.</div></div>
       </div>
     </div>`;
 }

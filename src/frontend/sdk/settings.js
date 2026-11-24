@@ -92,7 +92,6 @@ export function settingsPage(o) {
     + '<div class="glass-card p-5"><h3 class="font-bold text-slate-800 mb-3"><i class="bi bi-info-circle text-blue-500"></i> Quick guide</h3>'
     + '<ul class="text-[11px] text-slate-600 space-y-2 list-disc pl-4">'
     + '<li><b>Generate MAK</b> me sirf package limit, app names aur duration bharna hai.</li>'
-    + '<li><b>Install seats</b> = ek host package par kitne active installs allowed (default 3).</li>'
     + '<li><b>MAK Keys</b> me key blurred dikhegi — eye se show, copy button se copy.</li>'
     + '<li>Custom MAK me koi fixed length nahi — jo likhoge wahi chalega.</li>'
     + '</ul></div>'

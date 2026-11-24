@@ -52,6 +52,8 @@ CREATE TABLE IF NOT EXISTS mak_licenses (
   created_at       INTEGER NOT NULL,
   updated_at       INTEGER NOT NULL,
   expires_at       INTEGER,
+  duration_days    INTEGER, -- numeric duration; starts on first runtime bind
+  started_at       INTEGER, -- first successful /activate; expiry never resets
   max_devices      INTEGER NOT NULL DEFAULT 1,
   max_activations  INTEGER NOT NULL DEFAULT 1,
   activation_count INTEGER NOT NULL DEFAULT 0,

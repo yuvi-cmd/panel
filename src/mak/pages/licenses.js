@@ -224,6 +224,16 @@ export function licenseDetailPage({
   const effective = licenseStatusBadge(license);
   const suspended = String(license.status).toUpperCase() === 'SUSPENDED';
   const revoked = String(license.status).toUpperCase() === 'REVOKED';
+  const reservedDays = Number(license.duration_days) > 0 ? Number(license.duration_days) : 0;
+  const notStarted = reservedDays > 0 && !license.started_at;
+  const durationValue = notStarted ? String(reservedDays) : (license.expires_at ? 'custom' : 'lifetime');
+  const durationOptions = [['1', '1 day'], ['3', '3 days'], ['7', '7 days'], ['14', '14 days'], ['30', '30 days'], ['60', '60 days'], ['90', '90 days'], ['180', '180 days'], ['365', '1 year'], ['730', '2 years'], ['lifetime', 'Lifetime (no expiry)'], ['custom', 'Custom date…']];
+  if (notStarted && !durationOptions.some(([value]) => value === String(reservedDays))) {
+    durationOptions.unshift([String(reservedDays), reservedDays + ' days (current)']);
+  }
+  const durationNote = notStarted
+    ? 'Not started · ' + reservedDays + ' day(s) reserved. The countdown begins on the first successful app bind.'
+    : 'Server rejects every request once this duration ends.';
 
   return `
     ${pageHeader({
@@ -246,8 +256,8 @@ export function licenseDetailPage({
               ${field('Label', `<input name="label" value="${esc(license.label)}" maxlength="80" required>`)}
               ${field('User reference', `<input name="user_ref" value="${esc(license.user_ref)}" maxlength="120">`)}
               ${field('Duration', `<select name="duration" onchange="this.form.expires_on.parentElement.style.display=this.value==='custom'?'':'none'">
-                ${[['1', '1 day'], ['3', '3 days'], ['7', '7 days'], ['14', '14 days'], ['30', '30 days'], ['60', '60 days'], ['90', '90 days'], ['180', '180 days'], ['365', '1 year'], ['730', '2 years'], ['lifetime', 'Lifetime (no expiry)'], ['custom', 'Custom date…']].map(([value, label]) => `<option value="${value}" ${(license.expires_at ? 'custom' : 'lifetime') === value ? 'selected' : ''}>${label}</option>`).join('')}
-              </select>`, 'Server rejects every request once this duration ends.')}
+                ${durationOptions.map(([value, label]) => `<option value="${value}" ${durationValue === value ? 'selected' : ''}>${label}</option>`).join('')}
+              </select>`, durationNote)}
               ${field('Custom expiry date', `<input type="date" name="expires_on" value="${esc(dateInputValue(license.expires_at))}">`, 'Only used when Duration = Custom date.')}
               ${field('Session TTL (seconds)', `<input type="number" name="session_ttl" min="300" max="86400" value="${license.session_ttl}" required>`)}
               ${field('Max devices', `<input type="number" name="max_devices" min="1" max="100" value="${license.max_devices}" required>`)}
@@ -281,7 +291,7 @@ export function licenseDetailPage({
               <td data-label="Package"><div class="cell-main mono">${esc(h.package_name)}</div><div class="cell-sub mono">${esc(h.cert_sha256)}</div></td>
               <td data-label="App">${esc(h.app_name || '—')}</td>
               <td data-label="Status">${statusBadge(h.status)}</td>
-              <td data-label="" class="actions"><form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="${String(h.status).toUpperCase() === 'ACTIVE' ? 'host_block' : 'host_unblock'}"><input type="hidden" name="host_id" value="${h.id}"><button class="btn btn-sm ${String(h.status).toUpperCase() === 'ACTIVE' ? 'btn-danger' : 'btn-ghost'}" type="submit" onclick="return askConfirm(this.form,'${String(h.status).toUpperCase() === 'ACTIVE' ? 'Block' : 'Unblock'} this host package?','${String(h.status).toUpperCase() === 'ACTIVE' ? 'Requests from this package are denied and sessions are revoked.' : 'This package can authenticate again.'}','${String(h.status).toUpperCase() === 'ACTIVE' ? 'danger' : ''}')">${icon(String(h.status).toUpperCase() === 'ACTIVE' ? 'ban' : 'check', 13)} ${String(h.status).toUpperCase() === 'ACTIVE' ? 'Block' : 'Unblock'}</button></form><form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="host_reset"><input type="hidden" name="host_id" value="${h.id}"><button class="btn btn-sm btn-danger" type="submit" onclick="return askConfirm(this.form,'Remove this host package?','Sessions are revoked. This package can be auto-bound again in AUTO mode.','danger')">Remove</button></form></td>
+              <td data-label="" class="actions"><form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="${String(h.status).toUpperCase() === 'ACTIVE' ? 'host_block' : 'host_unblock'}"><input type="hidden" name="host_id" value="${h.id}"><button class="btn btn-sm ${String(h.status).toUpperCase() === 'ACTIVE' ? 'btn-danger' : 'btn-ghost'}" type="submit" onclick="return askConfirm(this.form,'${String(h.status).toUpperCase() === 'ACTIVE' ? 'Block' : 'Unblock'} this host package?','${String(h.status).toUpperCase() === 'ACTIVE' ? 'Requests from this package are denied and sessions are revoked. Its package slot stays reserved.' : 'This package can authenticate again.'}','${String(h.status).toUpperCase() === 'ACTIVE' ? 'danger' : ''}')">${icon(String(h.status).toUpperCase() === 'ACTIVE' ? 'ban' : 'check', 13)} ${String(h.status).toUpperCase() === 'ACTIVE' ? 'Block' : 'Unblock'}</button></form><form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="host_delete"><input type="hidden" name="host_id" value="${h.id}"><button class="btn btn-sm btn-danger" type="submit" onclick="return askConfirm(this.form,'Delete this host package?','The package pin, its grants, sessions and host-scoped guest bindings are removed. Its package slot becomes free.','danger')">Delete</button></form></td>
             </tr>`).join('')}</tbody></table></div>` : `<div class="notice" style="margin:0">${icon('clock', 17)}<div><b>${String(license.host_bind_mode || 'AUTO') === 'MANUAL' ? 'Manual binding.' : 'Auto binding enabled.'}</b> ${String(license.host_bind_mode || 'AUTO') === 'MANUAL' ? 'Only the packages you register here can authenticate.' : 'The first ' + Number(license.max_packages || 1) + ' host packages will bind on first authenticated use.'}</div></div>`}
           <details style="margin-top:14px">
             <summary class="btn btn-sm btn-ghost" style="list-style:none;display:inline-flex">${icon('edit', 14)} ${hosts.length ? 'Add / update host package' : 'Pre-register host'}</summary>
@@ -295,7 +305,7 @@ export function licenseDetailPage({
               <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit" onclick="return askConfirm(this.form,'Save host package?','All active sessions will be revoked. New authorization must match the package and certificate.','danger')">Save package</button></div>
             </form>
           </details>
-          ${hosts.length ? `<div class="divider"></div><div class="row" style="justify-content:space-between"><span class="muted small">Reset removes every package pin.</span><form method="post" action="/licenses/${license.id}/action">${csrfInput(csrf)}<input type="hidden" name="action" value="host_reset"><button class="btn btn-sm btn-danger" type="submit" onclick="return askConfirm(this.form,'Reset all host packages?','Active sessions are revoked and every package pin is removed.','danger')">Reset all</button></form></div>` : ''}
+          ${hosts.length ? `<div class="divider"></div><div class="row" style="justify-content:space-between"><span class="muted small">Delete all removes every package pin and frees all package slots.</span><form method="post" action="/licenses/${license.id}/action">${csrfInput(csrf)}<input type="hidden" name="action" value="host_delete"><button class="btn btn-sm btn-danger" type="submit" onclick="return askConfirm(this.form,'Delete all host packages?','Every package pin, grant, session and host-scoped guest binding is removed. Package slots become free.','danger')">Delete all</button></form></div>` : ''}
         </div>
 
         <div class="card tight">

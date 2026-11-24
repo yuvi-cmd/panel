@@ -151,6 +151,14 @@ export function guestDetailPage({ guest, bindings = [], licenses = [], events = 
             <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit">${icon('check', 14)} Update approved identity</button></div>
           </form>
         </div>
+        <div class="card">
+          ${sectionHead('Danger zone')}
+          <p class="muted small" style="margin:0 0 12px">Deleting the app removes this approved identity, every license binding and the app slots it occupied. Security events stay for audit.</p>
+          <form method="post" action="/guests/${guest.id}/action">
+            ${csrfInput(csrf)}<input type="hidden" name="action" value="delete">
+            <button class="btn btn-danger" style="width:100%" type="submit" onclick="return askConfirm(this.form,'Delete this guest app permanently?','The approved app, all of its license bindings and its app slots are deleted. This cannot be undone.','danger')">${icon('trash', 15)} Delete guest app</button>
+          </form>
+        </div>
       </div>
     </div>`;
 }

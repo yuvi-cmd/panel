@@ -6,7 +6,7 @@ import { bumpLicenseEpoch, revokeGrantsForLicense } from './store-v2.js';
 const LICENSE_POLICY_KEYS = new Set([
   'label', 'user_ref', 'max_devices', 'max_activations', 'session_ttl',
   'max_packages', 'max_apps', 'max_installs', 'signature_bind',
-  'host_bind_mode', 'notes', 'expires_at',
+  'host_bind_mode', 'notes', 'expires_at', 'duration_days',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -70,7 +70,7 @@ export async function listLicenses(db, { q = '', status = 'ALL' } = {}) {
                       (SELECT package_name FROM mak_hosts WHERE license_id=l.id ORDER BY id LIMIT 1) AS host_package,
                       (SELECT status FROM mak_hosts WHERE license_id=l.id ORDER BY id LIMIT 1) AS host_status,
                       (SELECT cert_sha256 FROM mak_hosts WHERE license_id=l.id ORDER BY id LIMIT 1) AS host_cert_sha256,
-                      (SELECT COUNT(*) FROM mak_hosts hm WHERE hm.license_id=l.id AND hm.status='ACTIVE') AS package_count,
+                      (SELECT COUNT(*) FROM mak_hosts hm WHERE hm.license_id=l.id) AS package_count,
                       (SELECT COUNT(*) FROM mak_devices d WHERE d.license_id=l.id AND d.status='ACTIVE') AS device_count,
                       (SELECT COUNT(*) FROM mak_bindings b WHERE b.license_id=l.id AND b.status='ACTIVE') AS guest_count
                  FROM mak_licenses l
@@ -84,9 +84,10 @@ export async function createLicenseRecord(db, input) {
   const inserted = await db.prepare(
     `INSERT INTO mak_licenses
       (license_uid,label,user_ref,credential_hash,credential_plain,status,created_at,updated_at,expires_at,
+       duration_days,
        max_devices,max_activations,activation_count,session_ttl,max_packages,max_apps,
        max_installs,signature_bind,host_bind_mode,epoch,notes,created_by)
-     VALUES (?,?,?,?,?, 'ACTIVE', ?,?,?,?,?,0,?,?,?,?,?,?,1,?,?)
+     VALUES (?,?,?,?,?, 'ACTIVE', ?,?,?,?,?,?,0,?,?,?,?,?,?,1,?,?)
      RETURNING id`,
   ).bind(
     input.license_uid,
@@ -95,6 +96,7 @@ export async function createLicenseRecord(db, input) {
     input.credential_hash,
     String(input.credential_plain || '').slice(0, 120),
     now, now, input.expires_at || null,
+    Number(input.duration_days) > 0 ? Number(input.duration_days) : null,
     input.max_devices || 1, input.max_activations || 1,
     input.session_ttl || 3600,
     input.max_packages || 1, input.max_apps || 2,
@@ -143,7 +145,7 @@ export async function updateLicensePolicy(db, id, patch) {
 // Extending duration or raising quotas does not invalidate any existing grant:
 // nothing that was previously allowed becomes denied. Keep active seats alive.
 export async function updateLicenseQuota(db, id, patch) {
-  const allowed = new Set(['expires_at', 'max_packages', 'max_apps', 'max_installs']);
+  const allowed = new Set(['expires_at', 'duration_days', 'started_at', 'max_packages', 'max_apps', 'max_installs']);
   const keys = Object.keys(patch).filter((k) => allowed.has(k));
   if (!keys.length) return;
   const sets = keys.map((k) => `${k}=?`).join(',');
@@ -235,20 +237,35 @@ export async function findHostForLicensePackage(db, licenseId, packageName) {
 }
 
 export async function countActiveHosts(db, licenseId) {
-  const row = await db.prepare("SELECT COUNT(*) AS c FROM mak_hosts WHERE license_id=? AND status='ACTIVE'")
+  // Every saved package consumes a slot, including suspended/blocked rows.
+  // Only an explicit package delete frees the slot again.
+  const row = await db.prepare('SELECT COUNT(*) AS c FROM mak_hosts WHERE license_id=?')
     .bind(Number(licenseId) || 0).first().catch(() => null);
   return Number(row?.c || 0);
 }
 
-// Atomic first-use bind: inserts only while the active package count is below
+// Numeric durations begin on the first successful runtime app bind. The
+// conditional UPDATE makes this a one-shot transition: later binds cannot
+// reset started_at or push expires_at forward.
+export async function startLicenseDurationAtomic(db, licenseId, now = nowS()) {
+  const row = await db.prepare(
+    `UPDATE mak_licenses
+        SET started_at=?, expires_at=? + (duration_days * 86400), updated_at=?
+      WHERE id=? AND started_at IS NULL AND duration_days IS NOT NULL AND duration_days>0
+      RETURNING *`,
+  ).bind(now, now, now, Number(licenseId) || 0).first().catch(() => null);
+  return row || null;
+}
+
+// Atomic first-use bind: inserts only while the total package count is below
 // the license limit. D1 serializes writes, so concurrent requests cannot both
-// take the last slot.
+// take the last slot. Suspended rows count because they still occupy a slot.
 export async function createHostAtomic(db, licenseId, { package_name, app_name = '', cert_sha256, maxPackages }) {
   const now = nowS();
   const row = await db.prepare(
     `INSERT INTO mak_hosts (license_id,package_name,app_name,cert_sha256,status,version_policy,created_at,updated_at)
      SELECT ?,?,?,?, 'ACTIVE','ANY',?,?
-      WHERE (SELECT COUNT(*) FROM mak_hosts WHERE license_id=? AND status='ACTIVE') < ?
+      WHERE (SELECT COUNT(*) FROM mak_hosts WHERE license_id=?) < ?
      RETURNING *`,
   ).bind(
     Number(licenseId), package_name, app_name || '', cert_sha256, now, now,
@@ -288,6 +305,39 @@ export async function deleteHost(db, licenseId, hostId = 0) {
     return;
   }
   await db.prepare('DELETE FROM mak_hosts WHERE license_id=?').bind(Number(licenseId)).run();
+}
+
+// Explicit package deletion. Unlike block/suspend this frees the package slot,
+// so all host-scoped runtime state must go with it. License-wide bindings
+// (host_id=0) stay because they apply to the remaining packages.
+export async function deleteHostCascade(db, licenseId, hostId) {
+  const id = Number(hostId) || 0;
+  const lid = Number(licenseId) || 0;
+  const host = id
+    ? await db.prepare('SELECT * FROM mak_hosts WHERE id=? AND license_id=?').bind(id, lid).first().catch(() => null)
+    : null;
+  if (id && !host) return null;
+  const stmts = [];
+  if (id) {
+    stmts.push(
+      db.prepare('DELETE FROM mak_sessions WHERE license_id=? AND host_id=?').bind(lid, id),
+      db.prepare('DELETE FROM mak_grants WHERE license_id=? AND host_id=?').bind(lid, id),
+      db.prepare('DELETE FROM mak_bindings WHERE license_id=? AND host_id=?').bind(lid, id),
+      db.prepare('DELETE FROM mak_hosts WHERE id=? AND license_id=?').bind(id, lid),
+    );
+  } else {
+    stmts.push(
+      db.prepare('DELETE FROM mak_sessions WHERE license_id=? AND host_id IS NOT NULL').bind(lid),
+      db.prepare('DELETE FROM mak_grants WHERE license_id=?').bind(lid),
+      db.prepare('DELETE FROM mak_bindings WHERE license_id=? AND host_id<>0').bind(lid),
+      db.prepare('DELETE FROM mak_hosts WHERE license_id=?').bind(lid),
+    );
+  }
+  if (stmts.length) {
+    if (typeof db.batch === 'function') await db.batch(stmts);
+    else for (const stmt of stmts) await stmt.run();
+  }
+  return host;
 }
 
 export async function touchHost(db, hostId) {
@@ -489,6 +539,31 @@ export async function unbindGuest(db, licenseId, guestId, hostId = 0) {
     `UPDATE mak_bindings SET status='REVOKED',updated_at=?
       WHERE license_id=? AND guest_app_id=? AND (?=0 OR host_id=?)`,
   ).bind(nowS(), Number(licenseId), Number(guestId), Number(hostId) || 0, Number(hostId) || 0).run();
+}
+
+// Explicit app removal from a license. A hard delete is required because a
+// revoked binding must not keep consuming a max_apps slot forever after the
+// operator deliberately deleted it.
+export async function deleteBinding(db, licenseId, guestId, hostId = 0) {
+  const res = await db.prepare(
+    `DELETE FROM mak_bindings
+      WHERE license_id=? AND guest_app_id=? AND (?=0 OR host_id=?)`,
+  ).bind(Number(licenseId), Number(guestId), Number(hostId) || 0, Number(hostId) || 0).run();
+  return Number(res?.meta?.changes || 0);
+}
+
+// Global guest-app delete. An approved app row is shared by multiple licenses,
+// so removing it cascades every binding and frees those app slots.
+export async function deleteGuestApp(db, guestId) {
+  const guest = await getGuestById(db, guestId);
+  if (!guest) return null;
+  const stmts = [
+    db.prepare('DELETE FROM mak_bindings WHERE guest_app_id=?').bind(Number(guestId)),
+    db.prepare('DELETE FROM mak_guest_apps WHERE id=?').bind(Number(guestId)),
+  ];
+  if (typeof db.batch === 'function') await db.batch(stmts);
+  else for (const stmt of stmts) await stmt.run();
+  return guest;
 }
 
 // ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ import {
   normalizeHex64, nowS, validPackageName,
 } from './crypto.js';
 import {
-  createLicenseRecord, bindGuest, findHostForLicensePackage, getLicenseByHash,
+  createLicenseRecord, bindGuestAtomic, findHostForLicensePackage, getLicenseByHash,
   listAllActiveGuests,
 } from './store.js';
 import { createGuestV2 } from './store-v2.js';
@@ -35,11 +35,13 @@ export const DURATION_OPTIONS = [
 
 function resolveExpiry(sp) {
   const raw = String(sp.get('duration') || '').trim().toLowerCase();
-  if (raw === 'lifetime' || raw === 'never') return { expiresAt: null };
+  if (raw === 'lifetime' || raw === 'never') return { expiresAt: null, durationDays: null };
   if (raw && /^\d+$/.test(raw)) {
     const days = Number(raw);
     if (days < 1 || days > 3650) return { error: 'Duration must be between 1 and 3650 days.' };
-    return { expiresAt: nowS() + days * 86400 };
+    // Numeric durations are started by the first successful runtime app bind,
+    // not by issuance. expires_at is filled atomically at that moment.
+    return { expiresAt: null, durationDays: days };
   }
   if (raw && raw !== 'custom') return { error: 'Choose a valid duration.' };
 
@@ -49,7 +51,7 @@ function resolveExpiry(sp) {
   if (!Number.isFinite(parsed)) return { error: 'Expiry date is invalid.' };
   const expiresAt = Math.floor(parsed / 1000);
   if (expiresAt <= nowS() + 60) return { error: 'Expiry must be in the future (IST end of day).' };
-  return { expiresAt };
+  return { expiresAt, durationDays: null };
 }
 
 function yes(value, fallback = true) {
@@ -132,6 +134,7 @@ export function parseLicensePolicy(sp, opts = {}) {
 
   const policy = {
     label, user_ref: userRef, notes, expires_at: expiry.expiresAt,
+    duration_days: expiry.durationDays,
     max_devices: maxDevices, max_activations: maxActivations,
     session_ttl: sessionTtl,
     max_packages: maxPackages,
@@ -147,6 +150,10 @@ export function parseLicensePolicy(sp, opts = {}) {
 export async function issueMak(db, sp, createdBy) {
   const parsed = parseLicensePolicy(sp);
   if (parsed.error) return { error: parsed.error };
+  const preboundPackages = new Set(parsed.guests.map((g) => g.package_name)).size;
+  if (preboundPackages > Number(parsed.policy.max_apps)) {
+    return { error: 'This MAK allows ' + parsed.policy.max_apps + ' app(s) per package; remove some guest rows or raise Max apps per package.' };
+  }
 
   const customRaw = String(sp.get('custom_key') || '').trim().slice(0, 120);
   let credential;
@@ -200,7 +207,12 @@ export async function issueMak(db, sp, createdBy) {
       version_code: 0,
     });
     if (guest?.id) {
-      await bindGuest(db, licenseId, guest.id, { install: true, launch: true, update: true, restart: true }, hostId);
+      const bound = await bindGuestAtomic(
+        db, licenseId, hostId, guest.id, row.package_name,
+        { install: true, launch: true, update: true, restart: true },
+        parsed.policy.max_apps,
+      );
+      if (!bound.ok) return { error: 'Guest app limit reached while binding ' + row.package_name + '.' };
     }
   }
 

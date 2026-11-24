@@ -67,6 +67,7 @@ export function statusBadge(status) {
   const s = String(status || 'UNKNOWN').toUpperCase();
   const map = {
     ACTIVE: 'ok', ALLOW: 'ok', SUCCESS: 'ok', ONLINE: 'ok', ALIVE: 'ok', AUTHORIZED: 'ok',
+    'NOT YET STARTED': 'warn', NOT_STARTED: 'warn',
     SUSPENDED: 'warn', PENDING: 'warn', EXPIRED: 'warn', INFO: 'warn',
     REVOKED: 'bad', DENY: 'bad', ERROR: 'bad', OFFLINE: 'bad', FAIL: 'bad',
   };
@@ -150,6 +151,9 @@ export function licenseHostText(license) {
 }
 
 export function licenseExpiry(license) {
+  if (Number(license?.duration_days) > 0 && !license?.started_at) {
+    return `<span class="muted" title="Duration starts on the first successful app bind">Not started · ${Number(license.duration_days)}d</span>`;
+  }
   if (!license.expires_at) return '<span class="muted">Never</span>';
   const now = Math.floor(Date.now() / 1000);
   const left = Number(license.expires_at) - now;
