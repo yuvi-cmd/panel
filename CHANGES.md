@@ -1,5 +1,19 @@
 # CHANGES.md
 
+## Pass 2026-11-24 — self-hosted CSS + icons (CSP-safe UI)
+
+- SDK/MAK pages ab Tailwind aur Bootstrap Icons **Worker ke `/assets/*`** se
+  load karte hain. Pehle dono public CDN se aate the, lekin strict CSP
+  (`script-src 'self'`, `style-src 'self'`) unhe block kar raha tha — isliye
+  Host/Guest/Logs/Settings pages raw HTML jaise dikhte the.
+- Tailwind `src/**/*.js` se compile hota hai (`tailwind.config.cjs`), icons
+  `vendor/bootstrap-icons/` me vendored hain. Build: `npm run assets:build`.
+- Main panel, login/register, aur OpenCode Control layouts bhi local assets
+  use karte hain; koi `cdn.tailwindcss.com` / `cdn.jsdelivr.net` reference
+  nahi bacha.
+- Smoke tests: local asset routes, WOFF2 magic bytes, CSP header, aur "no CDN"
+  regression checks. **254 + 31 passing**.
+
 ## Pass 2026-11-24 — MAK/2 lifecycle, slot-safe deletes, one green SDK shell
 
 - Numeric duration ab **first successful app bind** par start hota hai:

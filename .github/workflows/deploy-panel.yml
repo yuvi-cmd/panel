@@ -44,6 +44,9 @@ jobs:
       - name: Install
         run: npm ci
 
+      - name: Build CSS + icon assets
+        run: npm run assets:build
+
       - name: Test
         if: ${{ !inputs.skip_tests }}
         run: npm test

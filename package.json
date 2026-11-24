@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "assets:build": "node scripts/build-assets.mjs",
     "db:migrate": "wrangler d1 execute panel --file=schema.sql",
     "keys": "node scripts/generate-keys.mjs",
     "mak:keys": "node scripts/mak-keys.mjs",
@@ -18,6 +19,7 @@
     "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
+    "tailwindcss": "3.4.17",
     "wrangler": "^3.0.0"
   }
 }

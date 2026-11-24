@@ -122,6 +122,33 @@ console.log('json api auth');
   ok(h.status === 200 && hb.ok === true && typeof hb.v === 'string', 'health reports running version (' + hb.v + ')');
 }
 
+// ---------- 2a. self-hosted CSS + icon assets ----------
+console.log('static assets');
+{
+  const tw = await call(env, 'GET', '/assets/tailwind.css');
+  const twBody = await tw.text();
+  ok(tw.status === 200 && /text\/css/.test(tw.headers.get('Content-Type') || ''), 'tailwind.css is served locally');
+  ok(twBody.includes('.flex{') && twBody.includes('.grid'), 'tailwind.css contains layout utilities');
+  ok((tw.headers.get('Cache-Control') || '').includes('immutable'), 'tailwind.css is cacheable');
+
+  const icons = await call(env, 'GET', '/assets/bootstrap-icons.css');
+  const iconsBody = await icons.text();
+  ok(icons.status === 200 && iconsBody.includes('/assets/bootstrap-icons.woff2'), 'bootstrap-icons.css points at the local font');
+  ok(!iconsBody.includes('cdn.jsdelivr.net'), 'bootstrap-icons.css has no CDN font URL');
+
+  const font = await call(env, 'GET', '/assets/bootstrap-icons.woff2');
+  const fontBytes = new Uint8Array(await font.arrayBuffer());
+  ok(font.status === 200 && String(font.headers.get('Content-Type')).includes('font/woff2'), 'icon font is served locally');
+  ok(fontBytes.length > 50000 && fontBytes[0] === 0x77 && fontBytes[1] === 0x4f && fontBytes[2] === 0x46 && fontBytes[3] === 0x32, 'icon font is a real WOFF2 file');
+
+  const missing = await call(env, 'GET', '/assets/nope.css');
+  ok(missing.status !== 200 && !String(missing.headers.get('Content-Type') || '').includes('text/css'), 'unknown asset paths are not served as assets');
+
+  const login = await call(env, 'GET', '/login');
+  const loginBody = await login.text();
+  ok(login.status === 200 && loginBody.includes('/assets/tailwind.css?v=') && !loginBody.includes('cdn.tailwindcss.com'), 'login page uses the self-hosted stylesheets');
+}
+
 // ---------- 2b. MAK mounted inside the SDK Panel ----------
 console.log('mak integration');
 {
@@ -182,6 +209,8 @@ console.log('mak integration');
   const keys = await call(env, 'GET', '/sdk/keys', { cookie: ownerCookie });
   const keysBody = await keys.text();
   ok(keys.status === 200 && keysBody.includes('SDK issued license'), 'SDK MAK Keys lists the issued license');
+  ok(keysBody.includes('/assets/tailwind.css?v=') && keysBody.includes('/assets/bootstrap-icons.css?v='), 'SDK MAK Keys uses the self-hosted stylesheets');
+  ok(!keysBody.includes('cdn.tailwindcss.com') && !keysBody.includes('cdn.jsdelivr.net'), 'SDK MAK Keys has no external CDN dependency');
 
   const detail = await call(env, 'GET', '/sdk/keys/' + issuedRow.id, { cookie: ownerCookie });
   const detailBody = await detail.text();
@@ -193,6 +222,12 @@ console.log('mak integration');
   for (const section of ['guests', 'hosts', 'logs', 'settings']) {
     const r = await call(env, 'GET', '/sdk/' + section, { cookie: ownerCookie });
     ok(r.status === 200, 'SDK MAK ' + section + ' page renders (got ' + r.status + ')');
+    if (section === 'guests') {
+      const csp = r.headers.get('Content-Security-Policy') || '';
+      ok(csp.includes("style-src 'self'") && csp.includes("script-src 'self'"), 'SDK MAK pages keep the strict CSP');
+      const guestsBody = await r.text();
+      ok(!guestsBody.includes('cdn.tailwindcss.com') && !guestsBody.includes('cdn.jsdelivr.net'), 'SDK MAK pages load CSS from the Worker');
+    }
   }
   for (const section of ['devices', 'sessions']) {
     const r = await call(env, 'GET', '/sdk/' + section, { cookie: ownerCookie });

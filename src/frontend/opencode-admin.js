@@ -5,6 +5,7 @@
 // owner link (/opencode in panel-ui.js) opens this same standalone surface.
 
 import { CSS, MODE_BTN, MODE_EARLY, MODE_STANDALONE, esc } from './ui.js';
+import { assetHead } from './asset-head.js';
 
 const OCSS = `
 .oc-body{background:var(--bg);}
@@ -258,9 +259,8 @@ export function opencodeLoginPage(o = {}) {
       + '<p class="oc-hint">Owner shortcut: <a class="oc-link-inline" href="/login">login to the main panel</a>, then open <a class="oc-link-inline" href="/opencode">/opencode</a>. Panel user id 1 gets direct access.</p>'
       + '</div>';
   return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">'
-    + '<title>OpenCode Control - Admin Login</title><script src="https://cdn.tailwindcss.com"></script>'
+    + '<title>OpenCode Control - Admin Login</title>' + assetHead()
     + '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">'
-    + '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">'
     + '<style>' + CSS + OCSS + '</style>' + MODE_EARLY + MODE_STANDALONE + '</head>'
     + '<body class="oc-login-body">'
     + '<div class="fixed top-4 right-4 z-50">' + MODE_BTN + '</div>'
@@ -288,9 +288,8 @@ export function opencodeAdminLayout(o) {
   const actor = o.actor === 'owner' ? 'SDK owner' : 'Admin session';
   const encOk = !!o.encOk;
   return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">'
-    + '<title>' + esc(o.title) + ' - OpenCode Control</title><script src="https://cdn.tailwindcss.com"></script>'
+    + '<title>' + esc(o.title) + ' - OpenCode Control</title>' + assetHead()
     + '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">'
-    + '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">'
     + '<style>' + CSS + OCSS + '</style>' + MODE_EARLY + MODE_STANDALONE + '</head>'
     + '<body class="oc-body">'
     + '<aside id="ocSide" class="oc-side">'

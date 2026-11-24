@@ -1,4 +1,5 @@
 import { CSS, BASE_JS, MODE_BTN, MODE_EARLY, CMDK_BTN, PAL_SHELL, accentStyle, esc, navClass, sideLabel } from './ui.js';
+import { assetHead } from './asset-head.js';
 
 export function panelLayout(o) {
   const { title, route, sess, panelName, content, theme, accent } = o;
@@ -41,9 +42,8 @@ export function panelLayout(o) {
   return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
     + '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
     + '<title>' + esc(title) + ' - ' + esc(panelName) + '</title>'
-    + '<script src="https://cdn.tailwindcss.com"></script>'
+    + assetHead()
     + '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">'
-    + '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">'
     + '<style>' + CSS + '</style>' + MODE_EARLY + '</head>'
     + '<body class="flex h-screen overflow-hidden relative" data-theme="' + esc(th) + '"' + accentStyle(accent) + '>'
     + '<div class="droplet drop-1"></div><div class="droplet drop-2"></div><div class="droplet drop-3"></div><div class="droplet drop-4"></div><div class="droplet drop-5"></div><div class="droplet drop-6"></div><div class="droplet drop-7"></div><div class="droplet drop-8"></div>'

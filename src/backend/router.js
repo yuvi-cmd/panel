@@ -9,6 +9,7 @@ import { clientIp, hitRate, isProfessor } from './security.js';
 import { handleConnect, handleEncrypt, ensureModVersions, libUrlOk } from './connect.js';
 import { ensureDB } from './db.js';
 import { html, redir, parseCookies, formParams, tsMs, deny } from './http.js';
+import { assetResponse } from './assets.js';
 import { getSession, sessCookie, clearCookie } from './session.js';
 import { THEMES, HEX6, getTheme, getAccent, panelName } from './theme.js';
 import { deviceFingerprint } from './device.js';
@@ -59,6 +60,13 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, '') || '/';
     const method = request.method.toUpperCase();
+
+    // Self-hosted CSS + icon font. Public and cacheable; no DB/auth needed.
+    if (method === 'GET' || method === 'HEAD') {
+      const asset = assetResponse(path);
+      if (asset) return asset;
+    }
+
     await ensureDB(db, mainPanel);
 
     if (method === 'OPTIONS' && (path.startsWith('/sdk/') || path.startsWith('/connect/') || path.startsWith('/encrypt/') || path.startsWith('/api/')))

@@ -101,6 +101,22 @@ isliye installed AAR automatically nayi keys par chala jaata hai.
 
 Deploy aur verification: [docs/MAK-DEPLOY.md](docs/MAK-DEPLOY.md).
 
+## Frontend assets (self-hosted)
+
+SDK panel, main panel aur auth pages Tailwind + Bootstrap Icons ko
+`/assets/*` se load karte hain. Worker hi ye files serve karta hai, isliye
+strict CSP (`script-src 'self'`, `style-src 'self'`) ke saath bhi UI poora
+styled rehta hai aur mobile network par CDN block hone ka asar nahi padta.
+
+Tailwind classes badalne ya icons upgrade karne ke baad:
+
+```bash
+npm run assets:build
+```
+
+Ye `src/frontend/generated-assets.js` regenerate karta hai; use commit karo.
+Raw icon files `vendor/bootstrap-icons/` me hain (MIT license).
+
 ## Note (PHP se farak)
 
 - `loader-manager` (Set Mod/Loader) me **versions** hain — har version ka name + tag (FREE/PAID/SAFE…) + lib URL; `connect` API har key ke server type ka URL **sirf isi panel config se** bhejta hai (koi hardcoded fallback nahi). Pehli baar 4 starter versions seed hote hain (sirf naam — tag aur URL khud set karo; koi fixed link / default tag nahi). Tags Versions tab ke **Tags** card se add/remove hote hain. Zip upload nahi (Worker me disk nahi hota) — direct `.zip` link do.

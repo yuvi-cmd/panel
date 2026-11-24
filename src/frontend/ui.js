@@ -1,3 +1,5 @@
+import { assetHead } from './asset-head.js';
+
 export function esc(s) {
   // Escape &, <, >, " and ' so values are safe in HTML text, attributes
   // and single-quoted JS strings (e.g. onclick="doCopy('...')").
@@ -303,9 +305,8 @@ export function layout(o) {
   return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
     + '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
     + '<title>' + esc(title) + ' - ' + esc(panelName) + '</title>'
-    + '<script src="https://cdn.tailwindcss.com"></script>'
+    + assetHead()
     + '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">'
-    + '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">'
     + '<style>' + CSS + '</style>' + (o.extraCss ? '<style>' + o.extraCss + '</style>' : '') + MODE_EARLY + '</head>'
     + '<body class="flex h-screen overflow-hidden relative" data-theme="' + esc(th) + '"' + accentStyle(accent) + '>'
     + '<div class="droplet drop-1"></div><div class="droplet drop-2"></div><div class="droplet drop-3"></div><div class="droplet drop-4"></div><div class="droplet drop-5"></div><div class="droplet drop-6"></div><div class="droplet drop-7"></div><div class="droplet drop-8"></div>'
@@ -357,9 +358,8 @@ export function authPage(o) {
     + (isSetup ? '<div class="p-3 rounded-2xl text-[11px] text-blue-700 bg-blue-50 border border-blue-100"><i class="bi bi-info-circle-fill mr-1"></i> Pehli baar admin banao. Yehi login hoga.</div>' : '')
     + '<button class="btn-premium w-full py-4 rounded-2xl font-extrabold text-sm uppercase tracking-wider">' + (isSetup ? 'Create Admin' : 'Login') + ' <i class="bi bi-arrow-right"></i></button></form>';
   return '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">'
-    + '<title>' + esc(panelName) + ' - Login</title><script src="https://cdn.tailwindcss.com"></script>'
+    + '<title>' + esc(panelName) + ' - Login</title>' + assetHead()
     + '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">'
-    + '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">'
     + '<style>' + CSS + '</style>' + MODE_EARLY + MODE_STANDALONE + '</head>'
     + '<body><div class="auth-grid">'
     + '<aside class="auth-side"><div style="position:relative;z-index:1;max-width:400px;">'
