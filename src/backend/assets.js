@@ -9,7 +9,8 @@ import {
   ASSET_VERSION,
   BOOTSTRAP_ICONS_CSS,
   BOOTSTRAP_ICONS_WOFF2_B64,
-  TAILWIND_CSS,
+  TAILWIND_BASE_CSS,
+  TAILWIND_UTILITIES_CSS,
 } from '../frontend/generated-assets.js';
 
 export { ASSET_VERSION };
@@ -35,7 +36,10 @@ function asset(body, type) {
 
 // Returns a response for /assets/* or null when the path is not an asset.
 export function assetResponse(path) {
-  if (path === '/assets/tailwind.css') return asset(TAILWIND_CSS, 'text/css; charset=utf-8');
+  if (path === '/assets/tailwind-base.css') return asset(TAILWIND_BASE_CSS, 'text/css; charset=utf-8');
+  if (path === '/assets/tailwind-utilities.css') return asset(TAILWIND_UTILITIES_CSS, 'text/css; charset=utf-8');
+  // Kept for pages cached from the previous single-file build.
+  if (path === '/assets/tailwind.css') return asset(TAILWIND_BASE_CSS + TAILWIND_UTILITIES_CSS, 'text/css; charset=utf-8');
   if (path === '/assets/bootstrap-icons.css') return asset(BOOTSTRAP_ICONS_CSS, 'text/css; charset=utf-8');
   if (path === '/assets/bootstrap-icons.woff2') return asset(FONT_BYTES, 'font/woff2');
   return null;

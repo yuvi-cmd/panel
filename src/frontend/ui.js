@@ -1,4 +1,4 @@
-import { assetHead } from './asset-head.js';
+import { assetHead, assetTail } from './asset-head.js';
 
 export function esc(s) {
   // Escape &, <, >, " and ' so values are safe in HTML text, attributes
@@ -307,7 +307,7 @@ export function layout(o) {
     + '<title>' + esc(title) + ' - ' + esc(panelName) + '</title>'
     + assetHead()
     + '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">'
-    + '<style>' + CSS + '</style>' + (o.extraCss ? '<style>' + o.extraCss + '</style>' : '') + MODE_EARLY + '</head>'
+    + '<style>' + CSS + '</style>' + (o.extraCss ? '<style>' + o.extraCss + '</style>' : '') + assetTail() + MODE_EARLY + '</head>'
     + '<body class="flex h-screen overflow-hidden relative" data-theme="' + esc(th) + '"' + accentStyle(accent) + '>'
     + '<div class="droplet drop-1"></div><div class="droplet drop-2"></div><div class="droplet drop-3"></div><div class="droplet drop-4"></div><div class="droplet drop-5"></div><div class="droplet drop-6"></div><div class="droplet drop-7"></div><div class="droplet drop-8"></div>'
     + '<div id="sidebar-overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40 hidden md:hidden"></div>'
@@ -360,7 +360,7 @@ export function authPage(o) {
   return '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">'
     + '<title>' + esc(panelName) + ' - Login</title>' + assetHead()
     + '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">'
-    + '<style>' + CSS + '</style>' + MODE_EARLY + MODE_STANDALONE + '</head>'
+    + '<style>' + CSS + '</style>' + assetTail() + MODE_EARLY + MODE_STANDALONE + '</head>'
     + '<body><div class="auth-grid">'
     + '<aside class="auth-side"><div style="position:relative;z-index:1;max-width:400px;">'
     + '<div class="flex items-center gap-3"><div class="w-11 h-11 rounded-xl flex items-center justify-center text-xl text-white" style="background:var(--acc);box-shadow:0 4px 16px var(--acc-glow);"><i class="bi bi-shield-check"></i></div>'

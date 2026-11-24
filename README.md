@@ -108,6 +108,11 @@ SDK panel, main panel aur auth pages Tailwind + Bootstrap Icons ko
 strict CSP (`script-src 'self'`, `style-src 'self'`) ke saath bhi UI poora
 styled rehta hai aur mobile network par CDN block hone ka asar nahi padta.
 
+Tailwind do parts me load hota hai: **base** (preflight) panel CSS se pehle,
+aur **utilities** panel CSS ke baad. Isse `absolute`/`sticky` jaise utility
+classes `.glass-sidebar`/`.glass-header` ke defaults ko sahi tarah override
+karte hain — mobile sidebar content ko squeeze nahi karta.
+
 Tailwind classes badalne ya icons upgrade karne ke baad:
 
 ```bash

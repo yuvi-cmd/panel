@@ -1,5 +1,5 @@
 import { CSS, MODE_BTN, MODE_EARLY, MODE_STANDALONE, esc } from './ui.js';
-import { assetHead } from './asset-head.js';
+import { assetHead, assetTail } from './asset-head.js';
 
 function side(panelName) {
   return '<aside class="auth-side"><div style="position:relative;z-index:1;max-width:400px;">'
@@ -18,7 +18,7 @@ function shell(panelName, heading, sub, inner) {
   return '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">'
     + '<title>' + esc(heading) + ' - ' + esc(panelName) + '</title>' + assetHead()
     + '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">'
-    + '<style>' + CSS + '.clay-input{width:100%;background:var(--input);border:1px solid var(--line);border-radius:10px;padding:13px 15px;font-size:15px;font-weight:500;outline:none;color:var(--ink);}.clay-input:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--acc-soft);}.label-dark{display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;}.alert-box{padding:12px 14px;border-radius:10px;font-size:13px;font-weight:600;margin-bottom:16px;}.alert-error{background:var(--danger-bg);border:1px solid var(--danger-line);color:var(--danger-tx);}.alert-success{background:var(--ok-bg);border:1px solid var(--ok-line);color:var(--ok-tx);}</style>' + MODE_EARLY + MODE_STANDALONE + '</head>'
+    + '<style>' + CSS + '.clay-input{width:100%;background:var(--input);border:1px solid var(--line);border-radius:10px;padding:13px 15px;font-size:15px;font-weight:500;outline:none;color:var(--ink);}.clay-input:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--acc-soft);}.label-dark{display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;}.alert-box{padding:12px 14px;border-radius:10px;font-size:13px;font-weight:600;margin-bottom:16px;}.alert-error{background:var(--danger-bg);border:1px solid var(--danger-line);color:var(--danger-tx);}.alert-success{background:var(--ok-bg);border:1px solid var(--ok-line);color:var(--ok-tx);}</style>' + assetTail() + MODE_EARLY + MODE_STANDALONE + '</head>'
     + '<body><div class="auth-grid">'
     + side(panelName)
     + '<main class="auth-main"><div class="fixed top-4 right-4 z-50">' + MODE_BTN + '</div>'

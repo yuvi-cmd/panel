@@ -5,7 +5,7 @@
 // owner link (/opencode in panel-ui.js) opens this same standalone surface.
 
 import { CSS, MODE_BTN, MODE_EARLY, MODE_STANDALONE, esc } from './ui.js';
-import { assetHead } from './asset-head.js';
+import { assetHead, assetTail } from './asset-head.js';
 
 const OCSS = `
 .oc-body{background:var(--bg);}
@@ -261,7 +261,7 @@ export function opencodeLoginPage(o = {}) {
   return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">'
     + '<title>OpenCode Control - Admin Login</title>' + assetHead()
     + '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">'
-    + '<style>' + CSS + OCSS + '</style>' + MODE_EARLY + MODE_STANDALONE + '</head>'
+    + '<style>' + CSS + OCSS + '</style>' + assetTail() + MODE_EARLY + MODE_STANDALONE + '</head>'
     + '<body class="oc-login-body">'
     + '<div class="fixed top-4 right-4 z-50">' + MODE_BTN + '</div>'
     + '<main class="oc-login-wrap">'
@@ -290,7 +290,7 @@ export function opencodeAdminLayout(o) {
   return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">'
     + '<title>' + esc(o.title) + ' - OpenCode Control</title>' + assetHead()
     + '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">'
-    + '<style>' + CSS + OCSS + '</style>' + MODE_EARLY + MODE_STANDALONE + '</head>'
+    + '<style>' + CSS + OCSS + '</style>' + assetTail() + MODE_EARLY + MODE_STANDALONE + '</head>'
     + '<body class="oc-body">'
     + '<aside id="ocSide" class="oc-side">'
     + '<div class="oc-brand"><div class="oc-logo"><i class="bi bi-terminal-fill"></i></div><div><p class="oc-brand-name">OpenCode</p><p class="oc-brand-sub">CONTROL PLANE</p></div></div>'

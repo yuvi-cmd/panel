@@ -125,11 +125,19 @@ console.log('json api auth');
 // ---------- 2a. self-hosted CSS + icon assets ----------
 console.log('static assets');
 {
-  const tw = await call(env, 'GET', '/assets/tailwind.css');
-  const twBody = await tw.text();
-  ok(tw.status === 200 && /text\/css/.test(tw.headers.get('Content-Type') || ''), 'tailwind.css is served locally');
-  ok(twBody.includes('.flex{') && twBody.includes('.grid'), 'tailwind.css contains layout utilities');
-  ok((tw.headers.get('Cache-Control') || '').includes('immutable'), 'tailwind.css is cacheable');
+  const base = await call(env, 'GET', '/assets/tailwind-base.css');
+  const baseBody = await base.text();
+  ok(base.status === 200 && /text\/css/.test(base.headers.get('Content-Type') || ''), 'tailwind-base.css is served locally');
+  ok(baseBody.includes('box-sizing:border-box'), 'tailwind-base.css contains preflight');
+  ok((base.headers.get('Cache-Control') || '').includes('immutable'), 'tailwind-base.css is cacheable');
+
+  const utils = await call(env, 'GET', '/assets/tailwind-utilities.css');
+  const utilsBody = await utils.text();
+  ok(utils.status === 200 && utilsBody.includes('.flex{') && utilsBody.includes('.grid'), 'tailwind-utilities.css contains layout utilities');
+  ok(utilsBody.includes('.absolute{position:absolute}'), 'tailwind-utilities.css contains positioning utilities');
+
+  const legacyTw = await call(env, 'GET', '/assets/tailwind.css');
+  ok(legacyTw.status === 200 && (await legacyTw.text()).includes('.flex{'), 'legacy tailwind.css URL still works for cached pages');
 
   const icons = await call(env, 'GET', '/assets/bootstrap-icons.css');
   const iconsBody = await icons.text();
@@ -146,7 +154,7 @@ console.log('static assets');
 
   const login = await call(env, 'GET', '/login');
   const loginBody = await login.text();
-  ok(login.status === 200 && loginBody.includes('/assets/tailwind.css?v=') && !loginBody.includes('cdn.tailwindcss.com'), 'login page uses the self-hosted stylesheets');
+  ok(login.status === 200 && loginBody.includes('/assets/tailwind-base.css?v=') && !loginBody.includes('cdn.tailwindcss.com'), 'login page uses the self-hosted stylesheets');
 }
 
 // ---------- 2b. MAK mounted inside the SDK Panel ----------
@@ -209,8 +217,10 @@ console.log('mak integration');
   const keys = await call(env, 'GET', '/sdk/keys', { cookie: ownerCookie });
   const keysBody = await keys.text();
   ok(keys.status === 200 && keysBody.includes('SDK issued license'), 'SDK MAK Keys lists the issued license');
-  ok(keysBody.includes('/assets/tailwind.css?v=') && keysBody.includes('/assets/bootstrap-icons.css?v='), 'SDK MAK Keys uses the self-hosted stylesheets');
+  ok(keysBody.includes('/assets/tailwind-base.css?v=') && keysBody.includes('/assets/tailwind-utilities.css?v=') && keysBody.includes('/assets/bootstrap-icons.css?v='), 'SDK MAK Keys uses the self-hosted stylesheets');
   ok(!keysBody.includes('cdn.tailwindcss.com') && !keysBody.includes('cdn.jsdelivr.net'), 'SDK MAK Keys has no external CDN dependency');
+  ok(keysBody.indexOf('/assets/tailwind-base.css?v=') < keysBody.indexOf('</style>'), 'Tailwind base loads before the custom CSS');
+  ok(keysBody.indexOf('/assets/tailwind-utilities.css?v=') > keysBody.indexOf('</style>'), 'Tailwind utilities load after the custom CSS');
 
   const detail = await call(env, 'GET', '/sdk/keys/' + issuedRow.id, { cookie: ownerCookie });
   const detailBody = await detail.text();

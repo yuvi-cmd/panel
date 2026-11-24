@@ -8,11 +8,15 @@
   Host/Guest/Logs/Settings pages raw HTML jaise dikhte the.
 - Tailwind `src/**/*.js` se compile hota hai (`tailwind.config.cjs`), icons
   `vendor/bootstrap-icons/` me vendored hain. Build: `npm run assets:build`.
+- Tailwind base (preflight) custom CSS se pehle aur utilities custom CSS ke
+  baad load hote hain. Pehle `.glass-sidebar{position:relative}` Tailwind ke
+  `absolute` ko override kar raha tha, isliye mobile par sidebar 264px jagah
+  kha raha tha aur dashboard content squeeze ho raha tha.
 - Main panel, login/register, aur OpenCode Control layouts bhi local assets
   use karte hain; koi `cdn.tailwindcss.com` / `cdn.jsdelivr.net` reference
   nahi bacha.
-- Smoke tests: local asset routes, WOFF2 magic bytes, CSP header, aur "no CDN"
-  regression checks. **254 + 31 passing**.
+- Smoke tests: local asset routes, WOFF2 magic bytes, CSP header, cascade
+  order, aur "no CDN" regression checks. **260 + 31 passing**.
 
 ## Pass 2026-11-24 — MAK/2 lifecycle, slot-safe deletes, one green SDK shell
 

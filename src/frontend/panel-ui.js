@@ -1,5 +1,5 @@
 import { CSS, BASE_JS, MODE_BTN, MODE_EARLY, CMDK_BTN, PAL_SHELL, accentStyle, esc, navClass, sideLabel } from './ui.js';
-import { assetHead } from './asset-head.js';
+import { assetHead, assetTail } from './asset-head.js';
 
 export function panelLayout(o) {
   const { title, route, sess, panelName, content, theme, accent } = o;
@@ -44,7 +44,7 @@ export function panelLayout(o) {
     + '<title>' + esc(title) + ' - ' + esc(panelName) + '</title>'
     + assetHead()
     + '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">'
-    + '<style>' + CSS + '</style>' + MODE_EARLY + '</head>'
+    + '<style>' + CSS + '</style>' + assetTail() + MODE_EARLY + '</head>'
     + '<body class="flex h-screen overflow-hidden relative" data-theme="' + esc(th) + '"' + accentStyle(accent) + '>'
     + '<div class="droplet drop-1"></div><div class="droplet drop-2"></div><div class="droplet drop-3"></div><div class="droplet drop-4"></div><div class="droplet drop-5"></div><div class="droplet drop-6"></div><div class="droplet drop-7"></div><div class="droplet drop-8"></div>'
     + '<div id="sidebar-overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40 hidden md:hidden"></div>'
