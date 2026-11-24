@@ -680,6 +680,8 @@ async function main() {
       assert.match(html, /glass-sidebar/, path + ' uses the glass SDK shell');
       assert.match(html, /class="mak-admin"/, path + ' wraps MAK content for the shared shell');
       assert.match(html, /data-theme="emerald"/, path + ' uses the single green theme');
+      assert.match(html, /<\/style><style>\s*\.mak-admin\{/, path + ' injects MAK CSS inside a style tag');
+      assert.doesNotMatch(html, /<\/style>\s*\.mak-admin\{/, path + ' never leaks raw CSS into the body');
       assert.doesNotMatch(html, /SDK PANEL · MAK\/2/, path + ' has no duplicate MAK theme');
     }
   });
