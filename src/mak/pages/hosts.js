@@ -27,7 +27,7 @@ export function hostsPage({ hosts = [], counts = {}, q = '', status = 'ALL', csr
           <input type="hidden" name="return" value="${esc(returnTo)}">
           <input type="hidden" name="action" value="${active ? 'suspend' : 'activate'}">
           <button class="btn btn-sm ${active ? 'btn-danger' : 'btn-primary'}" type="submit"
-            onclick="return askConfirm(this.form,'${active ? 'Suspend' : 'Reactivate'} this host package?','${active ? 'Active sessions are revoked and this package is denied until reactivated. Its package slot stays reserved.' : 'The stored package + certificate will be accepted again.'}','${active ? 'danger' : ''}')">
+            onclick="return askConfirm(this.form,'${active ? 'Suspend' : 'Reactivate'} this host package?','${active ? 'Active grants and tickets are revoked and this package is denied until reactivated. Its package slot stays reserved.' : 'The stored package + certificate will be accepted again.'}','${active ? 'danger' : ''}')">
             ${icon(active ? 'ban' : 'check', 13)} ${active ? 'Suspend' : 'Activate'}
           </button>
         </form>

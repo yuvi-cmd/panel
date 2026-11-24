@@ -134,7 +134,7 @@ export function keysPage(o) {
       + blockForms
       + '<div class="mt-4 pt-3 border-t border-red-100">'
       + '<p class="text-[10px] font-extrabold uppercase tracking-wider text-red-400 mb-1">Danger zone</p>'
-      + '<form method="post" action="/sdk/keys/' + id + '/action" onsubmit="return confirm(\'Delete this MAK permanently? All hosts, guest bindings, install grants, devices and sessions will be removed. This cannot be undone.\')">'
+      + '<form method="post" action="/sdk/keys/' + id + '/action" onsubmit="return confirm(\'Delete this MAK permanently? All hosts, guest bindings, grants and tickets will be removed. This cannot be undone.\')">'
       + '<input type="hidden" name="_csrf" value="' + esc(csrf) + '">'
       + '<input type="hidden" name="action" value="delete">'
       + '<button type="submit" class="w-full px-3 py-2 rounded-xl text-[11px] font-extrabold bg-red-50 text-red-600 hover:bg-red-100"><i class="bi bi-trash3 mr-1"></i> Delete MAK</button>'

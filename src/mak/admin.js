@@ -464,7 +464,7 @@ export async function handleMakAdmin(request, env, db, options = {}) {
           event_type: 'LICENSE_DELETED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash,
           detail: 'MAK deleted permanently: ' + deleted.license_uid + (deleted.label ? ' (' + deleted.label + ')' : ''),
         });
-        return flash('/licenses', 'MAK deleted permanently. Its hosts, bindings, grants, devices and sessions were removed.');
+        return flash('/licenses', 'MAK deleted permanently. Its hosts, bindings, grants and legacy device/session rows were removed.');
       }
       if (action === 'rotate') {
         const credential = generateMak();
@@ -546,7 +546,7 @@ export async function handleMakAdmin(request, env, db, options = {}) {
       if (action === 'devices_reset') {
         await resetLicenseDevices(db, id, session.username);
         await logEvent(db, { license_id: id, event_type: 'DEVICES_RESET', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'All devices reset by administrator' });
-        return done('All active devices and sessions were reset.');
+        return done('All active grants and legacy device sessions were reset.');
       }
       return fail('Unknown license action.');
     }
