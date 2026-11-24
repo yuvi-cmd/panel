@@ -43,21 +43,21 @@ export function dashboardPage(d) {
     + '<div class="flex items-center gap-2">' + statusChip(l.status)
     + '<span class="text-[10px] text-slate-400">' + esc(fmtDate(l.expires_at)) + '</span>'
     + '<a href="/sdk/keys?q=' + encodeURIComponent(l.license_uid) + '" class="clay-card px-3 py-1.5 text-xs font-bold text-slate-600 rounded-xl">Open</a></div></div>'
-  ).join('') : '<div class="text-center py-8 text-slate-400"><i class="bi bi-inbox text-4xl mb-2 opacity-40"></i><p class="text-sm">No MAK issued yet</p><a href="/sdk/generate" class="inline-block mt-2 text-xs font-bold text-purple-600 hover:underline">Generate the first MAK →</a></div>';
+  ).join('') : '<div class="text-center py-8 text-slate-400"><i class="bi bi-inbox text-4xl mb-2 opacity-40"></i><p class="text-sm">No MAK issued yet</p><a href="/sdk/generate" class="inline-block mt-2 text-xs font-bold text-emerald-600 hover:underline">Generate the first MAK →</a></div>';
 
   return warnings.join('')
     + '<div class="pagehead"><div class="ph-ic"><i class="bi bi-speedometer2"></i></div><div class="flex-1 min-w-0"><h1 class="truncate">MAK Dashboard</h1><p class="truncate">Activation licenses, devices and sessions</p></div></div>'
     + '<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">'
-    + statCard('Total', stats.total || 0, 'MAK licenses issued', 'bi-key-fill', 'bg-purple-500')
+    + statCard('Total', stats.total || 0, 'MAK licenses issued', 'bi-key-fill', 'bg-emerald-500')
     + statCard('Active', stats.active || 0, 'Ready for activation', 'bi-check-circle-fill', 'bg-emerald-500')
     + statCard('Devices', stats.devices || 0, (stats.devices_online || 0) + ' seen in last 10 min', 'bi-phone-fill', 'bg-blue-500')
     + statCard('Sessions', stats.sessions || 0, 'Signed sessions live', 'bi-broadcast-pin', 'bg-amber-500')
     + '</div>'
     + '<div class="grid lg:grid-cols-3 gap-4 mb-6">'
-    + '<div class="glass-card p-5 lg:col-span-2"><div class="flex items-center justify-between mb-4"><h3 class="font-bold text-slate-800"><i class="bi bi-clock-history text-purple-500"></i> Recent MAK licenses</h3><a href="/sdk/keys" class="text-xs font-bold text-purple-600">View all →</a></div>' + recentHtml + '</div>'
+    + '<div class="glass-card p-5 lg:col-span-2"><div class="flex items-center justify-between mb-4"><h3 class="font-bold text-slate-800"><i class="bi bi-clock-history text-emerald-500"></i> Recent MAK licenses</h3><a href="/sdk/keys" class="text-xs font-bold text-emerald-600">View all →</a></div>' + recentHtml + '</div>'
     + '<div class="glass-card p-5"><h3 class="font-bold text-slate-800 mb-4"><i class="bi bi-lightning-charge-fill text-amber-500"></i> Quick actions</h3>'
     + '<div class="space-y-2">'
-    + '<a href="/sdk/generate" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-key-fill text-purple-500"></i><span class="text-sm font-bold flex-1">Generate MAK</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
+    + '<a href="/sdk/generate" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-key-fill text-emerald-500"></i><span class="text-sm font-bold flex-1">Generate MAK</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
     + '<a href="/sdk/keys" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-view-list text-blue-500"></i><span class="text-sm font-bold flex-1">MAK keys</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
     + '<a href="/sdk/devices" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-phone-fill text-emerald-500"></i><span class="text-sm font-bold flex-1">Devices</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
     + '<a href="/sdk/guests" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-app-indicator text-amber-500"></i><span class="text-sm font-bold flex-1">Guest apps</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
@@ -122,7 +122,7 @@ export function generatePage(o) {
 
   const bindToggle = '<label class="clay-card flex items-center justify-between gap-3 px-4 py-3 rounded-2xl cursor-pointer">'
     + '<span class="min-w-0"><span class="block text-sm font-bold text-slate-800">Manual bind</span><span class="block text-[10px] text-slate-400">OFF: pehla use khud bind hoga. ON: sirf niche diya package allow hoga.</span></span>'
-    + '<input type="checkbox" name="manual_bind" value="1" id="mak-manual-bind"' + (manualBind ? ' checked' : '') + ' onchange="toggleManualBind()" class="w-5 h-5 accent-purple-600 shrink-0">'
+    + '<input type="checkbox" name="manual_bind" value="1" id="mak-manual-bind"' + (manualBind ? ' checked' : '') + ' onchange="toggleManualBind()" class="w-5 h-5 accent-emerald-600 shrink-0">'
     + '</label>';
 
   const manualCard = '<div id="mak-manual-card" class="clay-card p-4 rounded-2xl space-y-3 ' + (manualBind ? '' : 'hidden') + '">'
@@ -169,8 +169,8 @@ export function generatePage(o) {
     + '</div>'
     + '</div>'
     + '<details class="mt-6 pt-5 border-t border-slate-200">'
-    + '<summary class="cursor-pointer flex items-center justify-between gap-3"><div><h4 class="text-xs font-extrabold text-slate-500 uppercase tracking-wider">App names pre-bind <span class="text-slate-300">(optional)</span></h4><p class="text-[10px] text-slate-400">AUTO me runtime par bhi bind ho sakte hain. Abhi bharna zaroori nahi.</p></div><span class="clay-card px-3 py-2 text-xs font-bold text-purple-600 rounded-xl"><i class="bi bi-chevron-down"></i></span></summary>'
-    + '<div class="mt-4"><div class="flex items-center justify-end mb-2"><button type="button" onclick="addGuestRow()" class="clay-card px-3 py-2 text-xs font-bold text-purple-600 rounded-xl"><i class="bi bi-plus-lg"></i> Add app</button></div>'
+    + '<summary class="cursor-pointer flex items-center justify-between gap-3"><div><h4 class="text-xs font-extrabold text-slate-500 uppercase tracking-wider">App names pre-bind <span class="text-slate-300">(optional)</span></h4><p class="text-[10px] text-slate-400">AUTO me runtime par bhi bind ho sakte hain. Abhi bharna zaroori nahi.</p></div><span class="clay-card px-3 py-2 text-xs font-bold text-emerald-600 rounded-xl"><i class="bi bi-chevron-down"></i></span></summary>'
+    + '<div class="mt-4"><div class="flex items-center justify-end mb-2"><button type="button" onclick="addGuestRow()" class="clay-card px-3 py-2 text-xs font-bold text-emerald-600 rounded-xl"><i class="bi bi-plus-lg"></i> Add app</button></div>'
     + '<div id="guest-rows">' + existingRows.map(guestRow).join('') + '</div></div>'
     + '</details>'
     + '<div class="mt-5"><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Notes</label><textarea name="notes" maxlength="1000" placeholder="Internal note (never sent to the client)" class="w-full clay-card px-4 py-3 text-sm rounded-2xl">' + esc(values.notes || '') + '</textarea></div>'

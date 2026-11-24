@@ -35,7 +35,7 @@ export function settingsPage(o) {
     + '</div>'
     + '<div class="grid lg:grid-cols-[1.5fr_1fr] gap-4 items-start">'
     + '<div class="space-y-4">'
-    + '<div class="glass-card p-5"><h3 class="font-bold text-slate-800 mb-3"><i class="bi bi-toggles text-purple-500"></i> Activation server</h3>'
+    + '<div class="glass-card p-5"><h3 class="font-bold text-slate-800 mb-3"><i class="bi bi-toggles text-emerald-500"></i> Activation server</h3>'
     + '<form method="POST" action="/sdk/settings/server" class="space-y-3"><input type="hidden" name="_csrf" value="' + esc(csrf) + '"><input type="hidden" name="action" value="save">'
     + '<label class="clay-card p-4 rounded-2xl flex items-center gap-3 cursor-pointer"><input type="checkbox" name="server_enabled" value="1" ' + (enabled ? 'checked' : '') + ' class="w-6 h-6" style="accent-color:#10b981"><span class="text-sm font-black flex-1">Activation decisions enabled</span><span class="text-[10px] font-extrabold ' + (enabled ? 'text-emerald-600' : 'text-red-600') + '">' + (enabled ? 'ON' : 'OFF') + '</span></label>'
     + field('Maintenance message', input('maintenance_message', s.maintenance_message, 'maxlength="300"'))
@@ -80,7 +80,7 @@ export function settingsPage(o) {
     + '</div>'
 
     + '<div class="space-y-4">'
-    + '<div class="glass-card p-5"><h3 class="font-bold text-slate-800 mb-3"><i class="bi bi-activity text-purple-500"></i> Posture</h3>'
+    + '<div class="glass-card p-5"><h3 class="font-bold text-slate-800 mb-3"><i class="bi bi-activity text-emerald-500"></i> Posture</h3>'
     + '<div class="space-y-2 text-xs text-slate-600">'
     + '<div class="flex justify-between gap-2"><span class="text-slate-400 font-bold">Server</span><b>' + (enabled ? 'ONLINE' : 'OFFLINE') + '</b></div>'
     + '<div class="flex justify-between gap-2"><span class="text-slate-400 font-bold">Signing</span><b>' + (signing.ok ? 'READY' : 'MISSING') + '</b></div>'
