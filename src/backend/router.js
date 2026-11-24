@@ -972,10 +972,16 @@ export default {
       });
     }
 
+    // MAK/2 has no device_id or long-lived session. The old MAK/1 pages are
+    // retired from the SDK panel; keep the URLs harmless for old bookmarks.
+    if (path === '/sdk/devices' || path.startsWith('/sdk/devices/')
+      || path === '/sdk/sessions' || path.startsWith('/sdk/sessions/')) {
+      const g = sdkGate(); if (g) return g;
+      return redir('/sdk/keys');
+    }
+
     if (path === '/sdk/guests' || path.startsWith('/sdk/guests/')
       || path === '/sdk/hosts' || path.startsWith('/sdk/hosts/')
-      || path === '/sdk/devices' || path.startsWith('/sdk/devices/')
-      || path === '/sdk/sessions' || path.startsWith('/sdk/sessions/')
       || path === '/sdk/logs' || path.startsWith('/sdk/logs/')
       || path === '/sdk/settings' || path.startsWith('/sdk/settings/')) {
       const g = sdkGate(); if (g) return g;

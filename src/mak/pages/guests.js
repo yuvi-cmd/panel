@@ -17,7 +17,7 @@ export function guestsPage({ guests = [], counts = {}, q = '', status = 'ALL', c
   return `
     ${pageHeader({
       eyebrow: 'Application allow-list',
-      title: 'Guest applications',
+      title: 'Guest apps',
       subtitle: 'APK identity = package + APK SHA-256 + signing certificate SHA-256.',
       actions: `<a class="btn btn-primary" href="/guests/new">${icon('plus', 16)} Register guest</a>`,
     })}

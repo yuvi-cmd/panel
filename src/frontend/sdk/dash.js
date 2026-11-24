@@ -46,12 +46,12 @@ export function dashboardPage(d) {
   ).join('') : '<div class="text-center py-8 text-slate-400"><i class="bi bi-inbox text-4xl mb-2 opacity-40"></i><p class="text-sm">No MAK issued yet</p><a href="/sdk/generate" class="inline-block mt-2 text-xs font-bold text-emerald-600 hover:underline">Generate the first MAK →</a></div>';
 
   return warnings.join('')
-    + '<div class="pagehead"><div class="ph-ic"><i class="bi bi-speedometer2"></i></div><div class="flex-1 min-w-0"><h1 class="truncate">MAK Dashboard</h1><p class="truncate">Activation licenses, devices and sessions</p></div></div>'
+    + '<div class="pagehead"><div class="ph-ic"><i class="bi bi-speedometer2"></i></div><div class="flex-1 min-w-0"><h1 class="truncate">MAK Dashboard</h1><p class="truncate">Activation licenses, host packages and guest apps</p></div></div>'
     + '<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">'
     + statCard('Total', stats.total || 0, 'MAK licenses issued', 'bi-key-fill', 'bg-emerald-500')
     + statCard('Active', stats.active || 0, 'Ready for activation', 'bi-check-circle-fill', 'bg-emerald-500')
-    + statCard('Devices', stats.devices || 0, (stats.devices_online || 0) + ' seen in last 10 min', 'bi-phone-fill', 'bg-blue-500')
-    + statCard('Sessions', stats.sessions || 0, 'Signed sessions live', 'bi-broadcast-pin', 'bg-amber-500')
+    + statCard('Host packages', stats.hosts || 0, 'Pinned package identities', 'bi-hdd-stack-fill', 'bg-blue-500')
+    + statCard('Guest apps', stats.guests || 0, 'Approved APK identities', 'bi-app-indicator', 'bg-amber-500')
     + '</div>'
     + '<div class="grid lg:grid-cols-3 gap-4 mb-6">'
     + '<div class="glass-card p-5 lg:col-span-2"><div class="flex items-center justify-between mb-4"><h3 class="font-bold text-slate-800"><i class="bi bi-clock-history text-emerald-500"></i> Recent MAK licenses</h3><a href="/sdk/keys" class="text-xs font-bold text-emerald-600">View all →</a></div>' + recentHtml + '</div>'
@@ -59,11 +59,11 @@ export function dashboardPage(d) {
     + '<div class="space-y-2">'
     + '<a href="/sdk/generate" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-key-fill text-emerald-500"></i><span class="text-sm font-bold flex-1">Generate MAK</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
     + '<a href="/sdk/keys" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-view-list text-blue-500"></i><span class="text-sm font-bold flex-1">MAK keys</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
-    + '<a href="/sdk/devices" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-phone-fill text-emerald-500"></i><span class="text-sm font-bold flex-1">Devices</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
+    + '<a href="/sdk/hosts" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-hdd-stack-fill text-blue-500"></i><span class="text-sm font-bold flex-1">Host packages</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
     + '<a href="/sdk/guests" class="clay-card p-3 rounded-2xl flex items-center gap-3"><i class="bi bi-app-indicator text-amber-500"></i><span class="text-sm font-bold flex-1">Guest apps</span><i class="bi bi-chevron-right text-slate-400"></i></a>'
     + '</div></div></div>'
     + '<div class="grid grid-cols-2 lg:grid-cols-4 gap-3">'
-    + '<div class="glass-card p-4"><p class="text-[10px] font-extrabold text-slate-400 uppercase">Guest apps</p><p class="text-xl font-black">' + Number(stats.guests || 0) + '</p></div>'
+    + '<div class="glass-card p-4"><p class="text-[10px] font-extrabold text-slate-400 uppercase">Active grants</p><p class="text-xl font-black">' + Number(stats.grants || 0) + '</p></div>'
     + '<div class="glass-card p-4"><p class="text-[10px] font-extrabold text-slate-400 uppercase">New (7 days)</p><p class="text-xl font-black">' + Number(stats.new_licenses || 0) + '</p></div>'
     + '<div class="glass-card p-4"><p class="text-[10px] font-extrabold text-slate-400 uppercase">Activations</p><p class="text-xl font-black">' + Number(stats.activations || 0) + '</p></div>'
     + '<div class="glass-card p-4"><p class="text-[10px] font-extrabold text-slate-400 uppercase">Signing</p><p class="text-sm font-black ' + (server.signingReady ? 'text-emerald-600' : 'text-amber-600') + '">' + (server.signingReady ? 'Ed25519 ready' : 'Not generated') + '</p></div>'

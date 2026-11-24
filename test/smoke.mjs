@@ -190,9 +190,13 @@ console.log('mak integration');
   const legacyDetail = await call(env, 'GET', '/mak/licenses/' + issuedRow.id, { cookie: ownerCookie });
   ok(legacyDetail.status === 302 && String(legacyDetail.headers.get('Location') || '') === '/sdk/keys/' + issuedRow.id, 'legacy /mak/licenses/:id redirects to /sdk/keys/:id');
 
-  for (const section of ['guests', 'hosts', 'devices', 'sessions', 'logs', 'settings']) {
+  for (const section of ['guests', 'hosts', 'logs', 'settings']) {
     const r = await call(env, 'GET', '/sdk/' + section, { cookie: ownerCookie });
     ok(r.status === 200, 'SDK MAK ' + section + ' page renders (got ' + r.status + ')');
+  }
+  for (const section of ['devices', 'sessions']) {
+    const r = await call(env, 'GET', '/sdk/' + section, { cookie: ownerCookie });
+    ok(r.status === 302 && String(r.headers.get('Location') || '') === '/sdk/keys', 'retired SDK MAK ' + section + ' page redirects to keys');
   }
 
   const srv = await call(env, 'GET', '/sdk/server', { cookie: ownerCookie });

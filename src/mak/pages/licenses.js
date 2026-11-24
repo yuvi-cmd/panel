@@ -2,7 +2,7 @@ import {
   codeValue, emptyState, field, icon, licenseExpiry, licenseHostText, licenseStatusBadge,
   pageHeader, resultBadge, sectionHead, segmented, statusBadge, timeCell,
 } from '../ui.js';
-import { esc, fmtDate, fmtDateTime, relTime, truncate } from '../http.js';
+import { esc, fmtDate, relTime } from '../http.js';
 
 function csrfInput(csrf) { return `<input type="hidden" name="_csrf" value="${esc(csrf)}">`; }
 
@@ -174,7 +174,7 @@ export function revealLicensePage({ license, credential, csrf, server }) {
 }
 
 export function licenseDetailPage({
-  license, host, hosts = [], bindings = [], allGuests = [], devices = [], sessions = [], events = [], csrf, server,
+  license, host, hosts = [], bindings = [], allGuests = [], events = [], csrf, server,
 }) {
   const guestRows = bindings.length ? bindings.map((b) => `
     <tr>
@@ -193,26 +193,6 @@ export function licenseDetailPage({
     </tr>`).join('') : `<tr><td colspan="4">${emptyState('apps', 'No guest apps bound', 'Bind an approved guest app to authorize install and launch operations.')}</td></tr>`;
 
   const guestOptions = allGuests.length ? allGuests.map((g) => `<option value="${g.id}">${esc(g.app_name || g.package_name)} · ${esc(g.package_name)} · v${esc(g.version_code)}</option>`).join('') : `<option value="">No approved guest apps</option>`;
-
-  const deviceRows = devices.length ? devices.map((d) => `
-    <tr>
-      <td data-label="Device"><div class="cell-main mono">${esc(d.fingerprint)}</div><div class="cell-sub">${esc(d.device_uid)}</div></td>
-      <td data-label="Status">${statusBadge(d.status)}</td>
-      <td data-label="Last seen">${timeCell(d.last_seen)}</td>
-      <td data-label="" class="actions">
-        <form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="device_revoke"><input type="hidden" name="device_id" value="${d.id}"><button class="btn btn-sm btn-danger" type="submit" ${d.status !== 'ACTIVE' ? 'disabled' : ''} onclick="return askConfirm(this.form,'Revoke this device?','Its sessions will be revoked and it must be re-authorized.','danger')">Revoke</button></form>
-        <form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="device_delete"><input type="hidden" name="device_id" value="${d.id}"><button class="btn btn-sm btn-ghost" type="submit" onclick="return askConfirm(this.form,'Delete device record?','The device row is removed, but audit events remain. This frees the key slot for a fresh registration.','danger')">Delete</button></form>
-      </td>
-    </tr>`).join('') : `<tr><td colspan="4">${emptyState('smartphone', 'No devices yet', 'The first successful /authorize call registers a P-256 public key.')}</td></tr>`;
-
-  const sessionRows = sessions.length ? sessions.map((s) => `
-    <tr>
-      <td data-label="Session"><div class="cell-main mono">${esc(truncate(s.id, 26))}</div><div class="cell-sub">Issued ${esc(relTime(s.issued_at))}</div></td>
-      <td data-label="Status">${statusBadge(s.status === 'REVOKED' ? 'REVOKED' : (Number(s.expires_at) <= Math.floor(Date.now() / 1000) ? 'EXPIRED' : 'ACTIVE'))}</td>
-      <td data-label="Expires">${esc(fmtDateTime(s.expires_at))}</td>
-      <td data-label="Heartbeat">${timeCell(s.last_heartbeat)}</td>
-      <td data-label="" class="actions"><form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="session_revoke"><input type="hidden" name="session_id" value="${esc(s.id)}"><button class="btn btn-sm btn-danger" type="submit" ${s.status !== 'ACTIVE' ? 'disabled' : ''} onclick="return confirm('Revoke this session?')">Revoke</button></form></td>
-    </tr>`).join('') : `<tr><td colspan="5">${emptyState('radio', 'No sessions', 'A session is created after host + device authorization.')}</td></tr>`;
 
   const eventItems = events.length ? events.map((e) => `
     <div class="timeline-item">
@@ -241,9 +221,9 @@ export function licenseDetailPage({
       title: esc(license.label || 'Untitled license'),
       subtitle: `Created ${esc(fmtDate(license.created_at))} · ${license.user_ref ? esc(license.user_ref) : 'No user reference'} · ${effective}`,
       actions: `<a class="btn" href="/licenses">${icon('chevron-left', 16)} Back</a>
-        ${!revoked ? `<form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="${suspended ? 'reactivate' : 'suspend'}"><button class="btn ${suspended ? 'btn-primary' : 'btn-danger'}" type="submit" onclick="return askConfirm(this.form,'${suspended ? 'Reactivate' : 'Suspend'} this license?','${suspended ? 'New authorizations will be allowed again.' : 'Active sessions are revoked and new authorizations are denied.'}','${suspended ? '' : 'danger'}')">${icon(suspended ? 'check' : 'ban', 15)} ${suspended ? 'Reactivate' : 'Suspend'}</button></form>` : ''}
-        <form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="rotate"><button class="btn" type="submit" onclick="return askConfirm(this.form,'Rotate MAK credential?','The old credential stops working immediately and all sessions are revoked. The new key is shown once.','danger')">${icon('rotate', 15)} Rotate</button></form>
-        ${!revoked ? `<form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="revoke"><button class="btn btn-danger" type="submit" onclick="return askConfirm(this.form,'Revoke this license permanently?','Every device and session is denied. This cannot be undone from the client side.','danger')">${icon('trash', 15)} Revoke</button></form>` : ''}`,
+        ${!revoked ? `<form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="${suspended ? 'reactivate' : 'suspend'}"><button class="btn ${suspended ? 'btn-primary' : 'btn-danger'}" type="submit" onclick="return askConfirm(this.form,'${suspended ? 'Reactivate' : 'Suspend'} this license?','${suspended ? 'New authorizations will be allowed again.' : 'Active grants and tickets are revoked and new authorizations are denied.'}','${suspended ? '' : 'danger'}')">${icon(suspended ? 'check' : 'ban', 15)} ${suspended ? 'Reactivate' : 'Suspend'}</button></form>` : ''}
+        <form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="rotate"><button class="btn" type="submit" onclick="return askConfirm(this.form,'Rotate MAK credential?','The old credential stops working immediately and all grants and tickets are revoked. The new key is shown once.','danger')">${icon('rotate', 15)} Rotate</button></form>
+        ${!revoked ? `<form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="revoke"><button class="btn btn-danger" type="submit" onclick="return askConfirm(this.form,'Revoke this license permanently?','Every host identity, grant and ticket is denied. This cannot be undone from the client side.','danger')">${icon('trash', 15)} Revoke</button></form>` : ''}`,
     })}
     <div class="detail-grid">
       <div class="stack">
@@ -259,8 +239,8 @@ export function licenseDetailPage({
                 ${durationOptions.map(([value, label]) => `<option value="${value}" ${durationValue === value ? 'selected' : ''}>${label}</option>`).join('')}
               </select>`, durationNote)}
               ${field('Custom expiry date', `<input type="date" name="expires_on" value="${esc(dateInputValue(license.expires_at))}">`, 'Only used when Duration = Custom date.')}
-              ${field('Session TTL (seconds)', `<input type="number" name="session_ttl" min="300" max="86400" value="${license.session_ttl}" required>`)}
-              ${field('Max devices', `<input type="number" name="max_devices" min="1" max="100" value="${license.max_devices}" required>`)}
+              <input type="hidden" name="session_ttl" value="${license.session_ttl}">
+              <input type="hidden" name="max_devices" value="${license.max_devices}">
               ${field('Max activations', `<input type="number" name="max_activations" min="1" max="1000" value="${license.max_activations}" required>`)}
               ${field('Max host packages', `<input type="number" name="max_packages" min="1" max="100" value="${license.max_packages || 1}" required>`, 'Kitne host APK package names is MAK se bind ho sakte hain.')}
               ${field('Max apps per package', `<input type="number" name="max_apps" min="1" max="100" value="${license.max_apps || 2}" required>`, 'Har host package ke liye kitne guest apps.')}
@@ -291,7 +271,7 @@ export function licenseDetailPage({
               <td data-label="Package"><div class="cell-main mono">${esc(h.package_name)}</div><div class="cell-sub mono">${esc(h.cert_sha256)}</div></td>
               <td data-label="App">${esc(h.app_name || '—')}</td>
               <td data-label="Status">${statusBadge(h.status)}</td>
-              <td data-label="" class="actions"><form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="${String(h.status).toUpperCase() === 'ACTIVE' ? 'host_block' : 'host_unblock'}"><input type="hidden" name="host_id" value="${h.id}"><button class="btn btn-sm ${String(h.status).toUpperCase() === 'ACTIVE' ? 'btn-danger' : 'btn-ghost'}" type="submit" onclick="return askConfirm(this.form,'${String(h.status).toUpperCase() === 'ACTIVE' ? 'Block' : 'Unblock'} this host package?','${String(h.status).toUpperCase() === 'ACTIVE' ? 'Requests from this package are denied and sessions are revoked. Its package slot stays reserved.' : 'This package can authenticate again.'}','${String(h.status).toUpperCase() === 'ACTIVE' ? 'danger' : ''}')">${icon(String(h.status).toUpperCase() === 'ACTIVE' ? 'ban' : 'check', 13)} ${String(h.status).toUpperCase() === 'ACTIVE' ? 'Block' : 'Unblock'}</button></form><form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="host_delete"><input type="hidden" name="host_id" value="${h.id}"><button class="btn btn-sm btn-danger" type="submit" onclick="return askConfirm(this.form,'Delete this host package?','The package pin, its grants, sessions and host-scoped guest bindings are removed. Its package slot becomes free.','danger')">Delete</button></form></td>
+              <td data-label="" class="actions"><form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="${String(h.status).toUpperCase() === 'ACTIVE' ? 'host_block' : 'host_unblock'}"><input type="hidden" name="host_id" value="${h.id}"><button class="btn btn-sm ${String(h.status).toUpperCase() === 'ACTIVE' ? 'btn-danger' : 'btn-ghost'}" type="submit" onclick="return askConfirm(this.form,'${String(h.status).toUpperCase() === 'ACTIVE' ? 'Block' : 'Unblock'} this host package?','${String(h.status).toUpperCase() === 'ACTIVE' ? 'Requests from this package are denied and its grants and tickets are revoked. Its package slot stays reserved.' : 'This package can authenticate again.'}','${String(h.status).toUpperCase() === 'ACTIVE' ? 'danger' : ''}')">${icon(String(h.status).toUpperCase() === 'ACTIVE' ? 'ban' : 'check', 13)} ${String(h.status).toUpperCase() === 'ACTIVE' ? 'Block' : 'Unblock'}</button></form><form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="host_delete"><input type="hidden" name="host_id" value="${h.id}"><button class="btn btn-sm btn-danger" type="submit" onclick="return askConfirm(this.form,'Delete this host package?','The package pin, its grants, tickets and host-scoped guest bindings are removed. Its package slot becomes free.','danger')">Delete</button></form></td>
             </tr>`).join('')}</tbody></table></div>` : `<div class="notice" style="margin:0">${icon('clock', 17)}<div><b>${String(license.host_bind_mode || 'AUTO') === 'MANUAL' ? 'Manual binding.' : 'Auto binding enabled.'}</b> ${String(license.host_bind_mode || 'AUTO') === 'MANUAL' ? 'Only the packages you register here can authenticate.' : 'The first ' + Number(license.max_packages || 1) + ' host packages will bind on first authenticated use.'}</div></div>`}
           <details style="margin-top:14px">
             <summary class="btn btn-sm btn-ghost" style="list-style:none;display:inline-flex">${icon('edit', 14)} ${hosts.length ? 'Add / update host package' : 'Pre-register host'}</summary>
@@ -302,20 +282,10 @@ export function licenseDetailPage({
                 ${field('App name', `<input name="host_app_name" placeholder="Display name (optional)">`)}
                 ${field('Certificate SHA-256', `<input name="host_cert" placeholder="64 hex characters" ${Number(license.signature_bind ?? 1) ? 'required' : ''}>`)}
               </div>
-              <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit" onclick="return askConfirm(this.form,'Save host package?','All active sessions will be revoked. New authorization must match the package and certificate.','danger')">Save package</button></div>
+              <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit" onclick="return askConfirm(this.form,'Save host package?','All active grants and tickets will be revoked. New authorization must match the package and certificate.','danger')">Save package</button></div>
             </form>
           </details>
-          ${hosts.length ? `<div class="divider"></div><div class="row" style="justify-content:space-between"><span class="muted small">Delete all removes every package pin and frees all package slots.</span><form method="post" action="/licenses/${license.id}/action">${csrfInput(csrf)}<input type="hidden" name="action" value="host_delete"><button class="btn btn-sm btn-danger" type="submit" onclick="return askConfirm(this.form,'Delete all host packages?','Every package pin, grant, session and host-scoped guest binding is removed. Package slots become free.','danger')">Delete all</button></form></div>` : ''}
-        </div>
-
-        <div class="card tight">
-          ${sectionHead('Devices', 'P-256 public keys registered against this license.', `<a class="btn btn-sm btn-ghost" href="/devices?q=${encodeURIComponent(license.license_uid)}">All devices ${icon('arrow-right', 13)}</a>`)}
-          <div class="table-wrap" style="border:0;border-radius:0;background:transparent"><table class="tbl"><thead><tr><th>Device</th><th>Status</th><th>Last seen</th><th></th></tr></thead><tbody>${deviceRows}</tbody></table></div>
-        </div>
-
-        <div class="card tight">
-          ${sectionHead('Sessions', 'Short-lived authorization state.', `<a class="btn btn-sm btn-ghost" href="/sessions?q=${encodeURIComponent(license.license_uid)}">All sessions ${icon('arrow-right', 13)}</a>`)}
-          <div class="table-wrap" style="border:0;border-radius:0;background:transparent"><table class="tbl"><thead><tr><th>Session</th><th>Status</th><th>Expires</th><th>Heartbeat</th><th></th></tr></thead><tbody>${sessionRows}</tbody></table></div>
+          ${hosts.length ? `<div class="divider"></div><div class="row" style="justify-content:space-between"><span class="muted small">Delete all removes every package pin and frees all package slots.</span><form method="post" action="/licenses/${license.id}/action">${csrfInput(csrf)}<input type="hidden" name="action" value="host_delete"><button class="btn btn-sm btn-danger" type="submit" onclick="return askConfirm(this.form,'Delete all host packages?','Every package pin, grant, ticket and host-scoped guest binding is removed. Package slots become free.','danger')">Delete all</button></form></div>` : ''}
         </div>
 
         <div class="card">
@@ -343,9 +313,12 @@ export function licenseDetailPage({
         </div>
 
         <div class="card">
-          ${sectionHead('Device allowance')}
-          <p class="muted small" style="margin:0 0 12px">Reset revokes every active device and session. The lifetime activation counter is preserved.</p>
-          <form method="post" action="/licenses/${license.id}/action">${csrfInput(csrf)}<input type="hidden" name="action" value="devices_reset"><button class="btn btn-danger" style="width:100%" type="submit" onclick="return askConfirm(this.form,'Reset all devices?','Every active device and session is revoked. Devices must authorize again, and the activation counter still applies.','danger')">${icon('rotate', 15)} Reset device allowance</button></form>
+          ${sectionHead('Activation allowance')}
+          <p class="muted small" style="margin:0 0 12px">MAK/2 has no device seat. One host identity (MAK + package + app name + certificate) reuses one signed grant. The activation counter is audit only.</p>
+          <div class="row" style="justify-content:space-between">
+            <div><div class="kpi-label">Activations used</div><div class="cell-main">${license.activation_count} of ${license.max_activations}</div></div>
+            <div style="flex:1;max-width:240px"><div class="meter"><span style="width:${Math.min(100, Math.round((Number(license.activation_count || 0) / Math.max(1, Number(license.max_activations))) * 100))}%"></span></div></div>
+          </div>
         </div>
 
         <div class="card">
@@ -359,7 +332,7 @@ export function licenseDetailPage({
           </dl>
           <div class="notice" style="margin:14px 0 0">${icon('lock', 17)}<div>The raw MAK is visible on MAK Keys. Rotate to replace it, or delete the MAK permanently below.</div></div>
           <div class="divider"></div>
-          <form method="post" action="/licenses/${license.id}/action" onsubmit="return askConfirm(this.form,'Delete this MAK permanently?','The license and all of its host bindings, guest bindings, install grants, devices and sessions are removed. Security event history is kept. This cannot be undone.','danger')">
+          <form method="post" action="/licenses/${license.id}/action" onsubmit="return askConfirm(this.form,'Delete this MAK permanently?','The license and all of its host bindings, guest bindings, grants, tickets and legacy device/session rows are removed. Security event history is kept. This cannot be undone.','danger')">
             ${csrfInput(csrf)}<input type="hidden" name="action" value="delete">
             <button class="btn btn-danger" style="width:100%" type="submit">${icon('trash', 15)} Delete MAK</button>
           </form>

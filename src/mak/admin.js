@@ -17,13 +17,13 @@ import {
 } from './http.js';
 import {
   activeLicenseOptions, bindGuestAtomic, createGuest, dashboardStats,
-  deleteBinding, deleteDevice, deleteGuestApp, deleteHostCascade, deleteLicense, deviceCounts, devicesForLicense, eventCounts, expiringLicenses,
+  deleteBinding, deleteDevice, deleteGuestApp, deleteHostCascade, deleteLicense, deviceCounts, eventCounts, expiringLicenses,
   getDeviceById, getGuestById, getHostById, getHostForLicense, getHostsForLicense, getLicenseById, getSession,
   guestCounts, guestEvents, hostCounts, licenseCounts, listAllActiveGuests,
   listBindingsForGuest, listBindingsForLicense, listDevices, listGuests, listHosts,
   listLicenses, listSessions, revokeAllSessions, revokeDevice, revokeLicense,
   revokeSession, revokeSessionsForLicense, resetLicenseDevices,
-  rotateLicenseCredential, sessionCounts, sessionsForLicense, setHostStatus,
+  rotateLicenseCredential, sessionCounts, setHostStatus,
   setLicenseStatus, updateGuest, updateLicensePolicy, updateLicenseQuota, upsertHost,
 } from './store.js';
 import { dashboardPage } from './pages/dashboard.js';
@@ -357,15 +357,15 @@ export async function handleMakAdmin(request, env, db, options = {}) {
     if (parts.length === 2 && method === 'GET') {
       const license = await getLicenseById(db, id);
       if (!license) return notFoundResponse(env, request, session, session, settings, config, 'That license does not exist.');
-      const [host, hosts, bindings, allGuests, devices, sessions, events] = await Promise.all([
+      const [host, hosts, bindings, allGuests, events] = await Promise.all([
         getHostForLicense(db, id), getHostsForLicense(db, id), listBindingsForLicense(db, id), listAllActiveGuests(db),
-        devicesForLicense(db, id), sessionsForLicense(db, id), licenseEvents(db, id, 12),
+        licenseEvents(db, id, 12),
       ]);
       return panelResponse(env, request, session, session, settings, config, {
         title: license.label || 'License',
         active: 'licenses',
         content: licenseDetailPage({
-          license, host, hosts, bindings, allGuests, devices, sessions, events,
+          license, host, hosts, bindings, allGuests, events,
           csrf: session.csrf, server: { enabled: settings.server_enabled },
         }),
       });

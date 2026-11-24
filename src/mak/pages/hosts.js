@@ -47,9 +47,9 @@ export function hostsPage({ hosts = [], counts = {}, q = '', status = 'ALL', csr
 
   return `
     ${pageHeader({
-      eyebrow: 'Host control',
-      title: 'Host bindings',
-      subtitle: 'Every host APK package under a license is pinned by package name and signing certificate, up to the license package limit.',
+      eyebrow: 'Host identity',
+      title: 'Host packages',
+      subtitle: 'Every host APK package under a license is pinned by package name, app name and signing certificate, up to the license package limit.',
       actions: `<a class="btn" href="/licenses">${icon('key', 16)} Licenses</a><a class="btn btn-primary" href="/licenses/new">${icon('plus', 16)} Issue MAK</a>`,
     })}
     ${!server.enabled ? `<div class="notice">${icon('alert', 17)}<div><b>Activation server is OFF.</b> Host authentication is denied until it is switched on.</div></div>` : ''}
@@ -76,7 +76,7 @@ export function hostsPage({ hosts = [], counts = {}, q = '', status = 'ALL', csr
       <div class="card">
         ${sectionHead('Binding rules')}
         <div class="timeline">
-          <div class="timeline-item"><span class="timeline-dot"></span><div class="timeline-main"><b>AUTO mode</b><p>The first valid MAK + device proof binds each new package (with its app name and certificate), up to Max host packages.</p></div></div>
+          <div class="timeline-item"><span class="timeline-dot"></span><div class="timeline-main"><b>AUTO mode</b><p>The first valid MAK + four-field host identity (package, app name, certificate) binds each new package, up to Max host packages.</p></div></div>
           <div class="timeline-item"><span class="timeline-dot"></span><div class="timeline-main"><b>MANUAL mode</b><p>Only host packages pre-registered by an administrator can authenticate.</p></div></div>
           <div class="timeline-item"><span class="timeline-dot bad"></span><div class="timeline-main"><b>Mismatch is fatal</b><p>Any package or certificate difference returns HOST_PACKAGE_MISMATCH / HOST_CERT_MISMATCH.</p></div></div>
         </div>

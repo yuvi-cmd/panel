@@ -684,10 +684,10 @@ async function main() {
     assert.ok(!html.includes(license.license_uid), 'deleted MAK is no longer listed');
   });
 
-  await test('Guest Apps, Hosts, Devices, Sessions and Logs share one green SDK shell', async () => {
+  await test('Guest Apps, Hosts and Logs share one green SDK shell', async () => {
     const env = globalThis.__lastEnv;
     const { cookie } = env.__test;
-    for (const path of ['/sdk/guests', '/sdk/hosts', '/sdk/devices', '/sdk/sessions', '/sdk/logs']) {
+    for (const path of ['/sdk/guests', '/sdk/hosts', '/sdk/logs']) {
       const res = await call(env, path, { cookie });
       const html = await res.text();
       assert.equal(res.status, 200, path);
@@ -698,6 +698,35 @@ async function main() {
       assert.doesNotMatch(html, /<\/style>\s*\.mak-admin\{/, path + ' never leaks raw CSS into the body');
       assert.doesNotMatch(html, /SDK PANEL · MAK\/2/, path + ' has no duplicate MAK theme');
     }
+  });
+
+  await test('retired device and session tabs redirect to MAK keys', async () => {
+    const env = globalThis.__lastEnv;
+    const { cookie } = env.__test;
+    for (const path of ['/sdk/devices', '/sdk/sessions']) {
+      const res = await call(env, path, { cookie });
+      assert.equal(res.status, 302, path);
+      assert.equal(String(res.headers.get('Location') || ''), '/sdk/keys', path + ' redirects to keys');
+    }
+  });
+
+  await test('APPS / PKG counts the bound host app name', async () => {
+    const env = globalThis.__lastEnv;
+    const { cookie, token } = env.__test;
+    const issued = await issueLicense(env, cookie, token, {
+      label: 'App count display', signature_bind: '0', max_packages: '1', max_apps: '2',
+      host_package: 'com.count.host', host_app_name: 'Count Host',
+    });
+    assert.ok(issued.mak, issued.html.slice(0, 500));
+    const license = await env.DB.prepare('SELECT * FROM mak_licenses ORDER BY id DESC LIMIT 1').first();
+    const host = await env.DB.prepare('SELECT * FROM mak_hosts WHERE license_id=?').bind(license.id).first();
+    assert.equal(host.app_name, 'Count Host');
+
+    const page = await call(env, '/sdk/keys?q=' + encodeURIComponent(license.license_uid), { cookie });
+    const html = await page.text();
+    assert.equal(page.status, 200);
+    assert.match(html, /APPS \/ PKG<\/p><p class="text-xs font-black">1 \/ 2<\/p>/, 'host app name occupies one app slot');
+    assert.match(html, /App names \/ package<\/p><p[^>]*>1 \/ 2 used<\/p>/, 'details show the same count');
   });
 
   await test('numeric duration starts on first app bind and never resets', async () => {

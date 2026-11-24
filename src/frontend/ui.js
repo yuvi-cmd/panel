@@ -324,9 +324,7 @@ export function layout(o) {
     + '<a href="/sdk/keys" class="' + navClass('sdk/keys', route) + '"><i class="bi bi-view-list text-lg w-6 text-center"></i> MAK Keys</a>'
     + sideLabel('MAK Activation')
     + '<a href="/sdk/guests" class="' + navClass('sdk/guests', route) + '"><i class="bi bi-app-indicator text-lg w-6 text-center"></i> Guest Apps</a>'
-    + '<a href="/sdk/hosts" class="' + navClass('sdk/hosts', route) + '"><i class="bi bi-hdd-stack-fill text-lg w-6 text-center"></i> Hosts</a>'
-    + '<a href="/sdk/devices" class="' + navClass('sdk/devices', route) + '"><i class="bi bi-phone-fill text-lg w-6 text-center"></i> Devices</a>'
-    + '<a href="/sdk/sessions" class="' + navClass('sdk/sessions', route) + '"><i class="bi bi-broadcast-pin text-lg w-6 text-center"></i> Sessions</a>'
+    + '<a href="/sdk/hosts" class="' + navClass('sdk/hosts', route) + '"><i class="bi bi-hdd-stack-fill text-lg w-6 text-center"></i> Host Packages</a>'
     + '<a href="/sdk/logs" class="' + navClass('sdk/logs', route) + '"><i class="bi bi-activity text-lg w-6 text-center"></i> Security Logs</a>'
     + '<a href="/sdk/settings" class="' + navClass('sdk/settings', route) + '"><i class="bi bi-sliders text-lg w-6 text-center"></i> MAK Settings</a>'
     + sideLabel('System')
@@ -344,7 +342,7 @@ export function layout(o) {
     + '<div class="absolute right-0 mt-3 w-52 rounded-xl overflow-hidden bg-white border border-slate-200 shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all"><div class="p-3"><a href="/logout" class="flex items-center gap-3 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 rounded-xl font-medium"><i class="bi bi-box-arrow-right"></i> Sign Out</a></div></div>'
     + '</div></div></div></header>'
     + '<main class="p-4 md:p-8 pb-20 relative z-10"><div class="mx-auto w-full max-w-6xl">' + content + '</div></main></div>'
-    + PAL_SHELL + '<script>window.PGS=[["Back to main panel","/dashboard","bi-arrow-left-short"],["MAK dashboard","/sdk","bi-speedometer2"],["Generate MAK","/sdk/generate","bi-key-fill"],["MAK keys","/sdk/keys","bi-view-list"],["Guest apps","/sdk/guests","bi-app-indicator"],["Hosts","/sdk/hosts","bi-hdd-stack-fill"],["Devices","/sdk/devices","bi-phone-fill"],["Sessions","/sdk/sessions","bi-broadcast-pin"],["Security logs","/sdk/logs","bi-activity"],["MAK settings","/sdk/settings","bi-sliders"],["MAK server","/sdk/server","bi-hdd-network-fill"],["Hash vault","/sdk/hash","bi-fingerprint"]];</script>'
+    + PAL_SHELL + '<script>window.PGS=[["Back to main panel","/dashboard","bi-arrow-left-short"],["MAK dashboard","/sdk","bi-speedometer2"],["Generate MAK","/sdk/generate","bi-key-fill"],["MAK keys","/sdk/keys","bi-view-list"],["Guest apps","/sdk/guests","bi-app-indicator"],["Host packages","/sdk/hosts","bi-hdd-stack-fill"],["Security logs","/sdk/logs","bi-activity"],["MAK settings","/sdk/settings","bi-sliders"],["MAK server","/sdk/server","bi-hdd-network-fill"],["Hash vault","/sdk/hash","bi-fingerprint"]];</script>'
     + '<script>' + BASE_JS + '</script>' + (o.extraScript || '') + '</body></html>';
 }
 

@@ -72,7 +72,18 @@ export async function listLicenses(db, { q = '', status = 'ALL' } = {}) {
                       (SELECT cert_sha256 FROM mak_hosts WHERE license_id=l.id ORDER BY id LIMIT 1) AS host_cert_sha256,
                       (SELECT COUNT(*) FROM mak_hosts hm WHERE hm.license_id=l.id) AS package_count,
                       (SELECT COUNT(*) FROM mak_devices d WHERE d.license_id=l.id AND d.status='ACTIVE') AS device_count,
-                      (SELECT COUNT(*) FROM mak_bindings b WHERE b.license_id=l.id AND b.status='ACTIVE') AS guest_count
+                      (SELECT COUNT(*) FROM mak_bindings b WHERE b.license_id=l.id AND b.status='ACTIVE') AS guest_count,
+                      COALESCE(
+                        (SELECT MAX((CASE WHEN h.app_name<>'' THEN 1 ELSE 0 END) +
+                           (SELECT COUNT(DISTINCT COALESCE(NULLIF(g.app_name,''), g.package_name))
+                              FROM mak_bindings b JOIN mak_guest_apps g ON g.id=b.guest_app_id
+                             WHERE b.license_id=l.id AND b.status='ACTIVE'
+                               AND (b.host_id=h.id OR b.host_id=0)))
+                           FROM mak_hosts h WHERE h.license_id=l.id),
+                        (SELECT COUNT(DISTINCT COALESCE(NULLIF(g.app_name,''), g.package_name))
+                           FROM mak_bindings b JOIN mak_guest_apps g ON g.id=b.guest_app_id
+                          WHERE b.license_id=l.id AND b.status='ACTIVE')
+                      ) AS app_count
                  FROM mak_licenses l
                  ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
                 ORDER BY l.id DESC LIMIT 300`;
@@ -109,11 +120,14 @@ export async function createLicenseRecord(db, input) {
   if (!id) throw new Error('license insert did not return id');
 
   const stmts = [];
-  if (input.host?.package_name && input.host?.cert_sha256) {
+  if (input.host?.package_name) {
+    // Signature Bind OFF allows a package pin without a certificate. Store an
+    // empty string instead of dropping the host row; the protocol skips cert
+    // checks when signature_bind is off.
     stmts.push(db.prepare(
       `INSERT INTO mak_hosts (license_id,package_name,app_name,cert_sha256,status,version_policy,created_at,updated_at)
        VALUES (?,?,?,?,'ACTIVE','ANY',?,?)`,
-    ).bind(id, input.host.package_name, input.host.app_name || '', input.host.cert_sha256, now, now));
+    ).bind(id, input.host.package_name, input.host.app_name || '', input.host.cert_sha256 || '', now, now));
   }
   for (const guestId of input.guest_ids || []) {
     // Admin-selected guests are license-wide (host_id=0), so every host package
@@ -808,6 +822,8 @@ export async function dashboardStats(db) {
       (SELECT COUNT(*) FROM mak_devices WHERE status='ACTIVE') AS devices,
       (SELECT COUNT(*) FROM mak_devices WHERE status='ACTIVE' AND last_seen>=?) AS devices_online,
       (SELECT COUNT(*) FROM mak_guest_apps WHERE status='ACTIVE') AS guests,
+      (SELECT COUNT(*) FROM mak_hosts WHERE status='ACTIVE') AS hosts,
+      (SELECT COUNT(*) FROM mak_grants WHERE status='ACTIVE') AS grants,
       (SELECT COUNT(*) FROM mak_sessions WHERE status='ACTIVE' AND expires_at>?) AS sessions,
       (SELECT COUNT(*) FROM mak_licenses WHERE created_at>=?) AS new_licenses,
       (SELECT SUM(activation_count) FROM mak_licenses) AS activations`,
@@ -817,6 +833,8 @@ export async function dashboardStats(db) {
     devices: Number(row?.devices || 0),
     devices_online: Number(row?.devices_online || 0),
     guests: Number(row?.guests || 0),
+    hosts: Number(row?.hosts || 0),
+    grants: Number(row?.grants || 0),
     sessions: Number(row?.sessions || 0),
     new_licenses: Number(row?.new_licenses || 0),
     activations: Number(row?.activations || 0),
