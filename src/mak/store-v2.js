@@ -25,47 +25,49 @@ export async function countActiveGrants(db, licenseId, hostId) {
   return Number(row?.c || 0);
 }
 
-// Atomic seat allocation: the insert only happens while the active grant count
-// for this host is below max_installs. D1 serialises writes, so two concurrent
-// activations cannot both take the last seat.
+// One host identity = one reusable grant. Seats are intentionally not
+// enforced: the same signed host APK may activate on any number of devices.
+// The four-field identity (MAK + package + app name + cert) is the boundary.
 export async function createGrantAtomic(db, input) {
   const now = nowS();
+  const grantId = String(input.grant_id);
+  const licenseId = Number(input.license_id);
+  const hostId = Number(input.host_id);
+  const packageName = String(input.package_name || '');
+  const certSha = String(input.cert_sha256 || '');
   const row = await db.prepare(
     `INSERT INTO mak_grants
        (grant_id,license_id,host_id,package_name,app_name,cert_sha256,status,epoch,created_at)
      SELECT ?,?,?,?,?,?,'ACTIVE',?,?
-      WHERE (SELECT COUNT(*) FROM mak_grants
-              WHERE license_id=? AND host_id=? AND status='ACTIVE') < ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM mak_grants
+         WHERE license_id=? AND host_id=? AND package_name=? AND cert_sha256=?
+           AND status='ACTIVE'
+      )
      RETURNING *`,
   ).bind(
-    String(input.grant_id),
-    Number(input.license_id),
-    Number(input.host_id),
-    String(input.package_name || ''),
-    String(input.app_name || ''),
-    String(input.cert_sha256 || ''),
-    Number(input.epoch) || 1,
-    now,
-    Number(input.license_id),
-    Number(input.host_id),
-    Math.max(1, Number(input.max_installs) || 1),
+    grantId, licenseId, hostId, packageName,
+    String(input.app_name || ''), certSha,
+    Number(input.epoch) || 1, now,
+    licenseId, hostId, packageName, certSha,
   ).first().catch(() => null);
-  if (!row) return { ok: false, code: 'INSTALL_LIMIT_REACHED' };
-  return { ok: true, grant: row };
+  if (row) return { ok: true, grant: row };
+  const existing = await findReusableGrant(db, licenseId, hostId, packageName, certSha);
+  if (existing) return { ok: true, grant: existing };
+  return { ok: false, code: 'GRANT_CREATE_FAILED' };
 }
 
-// Idempotency window: a retried activation for the same host/package/cert
-// reuses the recent grant instead of burning another seat.
-export async function findRecentGrant(db, licenseId, hostId, packageName, certSha, windowSeconds = 300) {
+// Reuse the active grant for the same host identity. Every device with the
+// same signed APK shares it instead of consuming a per-device seat.
+export async function findReusableGrant(db, licenseId, hostId, packageName, certSha) {
   return db.prepare(
     `SELECT * FROM mak_grants
       WHERE license_id=? AND host_id=? AND package_name=? AND cert_sha256=?
-        AND status='ACTIVE' AND created_at>=?
+        AND status='ACTIVE'
       ORDER BY id DESC LIMIT 1`,
   ).bind(
     Number(licenseId) || 0, Number(hostId) || 0,
     String(packageName || ''), String(certSha || ''),
-    nowS() - Math.max(30, Number(windowSeconds) || 300),
   ).first().catch(() => null);
 }
 

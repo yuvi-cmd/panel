@@ -352,6 +352,20 @@ async function main() {
     env.__test.grant = res.body.grant;
   });
 
+  await test('same host identity reuses one grant on any number of devices', async () => {
+    const env = globalThis.__lastEnv;
+    const { credential, grant } = env.__test;
+    for (let i = 0; i < 5; i += 1) {
+      const res = await activate(env, credential);
+      assert.equal(res.body.decision, 'ALLOW', JSON.stringify(res.body));
+      assert.equal(res.body.grant.grant_id, grant.grant_id);
+    }
+    const active = await env.DB.prepare(
+      "SELECT COUNT(*) AS c FROM mak_grants WHERE license_id=? AND package_name=? AND status='ACTIVE'",
+    ).bind(env.__test.license.id, 'com.test.host').first();
+    assert.equal(Number(active.c), 1, 'one host identity = one active grant');
+  });
+
   await test('host verification issues a signed HostTicket', async () => {
     const env = globalThis.__lastEnv;
     const { credential, grant } = env.__test;

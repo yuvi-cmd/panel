@@ -41,7 +41,7 @@ import {
   createGuestV2,
   findGuestByPackageAny,
   findGuestByPackageCert,
-  findRecentGrant,
+  findReusableGrant,
   getGrantById,
   revokeGrant,
   setGuestCert,
@@ -339,8 +339,11 @@ export async function handleMakV2(request, env, db) {
         });
       }
 
-      // Reuse a just-created grant on retry instead of burning a seat.
-      let grant = await findRecentGrant(db, license.id, host.id, packageName, signatureBind ? cert : '');
+      // No device seats: every device that presents the same four-field host
+      // identity shares one active grant. This makes the same signed APK work
+      // on any number of devices while still binding it to MAK + package +
+      // app name + signing certificate.
+      let grant = await findReusableGrant(db, license.id, host.id, packageName, signatureBind ? cert : '');
       if (!grant) {
         const created = await createGrantAtomic(db, {
           grant_id: generateGrantId(),
@@ -350,9 +353,8 @@ export async function handleMakV2(request, env, db) {
           app_name: appName || host.app_name || '',
           cert_sha256: signatureBind ? cert : '',
           epoch: Number(license.epoch || 1),
-          max_installs: license.max_installs,
         });
-        if (!created.ok) throw new HttpError(403, 'INSTALL_LIMIT_REACHED', 'Seat limit reached for this host package');
+        if (!created.ok) throw new HttpError(503, 'GRANT_CREATE_FAILED', 'Could not create host grant');
         grant = created.grant;
       }
 
