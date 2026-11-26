@@ -235,6 +235,7 @@ async function issueLicense(env, cookie, token, data = {}) {
     max_activations: '1',
     session_ttl: '3600',
     max_packages: '2',
+    guest_app_limit: '',
     max_apps: '2',
     max_installs: '3',
     signature_bind: '1',
@@ -308,6 +309,7 @@ async function main() {
     assert.match(newHtml, /Custom MAK key/);
     assert.match(newHtml, /Signature Bind/);
     assert.match(newHtml, /name="max_packages"/);
+    assert.match(newHtml, /name="guest_app_limit"[^>]*placeholder="Unlimited"/);
     assert.doesNotMatch(newHtml, /name="max_apps"/);
     assert.doesNotMatch(newHtml, /name="max_installs"/);
     assert.match(newHtml, /name="guest_cert"/);
@@ -317,6 +319,7 @@ async function main() {
     assert.ok(issued.mak, 'raw MAK appears on the reveal page');
     const license = await env.DB.prepare('SELECT * FROM mak_licenses ORDER BY id DESC LIMIT 1').first();
     assert.equal(license.max_packages, 2);
+    assert.equal(license.guest_app_limit, null);
     assert.equal(license.max_apps, 2);
     assert.equal(license.max_installs, 3);
     assert.equal(license.signature_bind, 1);
@@ -340,8 +343,9 @@ async function main() {
     assert.equal(res.body.grant.app_name, 'Test Host');
     assert.equal(res.body.grant.cert_sha256, 'c'.repeat(64));
     assert.equal(res.body.grant.signature_bind, true);
-    assert.equal(res.body.grant.max_apps, undefined, 'quantity cap is not part of the signed grant');
-    assert.equal(res.body.grant.max_installs, undefined, 'install cap is not part of the signed grant');
+    assert.equal(res.body.grant.max_apps, undefined, 'legacy quantity cap is not part of the signed grant');
+    assert.equal(res.body.grant.max_installs, undefined, 'legacy install cap is not part of the signed grant');
+    assert.equal(res.body.grant.guest_app_limit, null, 'blank guest limit means unlimited');
     assert.ok(res.body.grant.expires_at > nowS() + 29 * 86400);
     env.__test.grant = res.body.grant;
   });
@@ -412,6 +416,54 @@ async function main() {
         WHERE b.license_id=? AND b.status='ACTIVE'`,
     ).bind(env.__test.license.id).first();
     assert.equal(Number(bound.c), 6, 'no installed-app quota is enforced');
+  });
+
+  await test('optional guest app limit caps distinct packages only when set', async () => {
+    const env = globalThis.__lastEnv;
+    const { cookie, token } = env.__test;
+    const issued = await issueLicense(env, cookie, token, {
+      label: 'Limited License', guest_app_limit: '2', max_packages: '2',
+      host_package: 'com.limit.host', host_app_name: 'Limit Host', host_cert: '7'.repeat(64),
+    });
+    assert.equal(issued.res.status, 200, issued.html.slice(0, 500));
+    const license = await env.DB.prepare('SELECT * FROM mak_licenses ORDER BY id DESC LIMIT 1').first();
+    assert.equal(Number(license.guest_app_limit), 2);
+
+    const act = await activate(env, issued.mak, {
+      hostPackage: 'com.limit.host', hostCert: '7'.repeat(64), appName: 'Limit Host',
+    });
+    assert.equal(act.body.decision, 'ALLOW', JSON.stringify(act.body));
+    assert.equal(Number(act.body.grant.guest_app_limit), 2);
+    const grantId = act.body.grant.grant_id;
+
+    const checkGuest = (guestPackage, guestAppName, cert, apkHash, versionCode = 1) => guestCheck(env, issued.mak, grantId, {
+      hostPackage: 'com.limit.host', hostAppName: 'Limit Host', hostCert: '7'.repeat(64),
+      guestPackage, guestAppName, guestCert: cert, apkHash, versionCode,
+    });
+
+    assert.equal((await checkGuest('com.limit.one', 'One', '1'.repeat(64), 'a'.repeat(64))).body.decision, 'ALLOW');
+    const updated = await checkGuest('com.limit.one', 'One', '1'.repeat(64), 'b'.repeat(64), 2);
+    assert.equal(updated.body.decision, 'ALLOW', 'same package new version does not consume a slot');
+    assert.equal((await checkGuest('com.limit.two', 'Two', '2'.repeat(64), 'c'.repeat(64))).body.decision, 'ALLOW');
+
+    const third = await checkGuest('com.limit.three', 'Three', '3'.repeat(64), 'd'.repeat(64));
+    assert.equal(third.body.decision, 'DENY');
+    assert.equal(third.body.code, 'APP_LIMIT_REACHED');
+
+    // The cap is per host package: another host package gets its own slots.
+    const second = await activate(env, issued.mak, {
+      hostPackage: 'com.limit.host2', hostCert: '8'.repeat(64), appName: 'Limit Host Two',
+    });
+    assert.equal(second.body.decision, 'ALLOW', JSON.stringify(second.body));
+    const checkSecondHost = (guestPackage, guestAppName, cert, apkHash) => guestCheck(env, issued.mak, second.body.grant.grant_id, {
+      hostPackage: 'com.limit.host2', hostAppName: 'Limit Host Two', hostCert: '8'.repeat(64),
+      guestPackage, guestAppName, guestCert: cert, apkHash,
+    });
+    assert.equal((await checkSecondHost('com.limit.three', 'Three', '3'.repeat(64), 'd'.repeat(64))).body.decision, 'ALLOW');
+    assert.equal((await checkSecondHost('com.limit.four', 'Four', '4'.repeat(64), 'e'.repeat(64))).body.decision, 'ALLOW');
+    const fifth = await checkSecondHost('com.limit.five', 'Five', '5'.repeat(64), 'f'.repeat(64));
+    assert.equal(fifth.body.decision, 'DENY');
+    assert.equal(fifth.body.code, 'APP_LIMIT_REACHED');
   });
 
   await test('host app name is part of the signed host identity', async () => {
@@ -625,11 +677,32 @@ async function main() {
     assert.equal(Number(extended.duration_days), beforeDays + 7, 'reserved duration extended by 7 days');
     assert.equal(extended.expires_at, null, 'expiry is not written before the first app bind');
 
-    assert.equal((await action({ action: 'extend_limits', max_packages: '3', max_apps: '99', max_installs: '99' })).status, 303);
+    assert.equal((await action({ action: 'extend_limits', max_packages: '3', max_apps: '99', max_installs: '99', guest_app_limit: '' })).status, 303);
     const raised = await env.DB.prepare('SELECT * FROM mak_licenses WHERE id=?').bind(license.id).first();
     assert.equal(Number(raised.max_packages), 3);
-    assert.equal(Number(raised.max_apps), 2, 'guest app count cap is ignored');
-    assert.equal(Number(raised.max_installs), 3, 'install seat cap is ignored');
+    assert.equal(raised.guest_app_limit, null, 'blank guest limit means unlimited');
+    assert.equal(Number(raised.max_apps), 2, 'legacy guest cap is ignored');
+    assert.equal(Number(raised.max_installs), 3, 'legacy install seat cap is ignored');
+
+    assert.equal((await action({ action: 'extend_limits', max_packages: '3', guest_app_limit: '5' })).status, 303);
+    const limited = await env.DB.prepare('SELECT * FROM mak_licenses WHERE id=?').bind(license.id).first();
+    assert.equal(Number(limited.guest_app_limit), 5, 'guest limit can be set explicitly');
+    const limitedPage = await call(env, '/sdk/keys?q=' + encodeURIComponent(license.license_uid), { cookie });
+    const limitedHtml = await limitedPage.text();
+    assert.match(limitedHtml, /GUEST APPS<\/p><p class="text-xs font-black">0 \/ 5<\/p>/, 'keys page shows the explicit guest limit');
+    assert.match(limitedHtml, /Guest apps<\/p><p[^>]*>0 \/ 5 per package<\/p>/);
+
+    // Legacy callers that only post max_packages must not wipe the limit.
+    assert.equal((await action({ action: 'extend_limits', max_packages: '3' })).status, 303);
+    const kept = await env.DB.prepare('SELECT * FROM mak_licenses WHERE id=?').bind(license.id).first();
+    assert.equal(Number(kept.guest_app_limit), 5, 'omitted field keeps the stored guest limit');
+
+    assert.equal((await action({ action: 'extend_limits', max_packages: '3', guest_app_limit: '' })).status, 303);
+    const cleared = await env.DB.prepare('SELECT * FROM mak_licenses WHERE id=?').bind(license.id).first();
+    assert.equal(cleared.guest_app_limit, null, 'blank clears the guest limit back to unlimited');
+    const unlimitedPage = await call(env, '/sdk/keys?q=' + encodeURIComponent(license.license_uid), { cookie });
+    const unlimitedHtml = await unlimitedPage.text();
+    assert.match(unlimitedHtml, /GUEST APPS<\/p><p class="text-xs font-black">UNLIMITED<\/p>/);
 
     assert.equal((await action({ action: 'host_save', host_package: 'com.quick.host', host_app_name: 'Quick', host_cert: '' })).status, 303);
     const host = await env.DB.prepare('SELECT * FROM mak_hosts WHERE license_id=? ORDER BY id DESC LIMIT 1').bind(license.id).first();

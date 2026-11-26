@@ -8,6 +8,7 @@ export async function getGrantById(db, grantId) {
     `SELECT g.*,
             l.status AS license_status, l.expires_at AS license_expires_at,
             l.epoch AS license_epoch, l.signature_bind,
+            l.guest_app_limit,
             l.host_bind_mode, l.label AS license_label,
             h.status AS host_status, h.package_name AS host_package,
             h.app_name AS host_app_name, h.cert_sha256 AS host_cert

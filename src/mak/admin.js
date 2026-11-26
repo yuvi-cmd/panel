@@ -16,7 +16,7 @@ import {
   clientIp, flashRedirect, formAll, html, sameOrigin, text,
 } from './http.js';
 import {
-  activeLicenseOptions, bindGuestAtomic, createGuest, dashboardStats,
+  activeLicenseOptions, bindGuestAtomic, maxGuestPackageCount, createGuest, dashboardStats,
   deleteBinding, deleteDevice, deleteGuestApp, deleteHostCascade, deleteLicense, deviceCounts, eventCounts, expiringLicenses,
   getDeviceById, getGuestById, getHostById, getHostForLicense, getHostsForLicense, getLicenseById, getSession,
   guestCounts, guestEvents, hostCounts, licenseCounts, listAllActiveGuests,
@@ -279,6 +279,7 @@ export async function handleMakAdmin(request, env, db, options = {}) {
       max_activations: String(sp.get('max_activations') || '1'),
       session_ttl: String(sp.get('session_ttl') || '3600'),
       max_packages: String(sp.get('max_packages') || '1'),
+      guest_app_limit: String(sp.get('guest_app_limit') ?? ''),
       signature_bind: String(sp.get('signature_bind') ?? '1'),
       host_package: String(sp.get('host_package') || ''),
       host_app_name: String(sp.get('host_app_name') || ''),
@@ -390,6 +391,12 @@ export async function handleMakAdmin(request, env, db, options = {}) {
         if (Number(parsed.policy.max_packages) < boundHosts) {
           return fail('Max host packages cannot be lower than the ' + boundHosts + ' package(s) already bound.');
         }
+        if (parsed.policy.guest_app_limit != null) {
+          const boundGuests = await maxGuestPackageCount(db, id);
+          if (Number(parsed.policy.guest_app_limit) < boundGuests) {
+            return fail('Guest app limit cannot be lower than the ' + boundGuests + ' guest package(s) already bound.');
+          }
+        }
         if (Number(parsed.policy.duration_days) > 0 && license.started_at) {
           parsed.policy.expires_at = Number(license.started_at) + Number(parsed.policy.duration_days) * 86400;
         }
@@ -421,10 +428,28 @@ export async function handleMakAdmin(request, env, db, options = {}) {
         const maxPackages = clampInt(sp.get('max_packages'), 1, 100, Number(license.max_packages || 1));
         if (!maxPackages) return fail('Limit must be between 1 and 100.');
         if (maxPackages < hosts.length) return fail('Package limit cannot be lower than the ' + hosts.length + ' package(s) already saved.');
-        await updateLicenseQuota(db, id, { max_packages: maxPackages });
+        const guestProvided = typeof sp.has === 'function' && sp.has('guest_app_limit');
+        const guestRaw = String(sp.get('guest_app_limit') ?? '').trim().toLowerCase();
+        let guestLimit = null;
+        if (guestProvided && guestRaw && !['unlimited', 'none', '0'].includes(guestRaw)) {
+          guestLimit = clampInt(guestRaw, 1, 1000, 0);
+          if (!guestLimit) return fail('Guest app limit must be blank (unlimited) or between 1 and 1000.');
+        }
+        if (guestProvided && guestLimit != null) {
+          const boundGuests = await maxGuestPackageCount(db, id);
+          if (guestLimit < boundGuests) {
+            return fail('Guest app limit cannot be lower than the ' + boundGuests + ' guest package(s) already bound to a host.');
+          }
+        }
+        const quota = { max_packages: maxPackages };
+        // Omitted field = keep the stored limit (legacy callers); blank is an
+        // explicit request for unlimited.
+        if (guestProvided) quota.guest_app_limit = guestLimit;
+        await updateLicenseQuota(db, id, quota);
         await logEvent(db, {
           license_id: id, event_type: 'LIMITS_EXTENDED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash,
-          detail: 'Host package limit set to ' + maxPackages + '; guest apps have no count limit',
+          detail: 'Host package limit set to ' + maxPackages + '; guest app limit '
+            + (guestProvided ? (guestLimit == null ? 'set to unlimited' : 'set to ' + guestLimit) : 'unchanged'),
         });
         return done('Limits updated.');
       }
@@ -507,8 +532,8 @@ export async function handleMakAdmin(request, env, db, options = {}) {
         const guestId = Number(sp.get('guest_id') || 0);
         const guest = await getGuestById(db, guestId);
         if (!guest) return fail('Choose an approved guest app.');
-        const bound = await bindGuestAtomic(db, id, 0, guestId, guest.package_name, permissionsFrom(sp));
-        if (!bound.ok) return fail('Could not bind guest app.');
+        const bound = await bindGuestAtomic(db, id, 0, guestId, guest.package_name, permissionsFrom(sp), license.guest_app_limit);
+        if (!bound.ok) return fail(bound.code === 'APP_LIMIT_REACHED' ? 'Guest app limit reached. Raise the limit or remove a binding.' : 'Could not bind guest app.');
         await logEvent(db, { license_id: id, guest_app_id: guestId, event_type: 'BINDING_ADDED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Guest bound to license' });
         return done('Guest app bound.');
       }
@@ -647,8 +672,8 @@ export async function handleMakAdmin(request, env, db, options = {}) {
         const licenseId = Number(sp.get('license_id') || 0);
         const license = await getLicenseById(db, licenseId);
         if (!license) return fail('Choose a license.');
-        const bound = await bindGuestAtomic(db, licenseId, 0, id, guest.package_name, permissionsFrom(sp));
-        if (!bound.ok) return fail('Could not bind guest app.');
+        const bound = await bindGuestAtomic(db, licenseId, 0, id, guest.package_name, permissionsFrom(sp), license.guest_app_limit);
+        if (!bound.ok) return fail(bound.code === 'APP_LIMIT_REACHED' ? 'Guest app limit reached. Raise the limit or remove a binding.' : 'Could not bind guest app.');
         await logEvent(db, { license_id: licenseId, guest_app_id: id, event_type: 'BINDING_ADDED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Guest bound to license' });
         return done('Guest bound to license.');
       }

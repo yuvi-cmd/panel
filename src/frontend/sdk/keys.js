@@ -70,6 +70,8 @@ export function keysPage(o) {
     const pkgCount = Number(l.package_count || 0);
     const hosts = hostsByLicense.get(id) || [];
     const maxPackages = Number(l.max_packages || 1);
+    const guestLimit = l.guest_app_limit == null || l.guest_app_limit === '' ? 0 : Number(l.guest_app_limit);
+    const guestPackages = Number(l.guest_package_count || 0);
 
     const hostList = hosts.length ? hosts.map((h) => {
       const blocked = String(h.status || '').toUpperCase() !== 'ACTIVE';
@@ -101,7 +103,9 @@ export function keysPage(o) {
       + infoRow('Signature', Number(l.signature_bind ?? 1) ? 'Verify cert' : 'Package + app name')
       + infoRow('Expiry', esc(expiryLabel(l)))
       + infoRow('Package limit', pkgCount + ' / ' + maxPackages + ' used')
-      + infoRow('Guest apps', 'Unlimited · identity checked')
+      + infoRow('Guest apps', guestLimit
+        ? guestPackages + ' / ' + guestLimit + ' per package'
+        : 'Unlimited · identity checked')
       + infoRow('User ref', l.user_ref ? esc(l.user_ref) : '—')
       + '</div>'
       + '<div class="grid md:grid-cols-2 gap-3 mt-3">'
@@ -112,8 +116,9 @@ export function keysPage(o) {
         + '</select><button class="btn-premium px-3 py-2 rounded-xl text-[11px] font-extrabold">Extend</button></div>')
       + actionForm(csrf, id, '<p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-2">Extend limits</p>'
         + '<input type="hidden" name="action" value="extend_limits">'
-        + '<div class="grid grid-cols-2 gap-2 items-end">'
+        + '<div class="grid grid-cols-3 gap-2 items-end">'
         + '<div><p class="text-[9px] text-slate-400 font-bold mb-1">HOST PACKAGES</p><input type="number" name="max_packages" min="1" max="100" value="' + maxPackages + '" class="w-full clay-card px-2 py-2 text-xs rounded-lg"></div>'
+        + '<div><p class="text-[9px] text-slate-400 font-bold mb-1">GUEST LIMIT</p><input type="number" name="guest_app_limit" min="1" max="1000" placeholder="Unlimited" value="' + (guestLimit || '') + '" class="w-full clay-card px-2 py-2 text-xs rounded-lg"></div>'
         + '<button class="btn-premium px-2 py-2 rounded-lg text-[10px] font-extrabold">Save</button>'
         + '</div>')
       + '</div>'
@@ -159,7 +164,7 @@ export function keysPage(o) {
       + secretBox
       + '<div class="grid grid-cols-3 gap-2 mt-4">'
       + '<div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">PACKAGES</p><p class="text-xs font-black">' + pkgCount + ' / ' + maxPackages + '</p></div>'
-      + '<div class="clay-card p-2 text-center rounded-xl" title="Guest apps are unlimited; the signed package + app name + certificate identity is still enforced"><p class="text-[10px] text-slate-400 font-bold">GUEST APPS</p><p class="text-xs font-black">UNLIMITED</p></div>'
+      + '<div class="clay-card p-2 text-center rounded-xl" title="' + (guestLimit ? 'Distinct guest packages bound under this MAK, compared with the configured per-package limit' : 'Guest apps are unlimited; the signed package + app name + certificate identity is still enforced') + '"><p class="text-[10px] text-slate-400 font-bold">GUEST APPS</p><p class="text-xs font-black">' + (guestLimit ? guestPackages + ' / ' + guestLimit : 'UNLIMITED') + '</p></div>'
       + '<div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">ACTIVATIONS</p><p class="text-xs font-black">' + Number(l.activation_count || 0) + ' / ' + Number(l.max_activations || 0) + '</p></div></div>'
       + details + '</div>';
   }).join('') : '<div class="glass-card p-10 text-center"><i class="bi bi-inbox text-5xl text-slate-300 mb-3"></i><p class="text-slate-500 text-sm">No MAK licenses found</p><a href="/sdk/generate" class="inline-block mt-3 btn-premium px-6 py-2.5 rounded-xl text-xs font-bold">Generate MAK</a></div>';

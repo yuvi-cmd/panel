@@ -196,6 +196,7 @@ function grantPayload(grant) {
     app_name: grant.app_name || '',
     cert_sha256: grant.cert_sha256 || '',
     signature_bind: !!grant.signature_bind,
+    guest_app_limit: grant.guest_app_limit == null ? null : Number(grant.guest_app_limit),
     features: OPS.slice(),
     expires_at: grant.expires_at || null,
     epoch: Number(grant.epoch || 1),
@@ -393,7 +394,10 @@ export async function handleMakV2(request, env, db) {
       });
 
       const grantOut = signPayload({
-        ...grantPayload(grant),
+        ...grantPayload({
+          ...grant,
+          guest_app_limit: license.guest_app_limit == null ? null : Number(license.guest_app_limit),
+        }),
         license_uid: license.license_uid,
         signature_bind: signatureBind,
         expires_at: license.expires_at || null,
@@ -552,14 +556,20 @@ export async function handleMakV2(request, env, db) {
       let binding = await getBinding(db, license.id, guest.id, grant.host_id);
       if (!binding) {
         if (mode === 'MANUAL') throw new HttpError(403, 'GUEST_PACKAGE_MISMATCH', 'Guest app is not bound to this host');
-        // Unlimited guest bindings: MAK/2 no longer enforces max_apps or any
-        // per-package installed-app count. The signed host/guest identity is
-        // still verified, only the arbitrary quantity cap is gone.
+        // Guest app count is unlimited unless this MAK was issued with an
+        // explicit guest_app_limit. The signed host/guest identity is still
+        // verified either way.
         const bound = await bindGuestAtomic(
           db, license.id, grant.host_id, guest.id, guest.package_name,
           { launch: true, install: true, update: true, restart: true },
+          grant.guest_app_limit,
         );
-        if (!bound.ok) throw new HttpError(403, 'GUEST_PACKAGE_MISMATCH', 'Could not bind guest app');
+        if (!bound.ok) {
+          if (bound.code === 'APP_LIMIT_REACHED') {
+            throw new HttpError(403, 'APP_LIMIT_REACHED', 'Guest app limit reached for this MAK');
+          }
+          throw new HttpError(403, 'GUEST_PACKAGE_MISMATCH', 'Could not bind guest app');
+        }
         binding = bound.binding;
       }
       if (String(binding.status || '').toUpperCase() !== 'ACTIVE') {

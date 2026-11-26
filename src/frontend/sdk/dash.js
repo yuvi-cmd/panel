@@ -156,6 +156,7 @@ export function generatePage(o) {
     + '<div id="mak-custom-expiry" style="display:' + (String(values.duration || '30') === 'custom' ? 'block' : 'none') + '"><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Custom expiry date</label><input type="date" name="expires_on" value="' + esc(values.expires_on || o.defaultExpiry || '') + '" class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'
     + '<div class="grid grid-cols-2 gap-3">'
     + field('Package limit', '<input type="number" name="max_packages" id="mak-max-packages" min="1" max="100" value="' + esc(values.max_packages || 1) + '" required class="w-full clay-card px-4 py-3 text-sm rounded-2xl">', 'Kitne host packages is MAK par bind honge.')
+    + field('Guest app limit', '<input type="number" name="guest_app_limit" id="mak-guest-limit" min="1" max="1000" placeholder="Unlimited" value="' + esc(values.guest_app_limit || '') + '" class="w-full clay-card px-4 py-3 text-sm rounded-2xl">', 'Blank = unlimited. Set karne par har host package ke distinct guest apps is limit tak rahenge.')
     + '</div>'
     + '<input type="hidden" name="host_bind_mode" id="mak-bind-mode" value="' + (manualBind ? 'MANUAL' : 'AUTO') + '">'
     + '</div>'

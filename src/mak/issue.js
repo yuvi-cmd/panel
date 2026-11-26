@@ -101,6 +101,16 @@ export function parseLicensePolicy(sp, opts = {}) {
   const maxActivations = clampInt(sp.get('max_activations'), 1, 1000, 1);
   const sessionTtl = clampInt(sp.get('session_ttl'), 300, 86400, 3600);
   const maxPackages = clampInt(sp.get('max_packages'), 1, 100, 1);
+  const guestLimitRaw = String(sp.get('guest_app_limit') ?? '').trim().toLowerCase();
+  const guestLimitProvided = typeof sp.has === 'function' && sp.has('guest_app_limit');
+  let guestAppLimit = null;
+  if (guestLimitProvided && guestLimitRaw && !['unlimited', 'none', '0'].includes(guestLimitRaw)) {
+    const parsedLimit = Number(guestLimitRaw);
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 1000) {
+      return { error: 'Guest app limit must be blank (unlimited) or a whole number between 1 and 1000.' };
+    }
+    guestAppLimit = parsedLimit;
+  }
   if (!maxDevices || !maxActivations || !sessionTtl || !maxPackages) {
     return { error: 'One or more limits are outside the allowed range.' };
   }
@@ -139,6 +149,9 @@ export function parseLicensePolicy(sp, opts = {}) {
     signature_bind: signatureBind ? 1 : 0,
     host_bind_mode: hostBindMode,
   };
+  // Omitted field keeps the stored value (legacy callers); blank means
+  // explicitly unlimited.
+  if (guestLimitProvided) policy.guest_app_limit = guestAppLimit;
 
   return { policy, host, guests: guestRows.rows, guestIds };
 }
@@ -163,6 +176,18 @@ export async function issueMak(db, sp, createdBy) {
   const guests = await listAllActiveGuests(db);
   const validGuestIds = new Set(guests.map((g) => Number(g.id)));
   const guestIds = parsed.guestIds.filter((id) => validGuestIds.has(id));
+  const limit = parsed.policy.guest_app_limit;
+  if (limit != null) {
+    const prebound = new Set(parsed.guests.map((g) => g.package_name));
+    for (const g of guests) {
+      if (guestIds.includes(Number(g.id))) prebound.add(g.package_name);
+    }
+    if (prebound.size > limit) {
+      return {
+        error: 'This MAK allows ' + limit + ' guest app(s) per host package; reduce the pre-bound guest rows or leave the guest limit blank for unlimited.',
+      };
+    }
+  }
 
   const licenseUid = generateLicenseUid();
   let licenseId;
@@ -202,6 +227,7 @@ export async function issueMak(db, sp, createdBy) {
       const bound = await bindGuestAtomic(
         db, licenseId, hostId, guest.id, row.package_name,
         { install: true, launch: true, update: true, restart: true },
+        limit,
       );
       if (!bound.ok) return { error: 'Could not bind pre-registered guest ' + row.package_name + '.' };
     }

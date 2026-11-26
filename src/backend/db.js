@@ -195,6 +195,7 @@ async function migrateMakSchema(db) {
   // New policy columns.
   await addMakColumn(db, 'mak_licenses', 'credential_plain', "TEXT NOT NULL DEFAULT ''");
   await addMakColumn(db, 'mak_licenses', 'max_packages', 'INTEGER NOT NULL DEFAULT 1');
+  await addMakColumn(db, 'mak_licenses', 'guest_app_limit', 'INTEGER DEFAULT NULL');
   await addMakColumn(db, 'mak_licenses', 'max_apps', 'INTEGER NOT NULL DEFAULT 2');
   await addMakColumn(db, 'mak_licenses', 'max_installs', 'INTEGER NOT NULL DEFAULT 3');
   await addMakColumn(db, 'mak_licenses', 'signature_bind', 'INTEGER NOT NULL DEFAULT 1');
