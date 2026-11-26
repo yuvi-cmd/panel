@@ -562,11 +562,11 @@ export async function handleMakV2(request, env, db) {
         const bound = await bindGuestAtomic(
           db, license.id, grant.host_id, guest.id, guest.package_name,
           { launch: true, install: true, update: true, restart: true },
-          grant.guest_app_limit,
+          grant.guest_app_limit, guestAppName,
         );
         if (!bound.ok) {
           if (bound.code === 'APP_LIMIT_REACHED') {
-            throw new HttpError(403, 'APP_LIMIT_REACHED', 'Guest app limit reached for this MAK');
+            throw new HttpError(403, 'APP_LIMIT_REACHED', 'Cloned app limit reached for this MAK');
           }
           throw new HttpError(403, 'GUEST_PACKAGE_MISMATCH', 'Could not bind guest app');
         }

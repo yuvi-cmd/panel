@@ -450,6 +450,12 @@ async function main() {
     assert.equal(third.body.decision, 'DENY');
     assert.equal(third.body.code, 'APP_LIMIT_REACHED');
 
+    // Same package with a different app name is a different cloned app, so it
+    // must consume a slot too (package-only counting would let it through).
+    const renamed = await checkGuest('com.limit.one', 'One Renamed', '9'.repeat(64), '9'.repeat(64));
+    assert.equal(renamed.body.decision, 'DENY');
+    assert.equal(renamed.body.code, 'APP_LIMIT_REACHED');
+
     // The cap is per host package: another host package gets its own slots.
     const second = await activate(env, issued.mak, {
       hostPackage: 'com.limit.host2', hostCert: '8'.repeat(64), appName: 'Limit Host Two',
@@ -689,8 +695,8 @@ async function main() {
     assert.equal(Number(limited.guest_app_limit), 5, 'guest limit can be set explicitly');
     const limitedPage = await call(env, '/sdk/keys?q=' + encodeURIComponent(license.license_uid), { cookie });
     const limitedHtml = await limitedPage.text();
-    assert.match(limitedHtml, /GUEST APPS<\/p><p class="text-xs font-black">0 \/ 5<\/p>/, 'keys page shows the explicit guest limit');
-    assert.match(limitedHtml, /Guest apps<\/p><p[^>]*>0 \/ 5 per package<\/p>/);
+    assert.match(limitedHtml, /CLONED APPS<\/p><p class="text-xs font-black">0 \/ 5<\/p>/, 'keys page shows the explicit cloned app limit');
+    assert.match(limitedHtml, /Cloned apps<\/p><p[^>]*>0 \/ 5 per host<\/p>/);
 
     // Legacy callers that only post max_packages must not wipe the limit.
     assert.equal((await action({ action: 'extend_limits', max_packages: '3' })).status, 303);
@@ -702,7 +708,7 @@ async function main() {
     assert.equal(cleared.guest_app_limit, null, 'blank clears the guest limit back to unlimited');
     const unlimitedPage = await call(env, '/sdk/keys?q=' + encodeURIComponent(license.license_uid), { cookie });
     const unlimitedHtml = await unlimitedPage.text();
-    assert.match(unlimitedHtml, /GUEST APPS<\/p><p class="text-xs font-black">UNLIMITED<\/p>/);
+    assert.match(unlimitedHtml, /CLONED APPS<\/p><p class="text-xs font-black">UNLIMITED<\/p>/);
 
     assert.equal((await action({ action: 'host_save', host_package: 'com.quick.host', host_app_name: 'Quick', host_cert: '' })).status, 303);
     const host = await env.DB.prepare('SELECT * FROM mak_hosts WHERE license_id=? ORDER BY id DESC LIMIT 1').bind(license.id).first();
@@ -802,7 +808,7 @@ async function main() {
     }
   });
 
-  await test('host app name is stored and guest apps show as unlimited', async () => {
+  await test('host app name is stored and cloned apps show as unlimited', async () => {
     const env = globalThis.__lastEnv;
     const { cookie, token } = env.__test;
     const issued = await issueLicense(env, cookie, token, {
@@ -817,8 +823,8 @@ async function main() {
     const page = await call(env, '/sdk/keys?q=' + encodeURIComponent(license.license_uid), { cookie });
     const html = await page.text();
     assert.equal(page.status, 200);
-    assert.match(html, /GUEST APPS<\/p><p class="text-xs font-black">UNLIMITED<\/p>/);
-    assert.match(html, /Guest apps<\/p><p[^>]*>Unlimited · identity checked<\/p>/);
+    assert.match(html, /CLONED APPS<\/p><p class="text-xs font-black">UNLIMITED<\/p>/);
+    assert.match(html, /Cloned apps<\/p><p[^>]*>Unlimited · identity checked<\/p>/);
     assert.doesNotMatch(html, /APPS \/ PKG/);
   });
 

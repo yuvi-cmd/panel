@@ -74,15 +74,15 @@ export async function listLicenses(db, { q = '', status = 'ALL' } = {}) {
                       (SELECT COUNT(*) FROM mak_devices d WHERE d.license_id=l.id AND d.status='ACTIVE') AS device_count,
                       (SELECT COUNT(*) FROM mak_bindings b WHERE b.license_id=l.id AND b.status='ACTIVE') AS guest_count,
                       COALESCE(
-                        (SELECT MAX((SELECT COUNT(DISTINCT g.package_name)
+                        (SELECT MAX((SELECT COUNT(DISTINCT g.package_name || char(31) || COALESCE(NULLIF(g.app_name,''), g.package_name))
                                        FROM mak_bindings b JOIN mak_guest_apps g ON g.id=b.guest_app_id
                                       WHERE b.license_id=l.id AND b.status='ACTIVE'
                                         AND (b.host_id=h.id OR b.host_id=0)))
                            FROM mak_hosts h WHERE h.license_id=l.id),
-                        (SELECT COUNT(DISTINCT g.package_name)
+                        (SELECT COUNT(DISTINCT g.package_name || char(31) || COALESCE(NULLIF(g.app_name,''), g.package_name))
                            FROM mak_bindings b JOIN mak_guest_apps g ON g.id=b.guest_app_id
                           WHERE b.license_id=l.id AND b.status='ACTIVE')
-                      ) AS guest_package_count,
+                      ) AS guest_app_count,
                       COALESCE(
                         (SELECT MAX((CASE WHEN h.app_name<>'' THEN 1 ELSE 0 END) +
                            (SELECT COUNT(DISTINCT COALESCE(NULLIF(g.app_name,''), g.package_name))
@@ -469,26 +469,28 @@ export async function getHostBinding(db, licenseId, hostId, guestId) {
     .bind(Number(licenseId), Number(hostId), Number(guestId)).first().catch(() => null);
 }
 
-export async function countHostGuestPackages(db, licenseId, hostId) {
-  const row = await db.prepare(
-    `SELECT COUNT(DISTINCT g.package_name) AS c
-       FROM mak_bindings b JOIN mak_guest_apps g ON g.id=b.guest_app_id
-      WHERE b.license_id=? AND b.host_id=? AND b.status='ACTIVE'`,
-  ).bind(Number(licenseId), Number(hostId)).first().catch(() => null);
-  return Number(row?.c || 0);
+// A cloned app is identified by the pair the client sends with every guest
+// request: APK package name + real app name. The limit counts these unique
+// pairs, so a new version of the same app does not consume another slot, but
+// a differently named clone does. char(31) cannot appear in a package name.
+const GUEST_APP_KEY_SQL = "g.package_name || char(31) || COALESCE(NULLIF(g.app_name,''), g.package_name)";
+
+export function guestAppKey(packageName, appName) {
+  const pkg = String(packageName || '');
+  const name = String(appName || '').trim() || pkg;
+  return pkg + '\u001f' + name;
 }
 
-// Atomic AUTO bind. A guest binding is a permission record for one approved
-// guest identity. guestAppLimit is optional: null/0 means unlimited, a
-// positive value caps the number of distinct guest packages per host.
-// A new APK version of an already-bound package never consumes another slot.
-// The signed host/guest identities remain mandatory and are verified by the
-// client.
-export async function bindGuestAtomic(db, licenseId, hostId, guestId, guestPackage, perms = {}, guestAppLimit = null) {
+// Atomic AUTO bind. guestAppLimit is optional: null/0 means unlimited, a
+// positive value caps the number of distinct cloned apps (package + app name)
+// per host. The signed host/guest identities remain mandatory and are
+// verified by the client.
+export async function bindGuestAtomic(db, licenseId, hostId, guestId, guestPackage, perms = {}, guestAppLimit = null, guestAppName = '') {
   const now = nowS();
   const cap = Number.isFinite(Number(guestAppLimit)) && Number(guestAppLimit) > 0
     ? Math.max(1, Math.floor(Number(guestAppLimit)))
     : 0;
+  const appKey = guestAppKey(guestPackage, guestAppName);
   const row = await db.prepare(
     `INSERT INTO mak_bindings
        (license_id,host_id,guest_app_id,can_install,can_launch,can_update,can_restart,status,created_at,updated_at)
@@ -497,10 +499,10 @@ export async function bindGuestAtomic(db, licenseId, hostId, guestId, guestPacka
          OR EXISTS (
               SELECT 1 FROM mak_bindings b JOIN mak_guest_apps g ON g.id=b.guest_app_id
                WHERE b.license_id=? AND (b.host_id=? OR b.host_id=0)
-                 AND b.status='ACTIVE' AND g.package_name=?
+                 AND b.status='ACTIVE' AND ${GUEST_APP_KEY_SQL}=?
             )
          OR (
-              SELECT COUNT(DISTINCT g.package_name)
+              SELECT COUNT(DISTINCT ${GUEST_APP_KEY_SQL})
                 FROM mak_bindings b JOIN mak_guest_apps g ON g.id=b.guest_app_id
                WHERE b.license_id=? AND (b.host_id=? OR b.host_id=0) AND b.status='ACTIVE'
             ) < ?
@@ -515,7 +517,7 @@ export async function bindGuestAtomic(db, licenseId, hostId, guestId, guestPacka
     perms.update === false ? 0 : 1, perms.restart === false ? 0 : 1,
     now, now,
     cap,
-    Number(licenseId), Number(hostId), String(guestPackage || ''),
+    Number(licenseId), Number(hostId), appKey,
     Number(licenseId), Number(hostId), cap,
   ).first().catch(() => null);
   if (!row) {
@@ -524,9 +526,9 @@ export async function bindGuestAtomic(db, licenseId, hostId, guestId, guestPacka
   return { ok: true, binding: row };
 }
 
-export async function countDistinctGuestPackages(db, licenseId) {
+export async function countDistinctGuestApps(db, licenseId) {
   const row = await db.prepare(
-    `SELECT COUNT(DISTINCT g.package_name) AS c
+    `SELECT COUNT(DISTINCT ${GUEST_APP_KEY_SQL}) AS c
        FROM mak_bindings b JOIN mak_guest_apps g ON g.id=b.guest_app_id
       WHERE b.license_id=? AND b.status='ACTIVE'`,
   ).bind(Number(licenseId)).first().catch(() => null);
@@ -536,16 +538,16 @@ export async function countDistinctGuestPackages(db, licenseId) {
 // The limit is per host package, so compare it with the busiest host rather
 // than with the license-wide total. license-wide bindings (host_id=0) count
 // for every host because each of them inherits those bindings.
-export async function maxGuestPackageCount(db, licenseId) {
+export async function maxGuestAppCount(db, licenseId) {
   const row = await db.prepare(
-    `SELECT MAX((SELECT COUNT(DISTINCT g.package_name)
+    `SELECT MAX((SELECT COUNT(DISTINCT ${GUEST_APP_KEY_SQL})
                    FROM mak_bindings b JOIN mak_guest_apps g ON g.id=b.guest_app_id
                   WHERE b.license_id=? AND b.status='ACTIVE'
                     AND (b.host_id=h.id OR b.host_id=0))) AS c
        FROM mak_hosts h WHERE h.license_id=?`,
   ).bind(Number(licenseId), Number(licenseId)).first().catch(() => null);
   if (row && row.c != null) return Number(row.c);
-  return countDistinctGuestPackages(db, licenseId);
+  return countDistinctGuestApps(db, licenseId);
 }
 
 export async function listBindingsForLicense(db, licenseId) {

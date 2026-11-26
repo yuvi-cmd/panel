@@ -3,7 +3,7 @@
 // The form supports:
 //   - optional custom MAK (blank = random)
 //   - duration dropdown
-//   - max host packages / max apps per package / max installs per package
+//   - max host packages / optional cloned-app limit (package + app name)
 //   - Signature Bind Yes/No (per-app signing certificate enforcement)
 //   - AUTO / MANUAL host binding
 //   - optional host + guest app rows, each with its own signature
@@ -14,7 +14,7 @@ import {
 } from './crypto.js';
 import {
   createLicenseRecord, bindGuestAtomic, findHostForLicensePackage, getLicenseByHash,
-  listAllActiveGuests,
+  guestAppKey, listAllActiveGuests,
 } from './store.js';
 import { createGuestV2 } from './store-v2.js';
 
@@ -107,7 +107,7 @@ export function parseLicensePolicy(sp, opts = {}) {
   if (guestLimitProvided && guestLimitRaw && !['unlimited', 'none', '0'].includes(guestLimitRaw)) {
     const parsedLimit = Number(guestLimitRaw);
     if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 1000) {
-      return { error: 'Guest app limit must be blank (unlimited) or a whole number between 1 and 1000.' };
+      return { error: 'Cloned app limit must be blank (unlimited) or a whole number between 1 and 1000.' };
     }
     guestAppLimit = parsedLimit;
   }
@@ -178,13 +178,13 @@ export async function issueMak(db, sp, createdBy) {
   const guestIds = parsed.guestIds.filter((id) => validGuestIds.has(id));
   const limit = parsed.policy.guest_app_limit;
   if (limit != null) {
-    const prebound = new Set(parsed.guests.map((g) => g.package_name));
+    const prebound = new Set(parsed.guests.map((g) => guestAppKey(g.package_name, g.app_name)));
     for (const g of guests) {
-      if (guestIds.includes(Number(g.id))) prebound.add(g.package_name);
+      if (guestIds.includes(Number(g.id))) prebound.add(guestAppKey(g.package_name, g.app_name));
     }
     if (prebound.size > limit) {
       return {
-        error: 'This MAK allows ' + limit + ' guest app(s) per host package; reduce the pre-bound guest rows or leave the guest limit blank for unlimited.',
+        error: 'This MAK allows ' + limit + ' cloned app(s) per host package; reduce the pre-bound guest rows or leave the limit blank for unlimited.',
       };
     }
   }
@@ -227,7 +227,7 @@ export async function issueMak(db, sp, createdBy) {
       const bound = await bindGuestAtomic(
         db, licenseId, hostId, guest.id, row.package_name,
         { install: true, launch: true, update: true, restart: true },
-        limit,
+        limit, row.app_name,
       );
       if (!bound.ok) return { error: 'Could not bind pre-registered guest ' + row.package_name + '.' };
     }

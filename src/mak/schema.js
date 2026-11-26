@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS mak_licenses (
   activation_count INTEGER NOT NULL DEFAULT 0,
   session_ttl      INTEGER NOT NULL DEFAULT 3600,
   max_packages     INTEGER NOT NULL DEFAULT 1, -- host APK package names this MAK may bind
-  guest_app_limit  INTEGER, -- NULL = unlimited guest apps per host (positive = explicit cap)
+  guest_app_limit  INTEGER, -- NULL = unlimited cloned apps (unique package + app name) per host
   max_apps         INTEGER NOT NULL DEFAULT 2, -- legacy column, no longer enforced
   max_installs     INTEGER NOT NULL DEFAULT 3, -- legacy column, no longer enforced
   signature_bind   INTEGER NOT NULL DEFAULT 1, -- 1 = verify APK signing cert per app
