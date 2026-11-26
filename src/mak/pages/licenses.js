@@ -92,8 +92,7 @@ export function newLicensePage({ csrf, guests = [], error = '', values = {}, def
               ${field('Session TTL (seconds)', `<input type="number" name="session_ttl" min="300" max="86400" value="${esc(v.session_ttl || 3600)}" required>`, 'Short-lived signed sessions. Default 1 hour.')}
               ${field('Max devices', `<input type="number" name="max_devices" min="1" max="100" value="${esc(v.max_devices || 1)}" required>`, 'Concurrent active device keys.')}
               ${field('Max activations', `<input type="number" name="max_activations" min="1" max="1000" value="${esc(v.max_activations || 2)}" required>`, 'Lifetime registrations, including reinstalls.')}
-              ${field('Max host packages', `<input type="number" name="max_packages" min="1" max="100" value="${esc(v.max_packages || 1)}" required>`, 'Kitne host APK package names is MAK se bind ho sakte hain.')}
-              ${field('Max apps per package', `<input type="number" name="max_apps" min="1" max="100" value="${esc(v.max_apps || 2)}" required>`, 'Har host package ke liye kitne guest apps. Total = packages × apps.')}
+              ${field('Max host packages', `<input type="number" name="max_packages" min="1" max="100" value="${esc(v.max_packages || 1)}" required>`, 'Kitne host APK package names is MAK se bind ho sakte hain. Guest apps unlimited hain.')}
               ${field('Notes', `<textarea name="notes" placeholder="Internal note (not shown to the client)" maxlength="1000">${esc(v.notes || '')}</textarea>`, '', 'span-2')}
             </div>
           </div>
@@ -163,7 +162,7 @@ export function revealLicensePage({ license, credential, csrf, server }) {
         <dt>License ID</dt><dd class="mono">${esc(license.license_uid)}</dd>
         <dt>Expires</dt><dd>${esc(fmtDate(license.expires_at))}</dd>
         <dt>Devices / activations</dt><dd>${license.max_devices} / ${license.max_activations}</dd>
-        <dt>Host packages / apps</dt><dd>${license.max_packages || 1} packages × ${license.max_apps || 2} apps = ${(license.max_packages || 1) * (license.max_apps || 2)} apps</dd>
+        <dt>Host packages</dt><dd>${license.max_packages || 1} allowed · guest apps unlimited</dd>
         <dt>Host binding</dt><dd>${String(license.host_bind_mode || 'AUTO') === 'MANUAL' ? 'Manual (pre-registered)' : 'Auto (first use)'}</dd>
         <dt>Server</dt><dd>${statusBadge(server.enabled ? 'ONLINE' : 'OFFLINE')}</dd>
       </dl>
@@ -242,9 +241,7 @@ export function licenseDetailPage({
               <input type="hidden" name="session_ttl" value="${license.session_ttl}">
               <input type="hidden" name="max_devices" value="${license.max_devices}">
               ${field('Max activations', `<input type="number" name="max_activations" min="1" max="1000" value="${license.max_activations}" required>`)}
-              ${field('Max host packages', `<input type="number" name="max_packages" min="1" max="100" value="${license.max_packages || 1}" required>`, 'Kitne host APK package names is MAK se bind ho sakte hain.')}
-              ${field('Max apps per package', `<input type="number" name="max_apps" min="1" max="100" value="${license.max_apps || 2}" required>`, 'Har host package ke liye kitne guest apps.')}
-              <input type="hidden" name="max_installs" value="${license.max_installs || 3}">
+              ${field('Max host packages', `<input type="number" name="max_packages" min="1" max="100" value="${license.max_packages || 1}" required>`, 'Kitne host APK package names is MAK se bind ho sakte hain. Guest apps unlimited hain.')}
               ${field('Signature Bind', `<select name="signature_bind">
                 <option value="1" ${Number(license.signature_bind ?? 1) ? 'selected' : ''}>Yes — verify APK signature</option>
                 <option value="0" ${!Number(license.signature_bind ?? 1) ? 'selected' : ''}>No — package + app name only</option>

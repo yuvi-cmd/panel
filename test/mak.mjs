@@ -98,26 +98,34 @@ function randomNonce() {
   return b64(crypto.getRandomValues(new Uint8Array(24)));
 }
 
-// Encrypt a MAK/2 request and verify + decrypt the response. The server
-// public key comes from the same config the Worker uses, which mirrors the
-// key pinned inside the AAR.
-async function envelopeCall(env, endpoint, payload) {
-  const enc = loadEncryptionConfig(env);
+// Encrypt a MAK/2 envelope-v3 request and verify + decrypt the response.
+// Request: client ephemeral -> panel static X25519.
+// Response: fresh panel ephemeral -> client ephemeral, with a canonical-header
+// Ed25519 signature checked before decryption.
+async function envelopeCallWithKeys(env, endpoint, payload, keys, config) {
+  const enc = keys.encryption;
+  const signing = keys.signing || config;
   assert.equal(enc.ok, true, 'server encryption key');
+  assert.equal(signing.ok, true, 'server signing key');
+
   const serverPub = b64decode(enc.public_key);
   const client = nacl.box.keyPair();
   const nonce = crypto.getRandomValues(new Uint8Array(24));
+  const salt = crypto.getRandomValues(new Uint8Array(32));
   const shared = nacl.box.before(serverPub, client.secretKey);
-  const reqKey = await hkdfSha256(shared, nonce, 'MAK/2-REQ');
+  const clientPub = b64encode(client.publicKey);
+  const reqKey = await hkdfSha256(shared, salt, `MAK/2|REQ|3|${enc.key_id}|${clientPub}`);
   const inner = { protocol: 'MAK/2', endpoint, ...payload };
   const plaintext = canonicalJson(inner);
   const cipher = nacl.secretbox(utf8(plaintext), nonce, reqKey);
   const res = await call(env, '/mak/v2/' + endpoint, {
     method: 'POST',
     json: {
-      v: 2,
-      e: b64encode(client.publicKey),
+      v: 3,
+      k: enc.key_id,
+      e: clientPub,
       n: b64encode(nonce),
+      s: b64encode(salt),
       c: b64encode(cipher),
     },
   });
@@ -128,58 +136,38 @@ async function envelopeCall(env, endpoint, payload) {
   } catch {
     assert.fail('non-JSON response: ' + text.slice(0, 200));
   }
-  assert.equal(body.v, 2, 'response is an envelope: ' + text.slice(0, 400));
-  const respKey = await hkdfSha256(shared, nonce, 'MAK/2-RESP');
-  const opened = nacl.secretbox.open(b64decode(body.c), nonce, respKey);
+  assert.equal(body.v, 3, 'response is an envelope: ' + text.slice(0, 400));
+  const header = { v: 3, k: body.k, e: body.e, n: body.n, s: body.s, c: body.c };
+  assert.equal(nacl.sign.detached.verify(
+    utf8('MAK/2\nENVELOPE-V3\n' + canonicalJson(header)),
+    b64decode(body.sig),
+    b64decode(signing.active.public_key),
+  ), true, 'response header Ed25519 signature');
+
+  const serverEphemeral = b64decode(body.e);
+  const responseShared = nacl.box.before(serverEphemeral, client.secretKey);
+  const respKey = await hkdfSha256(responseShared, b64decode(body.s),
+    `MAK/2|RESP|3|${clientPub}|${body.e}|${b64encode(nonce)}`);
+  const opened = nacl.secretbox.open(b64decode(body.c), b64decode(body.n), respKey);
   assert.ok(opened, 'response decrypts');
   const responseText = fromUtf8(opened);
+  return { status: res.status, body: JSON.parse(responseText), text: responseText, config, keys };
+}
+
+// Uses env fallback keys (the same path as a deployment without panel keys).
+async function envelopeCall(env, endpoint, payload) {
   const config = loadSigningConfig(env);
-  const sigOk = nacl.sign.detached.verify(
-    utf8('MAK/2\nENVELOPE\n' + responseText),
-    b64decode(body.sig),
-    b64decode(config.active.public_key),
-  );
-  assert.equal(sigOk, true, 'envelope Ed25519 signature');
-  return { status: res.status, body: JSON.parse(responseText), text: responseText, config };
+  return envelopeCallWithKeys(env, endpoint, payload, {
+    encryption: loadEncryptionConfig(env),
+    signing: config,
+  }, config);
 }
 
 // Same wire helper, but resolves the encryption/signing keys exactly like a
 // real client: from /mak/v2/status (panel keyring), not from env secrets.
 async function panelEnvelopeCall(env, endpoint, payload) {
   const keys = await loadKeyConfig(env.DB, env, { force: true });
-  assert.equal(keys.encryption.ok, true, 'panel encryption key');
-  assert.equal(keys.signing.ok, true, 'panel signing key');
-  const serverPub = b64decode(keys.encryption.public_key);
-  const client = nacl.box.keyPair();
-  const nonce = crypto.getRandomValues(new Uint8Array(24));
-  const shared = nacl.box.before(serverPub, client.secretKey);
-  const reqKey = await hkdfSha256(shared, nonce, 'MAK/2-REQ');
-  const inner = { protocol: 'MAK/2', endpoint, ...payload };
-  const plaintext = canonicalJson(inner);
-  const cipher = nacl.secretbox(utf8(plaintext), nonce, reqKey);
-  const res = await call(env, '/mak/v2/' + endpoint, {
-    method: 'POST',
-    json: {
-      v: 2,
-      e: b64encode(client.publicKey),
-      n: b64encode(nonce),
-      c: b64encode(cipher),
-    },
-  });
-  const text = await res.text();
-  const body = jsonBody(text);
-  assert.equal(body.v, 2, 'response is an envelope');
-  assert.equal(body.key_id, undefined, 'response envelope leaks no key id');
-  const respKey = await hkdfSha256(shared, nonce, 'MAK/2-RESP');
-  const opened = nacl.secretbox.open(b64decode(body.c), nonce, respKey);
-  assert.ok(opened, 'response decrypts');
-  const responseText = fromUtf8(opened);
-  assert.equal(nacl.sign.detached.verify(
-    utf8('MAK/2\nENVELOPE\n' + responseText),
-    b64decode(body.sig),
-    b64decode(keys.signing.active.public_key),
-  ), true, 'envelope Ed25519 signature');
-  return { status: res.status, body: JSON.parse(responseText), keys };
+  return envelopeCallWithKeys(env, endpoint, payload, keys, keys.signing);
 }
 
 async function readStatus(env) {
@@ -214,19 +202,22 @@ async function hostVerify(env, credential, grantId, { hostPackage = 'com.test.ho
 }
 
 async function guestCheck(env, credential, grantId, {
-  operation = 'LAUNCH', hostPackage = 'com.test.host', hostCert = 'c'.repeat(64),
-  guestPackage = 'com.test.guest', guestCert = 'b'.repeat(64), apkHash = 'a'.repeat(64), versionCode = 1,
+  operation = 'LAUNCH', hostPackage = 'com.test.host', hostAppName = 'Test Host',
+  hostCert = 'c'.repeat(64),
+  guestPackage = 'com.test.guest', guestAppName = 'Guest',
+  guestCert = 'b'.repeat(64), apkHash = 'a'.repeat(64), versionCode = 1,
 } = {}) {
   return envelopeCall(env, 'guest/check', {
     grant_id: grantId,
     mak: credential,
     package_name: hostPackage,
+    app_name: hostAppName,
     cert_sha256: hostCert,
     operation,
     nonce: randomNonce(),
     guest: {
       package_name: guestPackage,
-      app_name: 'Guest',
+      app_name: guestAppName,
       apk_sha256: apkHash,
       cert_sha256: guestCert,
       version_code: versionCode,
@@ -316,7 +307,9 @@ async function main() {
     assert.equal(newPage.status, 200);
     assert.match(newHtml, /Custom MAK key/);
     assert.match(newHtml, /Signature Bind/);
-    assert.match(newHtml, /name="max_installs"/);
+    assert.match(newHtml, /name="max_packages"/);
+    assert.doesNotMatch(newHtml, /name="max_apps"/);
+    assert.doesNotMatch(newHtml, /name="max_installs"/);
     assert.match(newHtml, /name="guest_cert"/);
 
     const issued = await issueLicense(env, cookie, token);
@@ -344,10 +337,11 @@ async function main() {
     assert.equal(verifyWithProtocol(res.body.grant, res.config, 'MAK/2', 'GRANT'), true);
     assert.match(res.body.grant.grant_id, /^GRT-[0-9A-F]{24}$/);
     assert.equal(res.body.grant.package_name, 'com.test.host');
+    assert.equal(res.body.grant.app_name, 'Test Host');
     assert.equal(res.body.grant.cert_sha256, 'c'.repeat(64));
     assert.equal(res.body.grant.signature_bind, true);
-    assert.equal(res.body.grant.max_apps, 2);
-    assert.equal(res.body.grant.max_installs, 3);
+    assert.equal(res.body.grant.max_apps, undefined, 'quantity cap is not part of the signed grant');
+    assert.equal(res.body.grant.max_installs, undefined, 'install cap is not part of the signed grant');
     assert.ok(res.body.grant.expires_at > nowS() + 29 * 86400);
     env.__test.grant = res.body.grant;
   });
@@ -379,7 +373,7 @@ async function main() {
     env.__test.hostTicket = res.body.ticket;
   });
 
-  await test('guest AUTO binding, LaunchTicket, app limit and version reuse', async () => {
+  await test('guest AUTO binding, LaunchTicket, unlimited apps and version reuse', async () => {
     const env = globalThis.__lastEnv;
     const { credential, grant } = env.__test;
 
@@ -388,6 +382,8 @@ async function main() {
     assert.equal(first.body.code, 'AUTHORIZED');
     assert.equal(verifyWithProtocol(first.body.ticket, first.config, 'MAK/2', 'LAUNCH-TICKET'), true);
     assert.equal(first.body.ticket.guest.package_name, 'com.test.guest');
+    assert.equal(first.body.ticket.guest.app_name, 'Guest');
+    assert.equal(first.body.ticket.host.app_name, 'Test Host');
     assert.equal(first.body.permissions.launch, true);
 
     const v2 = await guestCheck(env, credential, grant.grant_id, { apkHash: 'f'.repeat(64), versionCode: 2 });
@@ -398,18 +394,34 @@ async function main() {
          JOIN mak_guest_apps g ON g.id=b.guest_app_id
         WHERE b.license_id=? AND b.status='ACTIVE'`,
     ).bind(env.__test.license.id).first();
-    assert.equal(distinct.c, 1, 'same package new version does not consume a slot');
+    assert.equal(distinct.c, 1, 'same package new version reuses one binding');
 
-    const second = await guestCheck(env, credential, grant.grant_id, {
-      guestPackage: 'com.test.guest2', guestCert: '1'.repeat(64), apkHash: '1'.repeat(64),
-    });
-    assert.equal(second.body.decision, 'ALLOW');
+    // A license can bind any number of distinct guest packages. Only the
+    // host/guest identity and the license status are checked.
+    for (let i = 2; i <= 6; i += 1) {
+      const extra = await guestCheck(env, credential, grant.grant_id, {
+        guestPackage: `com.test.guest${i}`,
+        guestCert: String(i).repeat(64),
+        apkHash: String(i).repeat(64),
+      });
+      assert.equal(extra.body.decision, 'ALLOW', JSON.stringify(extra.body));
+    }
+    const bound = await env.DB.prepare(
+      `SELECT COUNT(DISTINCT g.package_name) AS c FROM mak_bindings b
+         JOIN mak_guest_apps g ON g.id=b.guest_app_id
+        WHERE b.license_id=? AND b.status='ACTIVE'`,
+    ).bind(env.__test.license.id).first();
+    assert.equal(Number(bound.c), 6, 'no installed-app quota is enforced');
+  });
 
-    const third = await guestCheck(env, credential, grant.grant_id, {
-      guestPackage: 'com.test.guest3', guestCert: '2'.repeat(64), apkHash: '2'.repeat(64),
-    });
-    assert.equal(third.body.decision, 'DENY');
-    assert.equal(third.body.code, 'APP_LIMIT_REACHED');
+  await test('host app name is part of the signed host identity', async () => {
+    const env = globalThis.__lastEnv;
+    const { credential, grant } = env.__test;
+    const mismatch = await activate(env, credential, { appName: 'Different Host' });
+    assert.equal(mismatch.body.decision, 'DENY');
+    assert.equal(mismatch.body.code, 'HOST_APP_MISMATCH');
+    const ticket = await hostVerify(env, credential, grant.grant_id);
+    assert.equal(ticket.body.decision, 'ALLOW');
   });
 
   await test('second host package allowed, third blocked by max_packages', async () => {
@@ -454,11 +466,16 @@ async function main() {
     const enc = loadEncryptionConfig(env);
     const client = nacl.box.keyPair();
     const nonce = crypto.getRandomValues(new Uint8Array(24));
+    const salt = crypto.getRandomValues(new Uint8Array(32));
     const shared = nacl.box.before(b64decode(enc.public_key), client.secretKey);
-    const key = await hkdfSha256(shared, nonce, 'MAK/2-REQ');
+    const clientPub = b64encode(client.publicKey);
+    const key = await hkdfSha256(shared, salt, `MAK/2|REQ|3|${enc.key_id}|${clientPub}`);
     const inner = canonicalJson({ protocol: 'MAK/2', endpoint: 'activate', mak: credential, package_name: 'com.test.host', app_name: 'Test Host', cert_sha256: 'c'.repeat(64) });
     const cipher = b64encode(nacl.secretbox(utf8(inner), nonce, key));
-    const body = { v: 2, e: b64encode(client.publicKey), n: b64encode(nonce), c: cipher };
+    const body = {
+      v: 3, k: enc.key_id, e: clientPub,
+      n: b64encode(nonce), s: b64encode(salt), c: cipher,
+    };
     const one = await call(env, '/mak/v2/activate', { method: 'POST', json: body });
     assert.equal(one.status, 200);
     const two = await call(env, '/mak/v2/activate', { method: 'POST', json: body });
@@ -493,16 +510,24 @@ async function main() {
     assert.equal(ok.body.decision, 'ALLOW', JSON.stringify(ok.body));
 
     const deniedGuest = await guestCheck(env, issued.mak, ok.body.grant.grant_id, {
-      hostPackage: 'com.manual.host', hostCert: 'd'.repeat(64),
+      hostPackage: 'com.manual.host', hostAppName: 'Manual Host', hostCert: 'd'.repeat(64),
       guestPackage: 'com.manual.other', guestCert: 'e'.repeat(64),
     });
     assert.equal(deniedGuest.body.code, 'GUEST_PACKAGE_MISMATCH');
 
+    const wrongGuestApp = await guestCheck(env, issued.mak, ok.body.grant.grant_id, {
+      hostPackage: 'com.manual.host', hostAppName: 'Manual Host', hostCert: 'd'.repeat(64),
+      guestPackage: 'com.manual.guest', guestAppName: 'Wrong Guest', guestCert: 'e'.repeat(64),
+    });
+    assert.equal(wrongGuestApp.status, 403);
+    assert.equal(wrongGuestApp.body.code, 'GUEST_APP_MISMATCH');
+
     const allowedGuest = await guestCheck(env, issued.mak, ok.body.grant.grant_id, {
-      hostPackage: 'com.manual.host', hostCert: 'd'.repeat(64),
-      guestPackage: 'com.manual.guest', guestCert: 'e'.repeat(64),
+      hostPackage: 'com.manual.host', hostAppName: 'Manual Host', hostCert: 'd'.repeat(64),
+      guestPackage: 'com.manual.guest', guestAppName: 'Manual Guest', guestCert: 'e'.repeat(64),
     });
     assert.equal(allowedGuest.body.decision, 'ALLOW', JSON.stringify(allowedGuest.body));
+    assert.equal(allowedGuest.body.ticket.guest.app_name, 'Manual Guest');
   });
 
   await test('Signature Bind OFF ignores certificates', async () => {
@@ -581,7 +606,7 @@ async function main() {
     const { cookie, token } = env.__test;
     const issued = await issueLicense(env, cookie, token, {
       label: 'Quick actions', signature_bind: '0',
-      max_packages: '1', max_apps: '2', max_installs: '3',
+      max_packages: '1',
     });
     assert.ok(issued.mak);
     const license = await env.DB.prepare('SELECT * FROM mak_licenses ORDER BY id DESC LIMIT 1').first();
@@ -600,17 +625,11 @@ async function main() {
     assert.equal(Number(extended.duration_days), beforeDays + 7, 'reserved duration extended by 7 days');
     assert.equal(extended.expires_at, null, 'expiry is not written before the first app bind');
 
-    assert.equal((await action({ action: 'extend_limits', max_packages: '3', max_apps: '4', max_installs: '5' })).status, 303);
+    assert.equal((await action({ action: 'extend_limits', max_packages: '3', max_apps: '99', max_installs: '99' })).status, 303);
     const raised = await env.DB.prepare('SELECT * FROM mak_licenses WHERE id=?').bind(license.id).first();
     assert.equal(Number(raised.max_packages), 3);
-    assert.equal(Number(raised.max_apps), 4);
-    assert.equal(Number(raised.max_installs), 5);
-
-    // The Install Seats control is hidden from the UI. A limits update that
-    // omits the field must keep the existing backend seat policy untouched.
-    assert.equal((await action({ action: 'extend_limits', max_packages: '3', max_apps: '4' })).status, 303);
-    const kept = await env.DB.prepare('SELECT * FROM mak_licenses WHERE id=?').bind(license.id).first();
-    assert.equal(Number(kept.max_installs), 5);
+    assert.equal(Number(raised.max_apps), 2, 'guest app count cap is ignored');
+    assert.equal(Number(raised.max_installs), 3, 'install seat cap is ignored');
 
     assert.equal((await action({ action: 'host_save', host_package: 'com.quick.host', host_app_name: 'Quick', host_cert: '' })).status, 303);
     const host = await env.DB.prepare('SELECT * FROM mak_hosts WHERE license_id=? ORDER BY id DESC LIMIT 1').bind(license.id).first();
@@ -710,11 +729,11 @@ async function main() {
     }
   });
 
-  await test('APPS / PKG counts the bound host app name', async () => {
+  await test('host app name is stored and guest apps show as unlimited', async () => {
     const env = globalThis.__lastEnv;
     const { cookie, token } = env.__test;
     const issued = await issueLicense(env, cookie, token, {
-      label: 'App count display', signature_bind: '0', max_packages: '1', max_apps: '2',
+      label: 'App count display', signature_bind: '0', max_packages: '1',
       host_package: 'com.count.host', host_app_name: 'Count Host',
     });
     assert.ok(issued.mak, issued.html.slice(0, 500));
@@ -725,8 +744,9 @@ async function main() {
     const page = await call(env, '/sdk/keys?q=' + encodeURIComponent(license.license_uid), { cookie });
     const html = await page.text();
     assert.equal(page.status, 200);
-    assert.match(html, /APPS \/ PKG<\/p><p class="text-xs font-black">1 \/ 2<\/p>/, 'host app name occupies one app slot');
-    assert.match(html, /App names \/ package<\/p><p[^>]*>1 \/ 2 used<\/p>/, 'details show the same count');
+    assert.match(html, /GUEST APPS<\/p><p class="text-xs font-black">UNLIMITED<\/p>/);
+    assert.match(html, /Guest apps<\/p><p[^>]*>Unlimited · identity checked<\/p>/);
+    assert.doesNotMatch(html, /APPS \/ PKG/);
   });
 
   await test('numeric duration starts on first app bind and never resets', async () => {

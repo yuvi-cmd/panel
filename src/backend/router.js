@@ -882,8 +882,6 @@ export default {
         max_activations: String(sp.get('max_activations') || '1'),
         session_ttl: String(sp.get('session_ttl') || '3600'),
         max_packages: String(sp.get('max_packages') || '1'),
-        max_apps: String(sp.get('max_apps') || '2'),
-        max_installs: String(sp.get('max_installs') || '3'),
         signature_bind: String(sp.get('signature_bind') ?? '1'),
         host_package: String(sp.get('host_package') || ''),
         host_app_name: String(sp.get('host_app_name') || ''),

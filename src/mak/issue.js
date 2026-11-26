@@ -101,9 +101,7 @@ export function parseLicensePolicy(sp, opts = {}) {
   const maxActivations = clampInt(sp.get('max_activations'), 1, 1000, 1);
   const sessionTtl = clampInt(sp.get('session_ttl'), 300, 86400, 3600);
   const maxPackages = clampInt(sp.get('max_packages'), 1, 100, 1);
-  const maxApps = clampInt(sp.get('max_apps'), 1, 100, 2);
-  const maxInstalls = clampInt(sp.get('max_installs'), 1, 100, 3);
-  if (!maxDevices || !maxActivations || !sessionTtl || !maxPackages || !maxApps || !maxInstalls) {
+  if (!maxDevices || !maxActivations || !sessionTtl || !maxPackages) {
     return { error: 'One or more limits are outside the allowed range.' };
   }
   if (maxActivations < maxDevices) return { error: 'Max activations must be at least max devices.' };
@@ -138,8 +136,6 @@ export function parseLicensePolicy(sp, opts = {}) {
     max_devices: maxDevices, max_activations: maxActivations,
     session_ttl: sessionTtl,
     max_packages: maxPackages,
-    max_apps: maxApps,
-    max_installs: maxInstalls,
     signature_bind: signatureBind ? 1 : 0,
     host_bind_mode: hostBindMode,
   };
@@ -150,10 +146,6 @@ export function parseLicensePolicy(sp, opts = {}) {
 export async function issueMak(db, sp, createdBy) {
   const parsed = parseLicensePolicy(sp);
   if (parsed.error) return { error: parsed.error };
-  const preboundPackages = new Set(parsed.guests.map((g) => g.package_name)).size;
-  if (preboundPackages > Number(parsed.policy.max_apps)) {
-    return { error: 'This MAK allows ' + parsed.policy.max_apps + ' app(s) per package; remove some guest rows or raise Max apps per package.' };
-  }
 
   const customRaw = String(sp.get('custom_key') || '').trim().slice(0, 120);
   let credential;
@@ -210,9 +202,8 @@ export async function issueMak(db, sp, createdBy) {
       const bound = await bindGuestAtomic(
         db, licenseId, hostId, guest.id, row.package_name,
         { install: true, launch: true, update: true, restart: true },
-        parsed.policy.max_apps,
       );
-      if (!bound.ok) return { error: 'Guest app limit reached while binding ' + row.package_name + '.' };
+      if (!bound.ok) return { error: 'Could not bind pre-registered guest ' + row.package_name + '.' };
     }
   }
 

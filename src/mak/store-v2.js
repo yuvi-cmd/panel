@@ -7,7 +7,7 @@ export async function getGrantById(db, grantId) {
   return db.prepare(
     `SELECT g.*,
             l.status AS license_status, l.expires_at AS license_expires_at,
-            l.epoch AS license_epoch, l.signature_bind, l.max_apps, l.max_installs,
+            l.epoch AS license_epoch, l.signature_bind,
             l.host_bind_mode, l.label AS license_label,
             h.status AS host_status, h.package_name AS host_package,
             h.app_name AS host_app_name, h.cert_sha256 AS host_cert
@@ -34,6 +34,7 @@ export async function createGrantAtomic(db, input) {
   const licenseId = Number(input.license_id);
   const hostId = Number(input.host_id);
   const packageName = String(input.package_name || '');
+  const appName = String(input.app_name || '');
   const certSha = String(input.cert_sha256 || '');
   const row = await db.prepare(
     `INSERT INTO mak_grants
@@ -41,33 +42,32 @@ export async function createGrantAtomic(db, input) {
      SELECT ?,?,?,?,?,?,'ACTIVE',?,?
       WHERE NOT EXISTS (
         SELECT 1 FROM mak_grants
-         WHERE license_id=? AND host_id=? AND package_name=? AND cert_sha256=?
+         WHERE license_id=? AND host_id=? AND package_name=? AND app_name=? AND cert_sha256=?
            AND status='ACTIVE'
       )
      RETURNING *`,
   ).bind(
-    grantId, licenseId, hostId, packageName,
-    String(input.app_name || ''), certSha,
+    grantId, licenseId, hostId, packageName, appName, certSha,
     Number(input.epoch) || 1, now,
-    licenseId, hostId, packageName, certSha,
+    licenseId, hostId, packageName, appName, certSha,
   ).first().catch(() => null);
   if (row) return { ok: true, grant: row };
-  const existing = await findReusableGrant(db, licenseId, hostId, packageName, certSha);
+  const existing = await findReusableGrant(db, licenseId, hostId, packageName, certSha, appName);
   if (existing) return { ok: true, grant: existing };
   return { ok: false, code: 'GRANT_CREATE_FAILED' };
 }
 
 // Reuse the active grant for the same host identity. Every device with the
 // same signed APK shares it instead of consuming a per-device seat.
-export async function findReusableGrant(db, licenseId, hostId, packageName, certSha) {
+export async function findReusableGrant(db, licenseId, hostId, packageName, certSha, appName = '') {
   return db.prepare(
     `SELECT * FROM mak_grants
-      WHERE license_id=? AND host_id=? AND package_name=? AND cert_sha256=?
+      WHERE license_id=? AND host_id=? AND package_name=? AND app_name=? AND cert_sha256=?
         AND status='ACTIVE'
       ORDER BY id DESC LIMIT 1`,
   ).bind(
     Number(licenseId) || 0, Number(hostId) || 0,
-    String(packageName || ''), String(certSha || ''),
+    String(packageName || ''), String(appName || ''), String(certSha || ''),
   ).first().catch(() => null);
 }
 

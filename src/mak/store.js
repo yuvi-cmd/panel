@@ -466,26 +466,16 @@ export async function countHostGuestPackages(db, licenseId, hostId) {
   return Number(row?.c || 0);
 }
 
-// Atomic AUTO bind. A new APK version of an already-bound package does not
-// consume another app slot; a brand-new package is allowed only while the
-// per-host distinct package count is below max_apps.
-export async function bindGuestAtomic(db, licenseId, hostId, guestId, guestPackage, perms = {}, maxApps = 2) {
+// Atomic AUTO bind. A guest binding is a permission record for one approved
+// guest identity. MAK/2 intentionally has no installed-app count limit, so
+// binding another package never consumes or requires a slot. The signed
+// host/guest identities remain mandatory and are verified by the client.
+export async function bindGuestAtomic(db, licenseId, hostId, guestId, guestPackage, perms = {}) {
   const now = nowS();
   const row = await db.prepare(
     `INSERT INTO mak_bindings
        (license_id,host_id,guest_app_id,can_install,can_launch,can_update,can_restart,status,created_at,updated_at)
-     SELECT ?,?,?,?,?,?,?, 'ACTIVE', ?,?
-      WHERE (
-        EXISTS (
-          SELECT 1 FROM mak_bindings b JOIN mak_guest_apps g ON g.id=b.guest_app_id
-           WHERE b.license_id=? AND b.host_id=? AND b.status='ACTIVE' AND g.package_name=?
-        )
-        OR (
-          SELECT COUNT(DISTINCT g.package_name)
-            FROM mak_bindings b JOIN mak_guest_apps g ON g.id=b.guest_app_id
-           WHERE b.license_id=? AND b.host_id=? AND b.status='ACTIVE'
-        ) < ?
-      )
+     VALUES (?,?,?,?,?,?,?, 'ACTIVE', ?,?)
      ON CONFLICT(license_id,host_id,guest_app_id) DO UPDATE SET
        can_install=excluded.can_install, can_launch=excluded.can_launch,
        can_update=excluded.can_update, can_restart=excluded.can_restart,
@@ -496,10 +486,8 @@ export async function bindGuestAtomic(db, licenseId, hostId, guestId, guestPacka
     perms.install === false ? 0 : 1, perms.launch === false ? 0 : 1,
     perms.update === false ? 0 : 1, perms.restart === false ? 0 : 1,
     now, now,
-    Number(licenseId), Number(hostId), String(guestPackage || ''),
-    Number(licenseId), Number(hostId), Math.max(1, Number(maxApps) || 1),
   ).first().catch(() => null);
-  if (!row) return { ok: false, code: 'APP_LIMIT_REACHED' };
+  if (!row) return { ok: false, code: 'BINDING_CREATE_FAILED' };
   return { ok: true, binding: row };
 }
 

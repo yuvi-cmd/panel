@@ -197,8 +197,6 @@ function grantPayload(grant) {
     cert_sha256: grant.cert_sha256 || '',
     signature_bind: !!grant.signature_bind,
     features: OPS.slice(),
-    max_apps: Number(grant.max_apps || 1),
-    max_installs: Number(grant.max_installs || 1),
     expires_at: grant.expires_at || null,
     epoch: Number(grant.epoch || 1),
     issued_at: Number(grant.created_at || nowS()),
@@ -260,11 +258,13 @@ export async function handleMakV2(request, env, db) {
       key_source: keys.source,
       rotations: keys.rotations,
       signature_alg: 'Ed25519',
-      encryption: 'X25519+XSalsa20-Poly1305',
+      encryption: 'X25519+HKDF-SHA256+XSalsa20-Poly1305',
       encryption_ready: !!enc.ok,
       encryption_key_id: enc.key_id,
       encryption_public_key: enc.ok ? enc.public_key : null,
-      transport: 'TLS 1.3 + NaCl box',
+      envelope_version: 3,
+      envelope_suite: 'MAK/2-DHE-V3',
+      transport: 'TLS 1.3 + dual-ephemeral NaCl box',
       features: OPS.slice(),
       server_time: nowS(),
     };
@@ -301,7 +301,7 @@ export async function handleMakV2(request, env, db) {
 
       const packageName = validPackageName(body.package_name);
       if (!packageName) throw new HttpError(403, 'HOST_PACKAGE_MISMATCH', 'Invalid host package name');
-      const appName = cleanAppName(body.app_name);
+      const appName = cleanAppName(body.app_name) || packageName;
       const signatureBind = !!Number(license.signature_bind);
       const cert = normalizeHex64(body.cert_sha256);
       if (signatureBind && !cert) throw new HttpError(403, 'HOST_CERT_MISMATCH', 'Host signing certificate is required');
@@ -319,6 +319,17 @@ export async function handleMakV2(request, env, db) {
             .bind(cert, nowS(), host.id).run().catch(() => {});
           host.cert_sha256 = cert;
         }
+        // Host identity is MAK + package + app name + certificate. A host
+        // package cannot silently change its display identity after binding.
+        const boundAppName = cleanAppName(host.app_name);
+        if (boundAppName && boundAppName !== appName) {
+          throw new HttpError(403, 'HOST_APP_MISMATCH', 'Host app name does not match the bound identity');
+        }
+        if (!boundAppName) {
+          await db.prepare('UPDATE mak_hosts SET app_name=?,updated_at=? WHERE id=?')
+            .bind(appName, nowS(), host.id).run().catch(() => {});
+          host.app_name = appName;
+        }
       } else {
         const mode = String(license.host_bind_mode || 'AUTO').toUpperCase();
         if (mode === 'MANUAL') {
@@ -335,22 +346,23 @@ export async function handleMakV2(request, env, db) {
         await log(db, {
           license_id: license.id, host_id: host.id, event_type: 'HOST_BOUND',
           result: 'SUCCESS', request_id: requestId, ip_hash: ipHash,
-          detail: 'Host package auto-bound: ' + packageName,
+          detail: 'Host package auto-bound: ' + packageName + ' / ' + appName,
         });
       }
 
-      // No device seats: every device that presents the same four-field host
-      // identity shares one active grant. This makes the same signed APK work
-      // on any number of devices while still binding it to MAK + package +
-      // app name + signing certificate.
-      let grant = await findReusableGrant(db, license.id, host.id, packageName, signatureBind ? cert : '');
+      // No device seats and no installed-app count limit: every device that
+      // presents the same host identity shares one active grant, and any
+      // number of guest APKs may be bound to that grant. The four-field host
+      // identity (MAK + package + app name + certificate) is the boundary.
+      let grant = await findReusableGrant(db, license.id, host.id, packageName,
+        signatureBind ? cert : '', appName);
       if (!grant) {
         const created = await createGrantAtomic(db, {
           grant_id: generateGrantId(),
           license_id: license.id,
           host_id: host.id,
           package_name: packageName,
-          app_name: appName || host.app_name || '',
+          app_name: appName,
           cert_sha256: signatureBind ? cert : '',
           epoch: Number(license.epoch || 1),
         });
@@ -384,8 +396,6 @@ export async function handleMakV2(request, env, db) {
         ...grantPayload(grant),
         license_uid: license.license_uid,
         signature_bind: signatureBind,
-        max_apps: Number(license.max_apps || 1),
-        max_installs: Number(license.max_installs || 1),
         expires_at: license.expires_at || null,
         epoch: Number(license.epoch || 1),
         issued_at: Number(grant.created_at || nowS()),
@@ -419,6 +429,11 @@ export async function handleMakV2(request, env, db) {
 
       const packageName = validPackageName(body.package_name);
       if (!packageName || packageName !== grant.package_name) throw new HttpError(403, 'HOST_PACKAGE_MISMATCH', 'Host package mismatch');
+      const appName = cleanAppName(body.app_name);
+      const boundAppName = cleanAppName(grant.app_name);
+      if (boundAppName && appName !== boundAppName) {
+        throw new HttpError(403, 'HOST_APP_MISMATCH', 'Host app name does not match the bound identity');
+      }
       const cert = normalizeHex64(body.cert_sha256);
       if (grant.signature_bind && cert && grant.cert_sha256 && cert !== String(grant.cert_sha256).toLowerCase()) {
         throw new HttpError(403, 'HOST_CERT_MISMATCH', 'Host signing certificate mismatch');
@@ -476,6 +491,11 @@ export async function handleMakV2(request, env, db) {
 
       const hostPackage = validPackageName(body.package_name);
       if (!hostPackage || hostPackage !== grant.package_name) throw new HttpError(403, 'HOST_PACKAGE_MISMATCH', 'Host package mismatch');
+      const hostAppName = cleanAppName(body.app_name);
+      const boundHostAppName = cleanAppName(grant.app_name);
+      if (boundHostAppName && hostAppName !== boundHostAppName) {
+        throw new HttpError(403, 'HOST_APP_MISMATCH', 'Host app name does not match the bound identity');
+      }
       const hostCert = normalizeHex64(body.cert_sha256);
       if (grant.signature_bind && hostCert && grant.cert_sha256 && hostCert !== String(grant.cert_sha256).toLowerCase()) {
         throw new HttpError(403, 'HOST_CERT_MISMATCH', 'Host signing certificate mismatch');
@@ -483,11 +503,11 @@ export async function handleMakV2(request, env, db) {
 
       const guestInput = body.guest && typeof body.guest === 'object' ? body.guest : {};
       const guestPackage = validPackageName(guestInput.package_name);
-      const guestAppName = cleanAppName(guestInput.app_name);
+      const guestAppName = cleanAppName(guestInput.app_name) || guestPackage;
       const guestCert = normalizeHex64(guestInput.cert_sha256);
       const apkHash = normalizeHex64(guestInput.apk_sha256);
       const versionCode = Number(guestInput.version_code || 0);
-      if (!guestPackage || !Number.isFinite(versionCode) || versionCode < 0) {
+      if (!guestPackage || !apkHash || !Number.isFinite(versionCode) || versionCode < 0) {
         throw new HttpError(400, 'APK_INVALID', 'Guest identity is malformed');
       }
       if (grant.signature_bind && !guestCert) {
@@ -518,6 +538,10 @@ export async function handleMakV2(request, env, db) {
           await setGuestCert(db, guest.id, guestCert);
           guest.cert_sha256 = guestCert;
         }
+        const knownGuestAppName = cleanAppName(guest.app_name);
+        if (mode === 'MANUAL' && knownGuestAppName && knownGuestAppName !== guestAppName) {
+          throw new HttpError(403, 'GUEST_APP_MISMATCH', 'Guest app name does not match the pre-registered identity');
+        }
         await updateGuestSeen(db, guest.id, {
           app_name: guestAppName,
           apk_sha256: apkHash,
@@ -528,12 +552,14 @@ export async function handleMakV2(request, env, db) {
       let binding = await getBinding(db, license.id, guest.id, grant.host_id);
       if (!binding) {
         if (mode === 'MANUAL') throw new HttpError(403, 'GUEST_PACKAGE_MISMATCH', 'Guest app is not bound to this host');
+        // Unlimited guest bindings: MAK/2 no longer enforces max_apps or any
+        // per-package installed-app count. The signed host/guest identity is
+        // still verified, only the arbitrary quantity cap is gone.
         const bound = await bindGuestAtomic(
           db, license.id, grant.host_id, guest.id, guest.package_name,
           { launch: true, install: true, update: true, restart: true },
-          license.max_apps,
         );
-        if (!bound.ok) throw new HttpError(403, 'APP_LIMIT_REACHED', 'Guest app limit reached for this host package');
+        if (!bound.ok) throw new HttpError(403, 'GUEST_PACKAGE_MISMATCH', 'Could not bind guest app');
         binding = bound.binding;
       }
       if (String(binding.status || '').toUpperCase() !== 'ACTIVE') {

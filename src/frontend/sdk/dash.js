@@ -73,7 +73,6 @@ export function dashboardPage(d) {
 export function generatePage(o) {
   const values = o.values || {};
   const server = o.server || {};
-  const maxApps = Math.max(1, Number(values.max_apps || 2));
   const signatureBind = String(values.signature_bind ?? '1') !== '0';
   const manualBind = String(values.host_bind_mode || 'AUTO').toUpperCase() === 'MANUAL';
 
@@ -133,7 +132,7 @@ export function generatePage(o) {
 
   const existingRows = Array.isArray(values.guest_rows) && values.guest_rows.length
     ? values.guest_rows
-    : Array.from({ length: maxApps }, () => ({ app_name: '', package_name: '', cert_sha256: '' }));
+    : Array.from({ length: 2 }, () => ({ app_name: '', package_name: '', cert_sha256: '' }));
 
   const guestRow = (row) =>
     '<div class="guest-row clay-card p-3 rounded-2xl mb-3">'
@@ -157,9 +156,7 @@ export function generatePage(o) {
     + '<div id="mak-custom-expiry" style="display:' + (String(values.duration || '30') === 'custom' ? 'block' : 'none') + '"><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Custom expiry date</label><input type="date" name="expires_on" value="' + esc(values.expires_on || o.defaultExpiry || '') + '" class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'
     + '<div class="grid grid-cols-2 gap-3">'
     + field('Package limit', '<input type="number" name="max_packages" id="mak-max-packages" min="1" max="100" value="' + esc(values.max_packages || 1) + '" required class="w-full clay-card px-4 py-3 text-sm rounded-2xl">', 'Kitne host packages is MAK par bind honge.')
-    + field('App names / package', '<input type="number" name="max_apps" id="mak-max-apps" min="1" max="100" value="' + esc(values.max_apps || 2) + '" required class="w-full clay-card px-4 py-3 text-sm rounded-2xl">', 'Ek package me kitne apps allow honge.')
     + '</div>'
-    + '<input type="hidden" name="max_installs" value="' + esc(values.max_installs || 3) + '">'
     + '<input type="hidden" name="host_bind_mode" id="mak-bind-mode" value="' + (manualBind ? 'MANUAL' : 'AUTO') + '">'
     + '</div>'
     + '<div class="space-y-4">'

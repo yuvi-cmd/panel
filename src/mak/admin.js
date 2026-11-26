@@ -279,8 +279,6 @@ export async function handleMakAdmin(request, env, db, options = {}) {
       max_activations: String(sp.get('max_activations') || '1'),
       session_ttl: String(sp.get('session_ttl') || '3600'),
       max_packages: String(sp.get('max_packages') || '1'),
-      max_apps: String(sp.get('max_apps') || '2'),
-      max_installs: String(sp.get('max_installs') || '3'),
       signature_bind: String(sp.get('signature_bind') ?? '1'),
       host_package: String(sp.get('host_package') || ''),
       host_app_name: String(sp.get('host_app_name') || ''),
@@ -421,14 +419,12 @@ export async function handleMakAdmin(request, env, db, options = {}) {
       if (action === 'extend_limits') {
         const hosts = await getHostsForLicense(db, id);
         const maxPackages = clampInt(sp.get('max_packages'), 1, 100, Number(license.max_packages || 1));
-        const maxApps = clampInt(sp.get('max_apps'), 1, 100, Number(license.max_apps || 2));
-        const maxInstalls = clampInt(sp.get('max_installs'), 1, 100, Number(license.max_installs || 3));
-        if (!maxPackages || !maxApps || !maxInstalls) return fail('Limits must be between 1 and 100.');
+        if (!maxPackages) return fail('Limit must be between 1 and 100.');
         if (maxPackages < hosts.length) return fail('Package limit cannot be lower than the ' + hosts.length + ' package(s) already saved.');
-        await updateLicenseQuota(db, id, { max_packages: maxPackages, max_apps: maxApps, max_installs: maxInstalls });
+        await updateLicenseQuota(db, id, { max_packages: maxPackages });
         await logEvent(db, {
           license_id: id, event_type: 'LIMITS_EXTENDED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash,
-          detail: 'Limits set to packages=' + maxPackages + ' apps=' + maxApps + ' installs=' + maxInstalls,
+          detail: 'Host package limit set to ' + maxPackages + '; guest apps have no count limit',
         });
         return done('Limits updated.');
       }
@@ -511,8 +507,8 @@ export async function handleMakAdmin(request, env, db, options = {}) {
         const guestId = Number(sp.get('guest_id') || 0);
         const guest = await getGuestById(db, guestId);
         if (!guest) return fail('Choose an approved guest app.');
-        const bound = await bindGuestAtomic(db, id, 0, guestId, guest.package_name, permissionsFrom(sp), license.max_apps);
-        if (!bound.ok) return fail('App limit reached for this license. Delete an app binding to free a slot.');
+        const bound = await bindGuestAtomic(db, id, 0, guestId, guest.package_name, permissionsFrom(sp));
+        if (!bound.ok) return fail('Could not bind guest app.');
         await logEvent(db, { license_id: id, guest_app_id: guestId, event_type: 'BINDING_ADDED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Guest bound to license' });
         return done('Guest app bound.');
       }
@@ -651,8 +647,8 @@ export async function handleMakAdmin(request, env, db, options = {}) {
         const licenseId = Number(sp.get('license_id') || 0);
         const license = await getLicenseById(db, licenseId);
         if (!license) return fail('Choose a license.');
-        const bound = await bindGuestAtomic(db, licenseId, 0, id, guest.package_name, permissionsFrom(sp), license.max_apps);
-        if (!bound.ok) return fail('App limit reached for this license. Delete an app binding to free a slot.');
+        const bound = await bindGuestAtomic(db, licenseId, 0, id, guest.package_name, permissionsFrom(sp));
+        if (!bound.ok) return fail('Could not bind guest app.');
         await logEvent(db, { license_id: licenseId, guest_app_id: id, event_type: 'BINDING_ADDED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Guest bound to license' });
         return done('Guest bound to license.');
       }
