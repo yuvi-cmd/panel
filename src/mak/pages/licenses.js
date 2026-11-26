@@ -92,8 +92,9 @@ export function newLicensePage({ csrf, guests = [], error = '', values = {}, def
               ${field('Session TTL (seconds)', `<input type="number" name="session_ttl" min="300" max="86400" value="${esc(v.session_ttl || 3600)}" required>`, 'Short-lived signed sessions. Default 1 hour.')}
               ${field('Max devices', `<input type="number" name="max_devices" min="1" max="100" value="${esc(v.max_devices || 1)}" required>`, 'Concurrent active device keys.')}
               ${field('Max activations', `<input type="number" name="max_activations" min="1" max="1000" value="${esc(v.max_activations || 2)}" required>`, 'Lifetime registrations, including reinstalls.')}
-              ${field('Max host packages', `<input type="number" name="max_packages" min="1" max="100" value="${esc(v.max_packages || 1)}" required>`, 'Kitne host APK package names is MAK se bind ho sakte hain.')}
-              ${field('Cloned app limit', `<input type="number" name="guest_app_limit" min="1" max="1000" placeholder="Unlimited" value="${esc(v.guest_app_limit || '')}">`, 'Blank = unlimited. Har unique APK package + app name ek cloned app hai; same app ka naya version slot nahi khata.')}
+              ${field('Max host packages', `<input type="number" name="max_packages" min="1" max="100" value="${esc(v.max_packages || 1)}" required>`, 'Kitne alag host APK package names is MAK se bind ho sakte hain.')}
+              ${field('App names per package', `<input type="number" name="host_app_limit" min="1" max="100" value="${esc(v.host_app_limit || 1)}" required>`, 'Ek package ke andar kitne host app names allowed hain (jaise Dura plays, Sysmlcon).')}
+              ${field('Cloned app limit', `<input type="number" name="guest_app_limit" min="1" max="1000" placeholder="Unlimited" value="${esc(v.guest_app_limit || '')}">`, 'Blank = unlimited. Har host app ke andar unique guest APK package + app name ek cloned app hai; same app ka naya version slot nahi khata.')}
               ${field('Notes', `<textarea name="notes" placeholder="Internal note (not shown to the client)" maxlength="1000">${esc(v.notes || '')}</textarea>`, '', 'span-2')}
             </div>
           </div>
@@ -163,7 +164,7 @@ export function revealLicensePage({ license, credential, csrf, server }) {
         <dt>License ID</dt><dd class="mono">${esc(license.license_uid)}</dd>
         <dt>Expires</dt><dd>${esc(fmtDate(license.expires_at))}</dd>
         <dt>Devices / activations</dt><dd>${license.max_devices} / ${license.max_activations}</dd>
-        <dt>Host packages</dt><dd>${license.max_packages || 1} allowed · ${license.guest_app_limit ? 'cloned app limit ' + license.guest_app_limit + ' / host' : 'cloned apps unlimited'}</dd>
+        <dt>Host packages</dt><dd>${license.max_packages || 1} package(s) · ${license.host_app_limit || 1} app name(s) per package · ${license.guest_app_limit ? 'cloned app limit ' + license.guest_app_limit + ' / host app' : 'cloned apps unlimited'}</dd>
         <dt>Host binding</dt><dd>${String(license.host_bind_mode || 'AUTO') === 'MANUAL' ? 'Manual (pre-registered)' : 'Auto (first use)'}</dd>
         <dt>Server</dt><dd>${statusBadge(server.enabled ? 'ONLINE' : 'OFFLINE')}</dd>
       </dl>
@@ -214,6 +215,13 @@ export function licenseDetailPage({
   const durationNote = notStarted
     ? 'Not started · ' + reservedDays + ' day(s) reserved. The countdown begins on the first successful app bind.'
     : 'Server rejects every request once this duration ends.';
+  const packageCount = new Set(hosts.map((h) => String(h.package_name))).size;
+  const appNamesPerPackage = hosts.reduce((acc, h) => {
+    const key = String(h.package_name);
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const maxAppNames = Math.max(0, ...Object.values(appNamesPerPackage));
 
   return `
     ${pageHeader({
@@ -242,8 +250,9 @@ export function licenseDetailPage({
               <input type="hidden" name="session_ttl" value="${license.session_ttl}">
               <input type="hidden" name="max_devices" value="${license.max_devices}">
               ${field('Max activations', `<input type="number" name="max_activations" min="1" max="1000" value="${license.max_activations}" required>`)}
-              ${field('Max host packages', `<input type="number" name="max_packages" min="1" max="100" value="${license.max_packages || 1}" required>`, 'Kitne host APK package names is MAK se bind ho sakte hain.')}
-              ${field('Cloned app limit', `<input type="number" name="guest_app_limit" min="1" max="1000" placeholder="Unlimited" value="${esc(license.guest_app_limit || '')}">`, 'Blank = unlimited. Har unique APK package + app name ek cloned app hai; same app ka naya version slot nahi khata.')}
+              ${field('Max host packages', `<input type="number" name="max_packages" min="1" max="100" value="${license.max_packages || 1}" required>`, 'Kitne alag host APK package names is MAK se bind ho sakte hain.')}
+              ${field('App names per package', `<input type="number" name="host_app_limit" min="1" max="100" value="${license.host_app_limit || 1}" required>`, 'Ek package ke andar kitne host app names allowed hain.')}
+              ${field('Cloned app limit', `<input type="number" name="guest_app_limit" min="1" max="1000" placeholder="Unlimited" value="${esc(license.guest_app_limit || '')}">`, 'Blank = unlimited. Har host app ke andar unique guest APK package + app name ek cloned app hai; same app ka naya version slot nahi khata.')}
               ${field('Signature Bind', `<select name="signature_bind">
                 <option value="1" ${Number(license.signature_bind ?? 1) ? 'selected' : ''}>Yes — verify APK signature</option>
                 <option value="0" ${!Number(license.signature_bind ?? 1) ? 'selected' : ''}>No — package + app name only</option>
@@ -264,27 +273,27 @@ export function licenseDetailPage({
         </div>
 
         <div class="card">
-          ${sectionHead('Host packages', 'Package name + signing certificate must both match. ' + Number(hosts.length || 0) + ' / ' + Number(license.max_packages || 1) + ' used.', host ? statusBadge(host.status) : statusBadge('PENDING'))}
+          ${sectionHead('Host packages', 'Package name + app name + signing certificate must all match. ' + packageCount + ' / ' + Number(license.max_packages || 1) + ' package(s) · busiest package ' + maxAppNames + ' / ' + Number(license.host_app_limit || 1) + ' app name(s).', host ? statusBadge(host.status) : statusBadge('PENDING'))}
           ${hosts.length ? `<div class="table-wrap" style="border:0;background:transparent"><table class="tbl" style="min-width:0"><thead><tr><th>Package</th><th>App</th><th>Status</th><th></th></tr></thead><tbody>${hosts.map((h) => `
             <tr>
               <td data-label="Package"><div class="cell-main mono">${esc(h.package_name)}</div><div class="cell-sub mono">${esc(h.cert_sha256)}</div></td>
               <td data-label="App">${esc(h.app_name || '—')}</td>
               <td data-label="Status">${statusBadge(h.status)}</td>
-              <td data-label="" class="actions"><form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="${String(h.status).toUpperCase() === 'ACTIVE' ? 'host_block' : 'host_unblock'}"><input type="hidden" name="host_id" value="${h.id}"><button class="btn btn-sm ${String(h.status).toUpperCase() === 'ACTIVE' ? 'btn-danger' : 'btn-ghost'}" type="submit" onclick="return askConfirm(this.form,'${String(h.status).toUpperCase() === 'ACTIVE' ? 'Block' : 'Unblock'} this host package?','${String(h.status).toUpperCase() === 'ACTIVE' ? 'Requests from this package are denied and its grants and tickets are revoked. Its package slot stays reserved.' : 'This package can authenticate again.'}','${String(h.status).toUpperCase() === 'ACTIVE' ? 'danger' : ''}')">${icon(String(h.status).toUpperCase() === 'ACTIVE' ? 'ban' : 'check', 13)} ${String(h.status).toUpperCase() === 'ACTIVE' ? 'Block' : 'Unblock'}</button></form><form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="host_delete"><input type="hidden" name="host_id" value="${h.id}"><button class="btn btn-sm btn-danger" type="submit" onclick="return askConfirm(this.form,'Delete this host package?','The package pin, its grants, tickets and host-scoped guest bindings are removed. Its package slot becomes free.','danger')">Delete</button></form></td>
-            </tr>`).join('')}</tbody></table></div>` : `<div class="notice" style="margin:0">${icon('clock', 17)}<div><b>${String(license.host_bind_mode || 'AUTO') === 'MANUAL' ? 'Manual binding.' : 'Auto binding enabled.'}</b> ${String(license.host_bind_mode || 'AUTO') === 'MANUAL' ? 'Only the packages you register here can authenticate.' : 'The first ' + Number(license.max_packages || 1) + ' host packages will bind on first authenticated use.'}</div></div>`}
+              <td data-label="" class="actions"><form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="${String(h.status).toUpperCase() === 'ACTIVE' ? 'host_block' : 'host_unblock'}"><input type="hidden" name="host_id" value="${h.id}"><button class="btn btn-sm ${String(h.status).toUpperCase() === 'ACTIVE' ? 'btn-danger' : 'btn-ghost'}" type="submit" onclick="return askConfirm(this.form,'${String(h.status).toUpperCase() === 'ACTIVE' ? 'Block' : 'Unblock'} this host package?','${String(h.status).toUpperCase() === 'ACTIVE' ? 'Requests from this package are denied and its grants and tickets are revoked. Its package slot stays reserved.' : 'This package can authenticate again.'}','${String(h.status).toUpperCase() === 'ACTIVE' ? 'danger' : ''}')">${icon(String(h.status).toUpperCase() === 'ACTIVE' ? 'ban' : 'check', 13)} ${String(h.status).toUpperCase() === 'ACTIVE' ? 'Block' : 'Unblock'}</button></form><form method="post" action="/licenses/${license.id}/action" style="display:inline">${csrfInput(csrf)}<input type="hidden" name="action" value="host_delete"><input type="hidden" name="host_id" value="${h.id}"><button class="btn btn-sm btn-danger" type="submit" onclick="return askConfirm(this.form,'Delete this host app identity?','The app-name pin, its grants, tickets and host-scoped guest bindings are removed. Its app-name slot becomes free; the package slot frees only when no app names remain.','danger')">Delete</button></form></td>
+            </tr>`).join('')}</tbody></table></div>` : `<div class="notice" style="margin:0">${icon('clock', 17)}<div><b>${String(license.host_bind_mode || 'AUTO') === 'MANUAL' ? 'Manual binding.' : 'Auto binding enabled.'}</b> ${String(license.host_bind_mode || 'AUTO') === 'MANUAL' ? 'Only the host package + app name identities you register here can authenticate.' : 'Up to ' + Number(license.max_packages || 1) + ' package(s), with up to ' + Number(license.host_app_limit || 1) + ' app name(s) each, will bind on first authenticated use.'}</div></div>`}
           <details style="margin-top:14px">
-            <summary class="btn btn-sm btn-ghost" style="list-style:none;display:inline-flex">${icon('edit', 14)} ${hosts.length ? 'Add / update host package' : 'Pre-register host'}</summary>
+            <summary class="btn btn-sm btn-ghost" style="list-style:none;display:inline-flex">${icon('edit', 14)} ${hosts.length ? 'Add / update host app' : 'Pre-register host app'}</summary>
             <form method="post" action="/licenses/${license.id}/action" style="margin-top:12px">
               ${csrfInput(csrf)}<input type="hidden" name="action" value="host_save">
               <div class="form-grid">
                 ${field('Package name', `<input name="host_package" placeholder="com.example.host" required>`)}
-                ${field('App name', `<input name="host_app_name" placeholder="Display name (optional)">`)}
+                ${field('App name', `<input name="host_app_name" placeholder="e.g. Dura plays" maxlength="120" required>`)}
                 ${field('Certificate SHA-256', `<input name="host_cert" placeholder="64 hex characters" ${Number(license.signature_bind ?? 1) ? 'required' : ''}>`)}
               </div>
-              <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit" onclick="return askConfirm(this.form,'Save host package?','All active grants and tickets will be revoked. New authorization must match the package and certificate.','danger')">Save package</button></div>
+              <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit" onclick="return askConfirm(this.form,'Save host app identity?','All active grants and tickets will be revoked. New authorization must match the package, app name and certificate.','danger')">Save host app</button></div>
             </form>
           </details>
-          ${hosts.length ? `<div class="divider"></div><div class="row" style="justify-content:space-between"><span class="muted small">Delete all removes every package pin and frees all package slots.</span><form method="post" action="/licenses/${license.id}/action">${csrfInput(csrf)}<input type="hidden" name="action" value="host_delete"><button class="btn btn-sm btn-danger" type="submit" onclick="return askConfirm(this.form,'Delete all host packages?','Every package pin, grant, ticket and host-scoped guest binding is removed. Package slots become free.','danger')">Delete all</button></form></div>` : ''}
+          ${hosts.length ? `<div class="divider"></div><div class="row" style="justify-content:space-between"><span class="muted small">Delete all removes every package pin and frees all package slots.</span><form method="post" action="/licenses/${license.id}/action">${csrfInput(csrf)}<input type="hidden" name="action" value="host_delete"><button class="btn btn-sm btn-danger" type="submit" onclick="return askConfirm(this.form,'Delete all host app identities?','Every package/app-name pin, grant, ticket and host-scoped guest binding is removed. All slots become free.','danger')">Delete all</button></form></div>` : ''}
         </div>
 
         <div class="card">

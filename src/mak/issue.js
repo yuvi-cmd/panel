@@ -13,7 +13,7 @@ import {
   normalizeHex64, nowS, validPackageName,
 } from './crypto.js';
 import {
-  createLicenseRecord, bindGuestAtomic, findHostForLicensePackage, getLicenseByHash,
+  createLicenseRecord, bindGuestAtomic, findHostForLicenseIdentity, getLicenseByHash,
   guestAppKey, listAllActiveGuests,
 } from './store.js';
 import { createGuestV2 } from './store-v2.js';
@@ -101,6 +101,7 @@ export function parseLicensePolicy(sp, opts = {}) {
   const maxActivations = clampInt(sp.get('max_activations'), 1, 1000, 1);
   const sessionTtl = clampInt(sp.get('session_ttl'), 300, 86400, 3600);
   const maxPackages = clampInt(sp.get('max_packages'), 1, 100, 1);
+  const hostAppLimit = clampInt(sp.get('host_app_limit'), 1, 100, 1);
   const guestLimitRaw = String(sp.get('guest_app_limit') ?? '').trim().toLowerCase();
   const guestLimitProvided = typeof sp.has === 'function' && sp.has('guest_app_limit');
   let guestAppLimit = null;
@@ -111,7 +112,7 @@ export function parseLicensePolicy(sp, opts = {}) {
     }
     guestAppLimit = parsedLimit;
   }
-  if (!maxDevices || !maxActivations || !sessionTtl || !maxPackages) {
+  if (!maxDevices || !maxActivations || !sessionTtl || !maxPackages || !hostAppLimit) {
     return { error: 'One or more limits are outside the allowed range.' };
   }
   if (maxActivations < maxDevices) return { error: 'Max activations must be at least max devices.' };
@@ -146,6 +147,7 @@ export function parseLicensePolicy(sp, opts = {}) {
     max_devices: maxDevices, max_activations: maxActivations,
     session_ttl: sessionTtl,
     max_packages: maxPackages,
+    host_app_limit: hostAppLimit,
     signature_bind: signatureBind ? 1 : 0,
     host_bind_mode: hostBindMode,
   };
@@ -184,7 +186,7 @@ export async function issueMak(db, sp, createdBy) {
     }
     if (prebound.size > limit) {
       return {
-        error: 'This MAK allows ' + limit + ' cloned app(s) per host package; reduce the pre-bound guest rows or leave the limit blank for unlimited.',
+        error: 'This MAK allows ' + limit + ' cloned app(s) per host app; reduce the pre-bound guest rows or leave the limit blank for unlimited.',
       };
     }
   }
@@ -212,7 +214,7 @@ export async function issueMak(db, sp, createdBy) {
   // them empty; MANUAL mode requires them at issuance time.
   let hostId = 0;
   if (parsed.host?.package_name) {
-    const hostRow = await findHostForLicensePackage(db, licenseId, parsed.host.package_name);
+    const hostRow = await findHostForLicenseIdentity(db, licenseId, parsed.host.package_name, parsed.host.app_name);
     hostId = Number(hostRow?.id || 0);
   }
   for (const row of parsed.guests) {

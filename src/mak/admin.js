@@ -16,7 +16,7 @@ import {
   clientIp, flashRedirect, formAll, html, sameOrigin, text,
 } from './http.js';
 import {
-  activeLicenseOptions, bindGuestAtomic, maxGuestAppCount, createGuest, dashboardStats,
+  activeLicenseOptions, bindGuestAtomic, countDistinctHostPackages, maxGuestAppCount, maxHostAppCount, createGuest, dashboardStats,
   deleteBinding, deleteDevice, deleteGuestApp, deleteHostCascade, deleteLicense, deviceCounts, eventCounts, expiringLicenses,
   getDeviceById, getGuestById, getHostById, getHostForLicense, getHostsForLicense, getLicenseById, getSession,
   guestCounts, guestEvents, hostCounts, licenseCounts, listAllActiveGuests,
@@ -279,6 +279,7 @@ export async function handleMakAdmin(request, env, db, options = {}) {
       max_activations: String(sp.get('max_activations') || '1'),
       session_ttl: String(sp.get('session_ttl') || '3600'),
       max_packages: String(sp.get('max_packages') || '1'),
+      host_app_limit: String(sp.get('host_app_limit') || '1'),
       guest_app_limit: String(sp.get('guest_app_limit') ?? ''),
       signature_bind: String(sp.get('signature_bind') ?? '1'),
       host_package: String(sp.get('host_package') || ''),
@@ -387,9 +388,13 @@ export async function handleMakAdmin(request, env, db, options = {}) {
         if (parsed.error) return fail(parsed.error);
         // Suspended/blocked packages still occupy slots; only explicit delete
         // releases a package limit slot.
-        const boundHosts = hosts.length;
-        if (Number(parsed.policy.max_packages) < boundHosts) {
-          return fail('Max host packages cannot be lower than the ' + boundHosts + ' package(s) already bound.');
+        const boundPackages = await countDistinctHostPackages(db, id);
+        if (Number(parsed.policy.max_packages) < boundPackages) {
+          return fail('Package limit cannot be lower than the ' + boundPackages + ' package(s) already bound.');
+        }
+        const boundAppNames = await maxHostAppCount(db, id);
+        if (Number(parsed.policy.host_app_limit) < boundAppNames) {
+          return fail('App name limit cannot be lower than the ' + boundAppNames + ' app name(s) already bound under one package.');
         }
         if (parsed.policy.guest_app_limit != null) {
           const boundGuests = await maxGuestAppCount(db, id);
@@ -424,10 +429,14 @@ export async function handleMakAdmin(request, env, db, options = {}) {
         return done(raw === 'lifetime' ? 'Expiry set to lifetime.' : 'Expiry extended by ' + raw + ' day(s).');
       }
       if (action === 'extend_limits') {
-        const hosts = await getHostsForLicense(db, id);
         const maxPackages = clampInt(sp.get('max_packages'), 1, 100, Number(license.max_packages || 1));
-        if (!maxPackages) return fail('Limit must be between 1 and 100.');
-        if (maxPackages < hosts.length) return fail('Package limit cannot be lower than the ' + hosts.length + ' package(s) already saved.');
+        if (!maxPackages) return fail('Package limit must be between 1 and 100.');
+        const boundPackages = await countDistinctHostPackages(db, id);
+        if (maxPackages < boundPackages) return fail('Package limit cannot be lower than the ' + boundPackages + ' package(s) already saved.');
+        const hostAppLimit = clampInt(sp.get('host_app_limit'), 1, 100, Number(license.host_app_limit || 1));
+        if (!hostAppLimit) return fail('App name limit must be between 1 and 100.');
+        const boundAppNames = await maxHostAppCount(db, id);
+        if (hostAppLimit < boundAppNames) return fail('App name limit cannot be lower than the ' + boundAppNames + ' app name(s) already bound under one package.');
         const guestProvided = typeof sp.has === 'function' && sp.has('guest_app_limit');
         const guestRaw = String(sp.get('guest_app_limit') ?? '').trim().toLowerCase();
         let guestLimit = null;
@@ -441,14 +450,14 @@ export async function handleMakAdmin(request, env, db, options = {}) {
             return fail('Cloned app limit cannot be lower than the ' + boundGuests + ' cloned app(s) already bound to a host.');
           }
         }
-        const quota = { max_packages: maxPackages };
+        const quota = { max_packages: maxPackages, host_app_limit: hostAppLimit };
         // Omitted field = keep the stored limit (legacy callers); blank is an
         // explicit request for unlimited.
         if (guestProvided) quota.guest_app_limit = guestLimit;
         await updateLicenseQuota(db, id, quota);
         await logEvent(db, {
           license_id: id, event_type: 'LIMITS_EXTENDED', result: 'SUCCESS', actor: session.username, ip_hash: ipHash,
-          detail: 'Host package limit set to ' + maxPackages + '; cloned app limit '
+          detail: 'Package limit set to ' + maxPackages + '; app name limit set to ' + hostAppLimit + '; cloned app limit '
             + (guestProvided ? (guestLimit == null ? 'set to unlimited' : 'set to ' + guestLimit) : 'unchanged'),
         });
         return done('Limits updated.');
@@ -510,15 +519,34 @@ export async function handleMakAdmin(request, env, db, options = {}) {
         if (!validPackageName(hostPackage)) return fail('Host package name is malformed.');
         if (hostCertRaw && !hostCert) return fail('Host certificate must be 64 hex characters.');
         if (!hostCert && Number(license.signature_bind ?? 1) === 1) return fail('Signature Bind is ON: host certificate is required.');
+        if (!hostAppName) return fail('Host app name is required.');
         const hosts = await getHostsForLicense(db, id);
-        const existing = hosts.find((h) => String(h.package_name) === hostPackage);
-        if (!existing && hosts.length >= Number(license.max_packages || 1)) {
-          return fail('Host package limit reached. Increase Package limit before adding another.');
+        const packages = new Set(hosts.map((h) => String(h.package_name)));
+        const packageAppNames = hosts.filter((h) => String(h.package_name) === hostPackage);
+        const existing = packageAppNames.find((h) => String(h.app_name || '') === hostAppName);
+        const legacyEmpty = packageAppNames.find((h) => !String(h.app_name || ''));
+        if (!existing && !legacyEmpty) {
+          if (!packages.has(hostPackage) && packages.size >= Number(license.max_packages || 1)) {
+            return fail('Package limit reached. Increase Package limit before adding another package.');
+          }
+          if (packageAppNames.length >= Number(license.host_app_limit || 1)) {
+            return fail('App name limit reached for this package. Increase App name limit or delete an app name.');
+          }
         }
-        await upsertHost(db, id, { package_name: hostPackage, app_name: hostAppName, cert_sha256: hostCert });
+        const saved = await upsertHost(db, id, {
+          package_name: hostPackage, app_name: hostAppName, cert_sha256: hostCert,
+          maxPackages: license.max_packages, hostAppLimit: license.host_app_limit,
+        });
+        if (!saved.ok) {
+          return fail(saved.code === 'APP_NAME_LIMIT_REACHED'
+            ? 'App name limit reached for this package.'
+            : saved.code === 'PACKAGE_LIMIT_REACHED'
+              ? 'Package limit reached.'
+              : 'Could not save host identity.');
+        }
         await revokeSessionsForLicense(db, id);
-        await logEvent(db, { license_id: id, event_type: 'HOST_BOUND', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Host package saved by administrator: ' + hostPackage });
-        return done('Host package saved. Sessions revoked.');
+        await logEvent(db, { license_id: id, event_type: 'HOST_BOUND', result: 'SUCCESS', actor: session.username, ip_hash: ipHash, detail: 'Host identity saved by administrator: ' + hostPackage + ' / ' + hostAppName });
+        return done('Host identity saved. Sessions revoked.');
       }
       if (action === 'host_reset' || action === 'host_delete') {
         const hostId = Number(sp.get('host_id') || 0);

@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS mak_licenses (
   activation_count INTEGER NOT NULL DEFAULT 0,
   session_ttl      INTEGER NOT NULL DEFAULT 3600,
   max_packages     INTEGER NOT NULL DEFAULT 1, -- host APK package names this MAK may bind
-  guest_app_limit  INTEGER, -- NULL = unlimited cloned apps (unique package + app name) per host
+  host_app_limit   INTEGER NOT NULL DEFAULT 1, -- host app names allowed PER package
+  guest_app_limit  INTEGER, -- NULL = unlimited cloned guest apps per host app identity
   max_apps         INTEGER NOT NULL DEFAULT 2, -- legacy column, no longer enforced
   max_installs     INTEGER NOT NULL DEFAULT 3, -- legacy column, no longer enforced
   signature_bind   INTEGER NOT NULL DEFAULT 1, -- 1 = verify APK signing cert per app
@@ -89,7 +90,7 @@ CREATE TABLE IF NOT EXISTS mak_hosts (
   created_at    INTEGER NOT NULL,
   updated_at    INTEGER NOT NULL,
   last_seen     INTEGER,
-  UNIQUE(license_id, package_name)
+  UNIQUE(license_id, package_name, app_name)
 );
 CREATE INDEX IF NOT EXISTS idx_mak_hosts_license ON mak_hosts(license_id);
 CREATE INDEX IF NOT EXISTS idx_mak_hosts_package ON mak_hosts(package_name);

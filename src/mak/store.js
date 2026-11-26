@@ -5,7 +5,7 @@ import { bumpLicenseEpoch, revokeGrantsForLicense } from './store-v2.js';
 
 const LICENSE_POLICY_KEYS = new Set([
   'label', 'user_ref', 'max_devices', 'max_activations', 'session_ttl',
-  'max_packages', 'guest_app_limit', 'max_apps', 'max_installs', 'signature_bind',
+  'max_packages', 'host_app_limit', 'guest_app_limit', 'max_apps', 'max_installs', 'signature_bind',
   'host_bind_mode', 'notes', 'expires_at', 'duration_days',
 ]);
 
@@ -70,7 +70,9 @@ export async function listLicenses(db, { q = '', status = 'ALL' } = {}) {
                       (SELECT package_name FROM mak_hosts WHERE license_id=l.id ORDER BY id LIMIT 1) AS host_package,
                       (SELECT status FROM mak_hosts WHERE license_id=l.id ORDER BY id LIMIT 1) AS host_status,
                       (SELECT cert_sha256 FROM mak_hosts WHERE license_id=l.id ORDER BY id LIMIT 1) AS host_cert_sha256,
-                      (SELECT COUNT(*) FROM mak_hosts hm WHERE hm.license_id=l.id) AS package_count,
+                      (SELECT COUNT(DISTINCT hm.package_name) FROM mak_hosts hm WHERE hm.license_id=l.id) AS package_count,
+                      (SELECT COALESCE(MAX(c),0)
+                         FROM (SELECT COUNT(*) AS c FROM mak_hosts hm WHERE hm.license_id=l.id GROUP BY hm.package_name)) AS host_app_count,
                       (SELECT COUNT(*) FROM mak_devices d WHERE d.license_id=l.id AND d.status='ACTIVE') AS device_count,
                       (SELECT COUNT(*) FROM mak_bindings b WHERE b.license_id=l.id AND b.status='ACTIVE') AS guest_count,
                       COALESCE(
@@ -106,9 +108,9 @@ export async function createLicenseRecord(db, input) {
     `INSERT INTO mak_licenses
       (license_uid,label,user_ref,credential_hash,credential_plain,status,created_at,updated_at,expires_at,
        duration_days,
-       max_devices,max_activations,activation_count,session_ttl,max_packages,guest_app_limit,max_apps,
+       max_devices,max_activations,activation_count,session_ttl,max_packages,host_app_limit,guest_app_limit,max_apps,
        max_installs,signature_bind,host_bind_mode,epoch,notes,created_by)
-     VALUES (?,?,?,?,?, 'ACTIVE', ?,?,?,?,?,?,0,?,?,?,?,?,?,?,1,?,?)
+     VALUES (?,?,?,?,?, 'ACTIVE', ?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,1,?,?)
      RETURNING id`,
   ).bind(
     input.license_uid,
@@ -121,6 +123,7 @@ export async function createLicenseRecord(db, input) {
     input.max_devices || 1, input.max_activations || 1,
     input.session_ttl || 3600,
     input.max_packages || 1,
+    input.host_app_limit || 1,
     input.guest_app_limit == null || input.guest_app_limit === '' ? null : Number(input.guest_app_limit),
     input.max_apps || 2,
     input.max_installs || 3,
@@ -171,7 +174,7 @@ export async function updateLicensePolicy(db, id, patch) {
 // Extending duration or raising quotas does not invalidate any existing grant:
 // nothing that was previously allowed becomes denied. Keep active seats alive.
 export async function updateLicenseQuota(db, id, patch) {
-  const allowed = new Set(['expires_at', 'duration_days', 'started_at', 'max_packages', 'guest_app_limit', 'max_apps', 'max_installs']);
+  const allowed = new Set(['expires_at', 'duration_days', 'started_at', 'max_packages', 'host_app_limit', 'guest_app_limit', 'max_apps', 'max_installs']);
   const keys = Object.keys(patch).filter((k) => allowed.has(k));
   if (!keys.length) return;
   const sets = keys.map((k) => `${k}=?`).join(',');
@@ -258,16 +261,43 @@ export async function getHostForLicense(db, licenseId) {
 }
 
 export async function findHostForLicensePackage(db, licenseId, packageName) {
-  return db.prepare('SELECT * FROM mak_hosts WHERE license_id=? AND package_name=?')
+  return db.prepare('SELECT * FROM mak_hosts WHERE license_id=? AND package_name=? ORDER BY id LIMIT 1')
     .bind(Number(licenseId) || 0, String(packageName || '')).first().catch(() => null);
 }
 
-export async function countActiveHosts(db, licenseId) {
-  // Every saved package consumes a slot, including suspended/blocked rows.
-  // Only an explicit package delete frees the slot again.
-  const row = await db.prepare('SELECT COUNT(*) AS c FROM mak_hosts WHERE license_id=?')
+export async function findHostForLicenseIdentity(db, licenseId, packageName, appName) {
+  return db.prepare('SELECT * FROM mak_hosts WHERE license_id=? AND package_name=? AND app_name=?')
+    .bind(Number(licenseId) || 0, String(packageName || ''), String(appName || '').trim())
+    .first().catch(() => null);
+}
+
+// Legacy rows registered before the app-name limit existed carry an empty
+// app_name. The first real activation adopts that row instead of spending a
+// second app-name slot.
+export async function findEmptyHostForLicensePackage(db, licenseId, packageName) {
+  return db.prepare("SELECT * FROM mak_hosts WHERE license_id=? AND package_name=? AND app_name='' ORDER BY id LIMIT 1")
+    .bind(Number(licenseId) || 0, String(packageName || '')).first().catch(() => null);
+}
+
+export async function countDistinctHostPackages(db, licenseId) {
+  const row = await db.prepare('SELECT COUNT(DISTINCT package_name) AS c FROM mak_hosts WHERE license_id=?')
     .bind(Number(licenseId) || 0).first().catch(() => null);
   return Number(row?.c || 0);
+}
+
+export async function maxHostAppCount(db, licenseId) {
+  const row = await db.prepare(
+    `SELECT COALESCE(MAX(c),0) AS c
+       FROM (SELECT COUNT(*) AS c FROM mak_hosts WHERE license_id=? GROUP BY package_name)`,
+  ).bind(Number(licenseId) || 0).first().catch(() => null);
+  return Number(row?.c || 0);
+}
+
+export async function countActiveHosts(db, licenseId) {
+  // Package slots are distinct package names. Suspended rows still count;
+  // only an explicit host delete frees an app-name slot, and deleting the last
+  // app name of a package frees the package slot.
+  return countDistinctHostPackages(db, licenseId);
 }
 
 // Numeric durations begin on the first successful runtime app bind. The
@@ -283,35 +313,53 @@ export async function startLicenseDurationAtomic(db, licenseId, now = nowS()) {
   return row || null;
 }
 
-// Atomic first-use bind: inserts only while the total package count is below
-// the license limit. D1 serializes writes, so concurrent requests cannot both
-// take the last slot. Suspended rows count because they still occupy a slot.
-export async function createHostAtomic(db, licenseId, { package_name, app_name = '', cert_sha256, maxPackages }) {
+// Atomic first-use bind. Two independent limits are checked inside the same
+// statement: distinct packages < maxPackages, and app names for this package
+// < hostAppLimit. An existing package may receive another app name without
+// spending a new package slot. Suspended rows count because they still occupy
+// slots until an administrator deletes them.
+export async function createHostAtomic(db, licenseId, { package_name, app_name = '', cert_sha256, maxPackages, hostAppLimit }) {
   const now = nowS();
+  const appLimit = Math.max(1, Number(hostAppLimit) || 1);
+  const pkgLimit = Math.max(1, Number(maxPackages) || 1);
   const row = await db.prepare(
     `INSERT INTO mak_hosts (license_id,package_name,app_name,cert_sha256,status,version_policy,created_at,updated_at)
      SELECT ?,?,?,?, 'ACTIVE','ANY',?,?
-      WHERE (SELECT COUNT(*) FROM mak_hosts WHERE license_id=?) < ?
+      WHERE (SELECT COUNT(*) FROM mak_hosts WHERE license_id=? AND package_name=?) < ?
+        AND ((SELECT COUNT(DISTINCT package_name) FROM mak_hosts WHERE license_id=?) < ?
+             OR EXISTS (SELECT 1 FROM mak_hosts WHERE license_id=? AND package_name=?))
      RETURNING *`,
   ).bind(
     Number(licenseId), package_name, app_name || '', cert_sha256, now, now,
-    Number(licenseId), Math.max(1, Number(maxPackages) || 1),
+    Number(licenseId), package_name, appLimit,
+    Number(licenseId), pkgLimit,
+    Number(licenseId), package_name,
   ).first().catch(() => null);
-  if (!row) return { ok: false, code: 'PACKAGE_LIMIT_REACHED' };
-  return { ok: true, host: row };
+  if (row) return { ok: true, host: row };
+  const pkg = await db.prepare('SELECT 1 AS x FROM mak_hosts WHERE license_id=? AND package_name=? LIMIT 1')
+    .bind(Number(licenseId), package_name).first().catch(() => null);
+  return { ok: false, code: pkg ? 'APP_NAME_LIMIT_REACHED' : 'PACKAGE_LIMIT_REACHED' };
 }
 
-export async function upsertHost(db, licenseId, { package_name, app_name = '', cert_sha256, status = 'ACTIVE', version_policy = 'ANY' }) {
+export async function upsertHost(db, licenseId, {
+  package_name, app_name = '', cert_sha256, status = 'ACTIVE', version_policy = 'ANY',
+  maxPackages, hostAppLimit,
+}) {
   const now = nowS();
-  const row = await db.prepare(
-    `INSERT INTO mak_hosts (license_id,package_name,app_name,cert_sha256,status,version_policy,created_at,updated_at)
-     VALUES (?,?,?,?,?,?,?,?)
-     ON CONFLICT(license_id,package_name) DO UPDATE SET
-       app_name=excluded.app_name, cert_sha256=excluded.cert_sha256,
-       status=excluded.status, version_policy=excluded.version_policy, updated_at=excluded.updated_at
-     RETURNING *`,
-  ).bind(Number(licenseId), package_name, app_name || '', cert_sha256, status, version_policy, now, now).first().catch(() => null);
-  return row || findHostForLicensePackage(db, licenseId, package_name);
+  const appName = String(app_name || '').trim();
+  let existing = await findHostForLicenseIdentity(db, licenseId, package_name, appName);
+  if (!existing) existing = await findEmptyHostForLicensePackage(db, licenseId, package_name);
+  if (existing) {
+    const row = await db.prepare(
+      `UPDATE mak_hosts SET app_name=?,cert_sha256=?,status=?,version_policy=?,updated_at=?
+        WHERE id=? AND license_id=? RETURNING *`,
+    ).bind(appName || existing.app_name || '', cert_sha256, status, version_policy, now,
+      Number(existing.id), Number(licenseId)).first().catch(() => null);
+    return row ? { ok: true, host: row } : { ok: false, code: 'HOST_UPDATE_FAILED' };
+  }
+  return createHostAtomic(db, licenseId, {
+    package_name, app_name: appName, cert_sha256, maxPackages, hostAppLimit,
+  });
 }
 
 export async function setHostStatus(db, licenseId, status, hostId = 0) {
@@ -483,8 +531,10 @@ export function guestAppKey(packageName, appName) {
 
 // Atomic AUTO bind. guestAppLimit is optional: null/0 means unlimited, a
 // positive value caps the number of distinct cloned apps (package + app name)
-// per host. The signed host/guest identities remain mandatory and are
-// verified by the client.
+// per host app identity. license-wide rows (host_id=0) count for every host,
+// so a host_id=0 insert is checked against the license-wide maximum too.
+// The signed host/guest identities remain mandatory and are verified by the
+// client.
 export async function bindGuestAtomic(db, licenseId, hostId, guestId, guestPackage, perms = {}, guestAppLimit = null, guestAppName = '') {
   const now = nowS();
   const cap = Number.isFinite(Number(guestAppLimit)) && Number(guestAppLimit) > 0
@@ -498,13 +548,13 @@ export async function bindGuestAtomic(db, licenseId, hostId, guestId, guestPacka
       WHERE ? = 0
          OR EXISTS (
               SELECT 1 FROM mak_bindings b JOIN mak_guest_apps g ON g.id=b.guest_app_id
-               WHERE b.license_id=? AND (b.host_id=? OR b.host_id=0)
+               WHERE b.license_id=? AND (?=0 OR b.host_id=? OR b.host_id=0)
                  AND b.status='ACTIVE' AND ${GUEST_APP_KEY_SQL}=?
             )
          OR (
               SELECT COUNT(DISTINCT ${GUEST_APP_KEY_SQL})
                 FROM mak_bindings b JOIN mak_guest_apps g ON g.id=b.guest_app_id
-               WHERE b.license_id=? AND (b.host_id=? OR b.host_id=0) AND b.status='ACTIVE'
+               WHERE b.license_id=? AND (?=0 OR b.host_id=? OR b.host_id=0) AND b.status='ACTIVE'
             ) < ?
      ON CONFLICT(license_id,host_id,guest_app_id) DO UPDATE SET
        can_install=excluded.can_install, can_launch=excluded.can_launch,
@@ -517,8 +567,8 @@ export async function bindGuestAtomic(db, licenseId, hostId, guestId, guestPacka
     perms.update === false ? 0 : 1, perms.restart === false ? 0 : 1,
     now, now,
     cap,
-    Number(licenseId), Number(hostId), appKey,
-    Number(licenseId), Number(hostId), cap,
+    Number(licenseId), Number(hostId), Number(hostId), appKey,
+    Number(licenseId), Number(hostId), Number(hostId), cap,
   ).first().catch(() => null);
   if (!row) {
     return { ok: false, code: cap > 0 ? 'APP_LIMIT_REACHED' : 'BINDING_CREATE_FAILED' };
@@ -535,9 +585,9 @@ export async function countDistinctGuestApps(db, licenseId) {
   return Number(row?.c || 0);
 }
 
-// The limit is per host package, so compare it with the busiest host rather
-// than with the license-wide total. license-wide bindings (host_id=0) count
-// for every host because each of them inherits those bindings.
+// The limit is per host app identity, so compare it with the busiest host app
+// rather than with the license-wide total. license-wide bindings (host_id=0)
+// count for every host app because each of them inherits those bindings.
 export async function maxGuestAppCount(db, licenseId) {
   const row = await db.prepare(
     `SELECT MAX((SELECT COUNT(DISTINCT ${GUEST_APP_KEY_SQL})

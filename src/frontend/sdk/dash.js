@@ -154,9 +154,10 @@ export function generatePage(o) {
     + field('Label <span class="text-red-500">*</span>', input('label', values.label, 'required maxlength="80" placeholder="e.g. Rahul monthly"'))
     + field('Duration <span class="text-red-500">*</span>', durationSelect, 'Expiry grant me signed hoti hai; AAR device clock se check karega.')
     + '<div id="mak-custom-expiry" style="display:' + (String(values.duration || '30') === 'custom' ? 'block' : 'none') + '"><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Custom expiry date</label><input type="date" name="expires_on" value="' + esc(values.expires_on || o.defaultExpiry || '') + '" class="w-full clay-card px-4 py-3 text-sm rounded-2xl"></div>'
-    + '<div class="grid grid-cols-2 gap-3">'
-    + field('Package limit', '<input type="number" name="max_packages" id="mak-max-packages" min="1" max="100" value="' + esc(values.max_packages || 1) + '" required class="w-full clay-card px-4 py-3 text-sm rounded-2xl">', 'Kitne host packages is MAK par bind honge.')
-    + field('Cloned app limit', '<input type="number" name="guest_app_limit" id="mak-guest-limit" min="1" max="1000" placeholder="Unlimited" value="' + esc(values.guest_app_limit || '') + '" class="w-full clay-card px-4 py-3 text-sm rounded-2xl">', 'Blank = unlimited. Har unique APK package + app name ek cloned app hai; same app ka naya version slot nahi khata.')
+    + '<div class="grid grid-cols-2 lg:grid-cols-3 gap-3">'
+    + field('Package limit', '<input type="number" name="max_packages" id="mak-max-packages" min="1" max="100" value="' + esc(values.max_packages || 1) + '" required class="w-full clay-card px-4 py-3 text-sm rounded-2xl">', 'Kitne alag host APK packages is MAK par bind honge.')
+    + field('App name limit', '<input type="number" name="host_app_limit" id="mak-host-app-limit" min="1" max="100" value="' + esc(values.host_app_limit || 1) + '" required class="w-full clay-card px-4 py-3 text-sm rounded-2xl">', 'Har package ke andar kitne host app names allowed hain (jaise Dura plays, Sysmlcon).')
+    + field('Cloned app limit', '<input type="number" name="guest_app_limit" id="mak-guest-limit" min="1" max="1000" placeholder="Unlimited" value="' + esc(values.guest_app_limit || '') + '" class="w-full clay-card px-4 py-3 text-sm rounded-2xl">', 'Blank = unlimited. Har host app ke andar unique guest APK package + app name ek cloned app hai; same app ka naya version slot nahi khata.')
     + '</div>'
     + '<input type="hidden" name="host_bind_mode" id="mak-bind-mode" value="' + (manualBind ? 'MANUAL' : 'AUTO') + '">'
     + '</div>'

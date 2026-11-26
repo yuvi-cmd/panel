@@ -27,7 +27,8 @@ import { loadKeyConfig, publicKeysView } from './keystore.js';
 import {
   bindGuestAtomic,
   createHostAtomic,
-  findHostForLicensePackage,
+  findEmptyHostForLicensePackage,
+  findHostForLicenseIdentity,
   findLicenseByCredential,
   getBinding,
   startLicenseDurationAtomic,
@@ -307,7 +308,29 @@ export async function handleMakV2(request, env, db) {
       const cert = normalizeHex64(body.cert_sha256);
       if (signatureBind && !cert) throw new HttpError(403, 'HOST_CERT_MISMATCH', 'Host signing certificate is required');
 
-      let host = await findHostForLicensePackage(db, license.id, packageName);
+      // Host identity is MAK + package + app name + certificate. One package
+      // may hold several app names (rebrands), capped per package, while the
+      // number of packages is capped separately.
+      let host = await findHostForLicenseIdentity(db, license.id, packageName, appName);
+      if (!host) {
+        // A legacy row registered before app names were limited can still be
+        // claimed by its first real activation.
+        const legacy = await findEmptyHostForLicensePackage(db, license.id, packageName);
+        if (legacy) {
+          if (String(legacy.status || '').toUpperCase() !== 'ACTIVE') {
+            throw new HttpError(403, 'HOST_PACKAGE_MISMATCH', 'Host binding is suspended');
+          }
+          if (signatureBind && legacy.cert_sha256 && String(legacy.cert_sha256).toLowerCase() !== cert) {
+            throw new HttpError(403, 'HOST_CERT_MISMATCH', 'Host signing certificate mismatch');
+          }
+          const adopted = await db.prepare(
+            `UPDATE mak_hosts
+                SET app_name=?,cert_sha256=CASE WHEN cert_sha256='' THEN ? ELSE cert_sha256 END,updated_at=?
+              WHERE id=? AND license_id=? AND app_name='' RETURNING *`,
+          ).bind(appName, signatureBind ? cert : '', nowS(), legacy.id, license.id).first().catch(() => null);
+          host = adopted || await findHostForLicenseIdentity(db, license.id, packageName, appName);
+        }
+      }
       if (host) {
         if (String(host.status || '').toUpperCase() !== 'ACTIVE') {
           throw new HttpError(403, 'HOST_PACKAGE_MISMATCH', 'Host binding is suspended');
@@ -320,34 +343,33 @@ export async function handleMakV2(request, env, db) {
             .bind(cert, nowS(), host.id).run().catch(() => {});
           host.cert_sha256 = cert;
         }
-        // Host identity is MAK + package + app name + certificate. A host
-        // package cannot silently change its display identity after binding.
         const boundAppName = cleanAppName(host.app_name);
         if (boundAppName && boundAppName !== appName) {
           throw new HttpError(403, 'HOST_APP_MISMATCH', 'Host app name does not match the bound identity');
         }
-        if (!boundAppName) {
-          await db.prepare('UPDATE mak_hosts SET app_name=?,updated_at=? WHERE id=?')
-            .bind(appName, nowS(), host.id).run().catch(() => {});
-          host.app_name = appName;
-        }
       } else {
         const mode = String(license.host_bind_mode || 'AUTO').toUpperCase();
         if (mode === 'MANUAL') {
-          throw new HttpError(403, 'HOST_PACKAGE_MISMATCH', 'Host package is not pre-registered for this license');
+          throw new HttpError(403, 'HOST_PACKAGE_MISMATCH', 'Host package/app name is not pre-registered for this license');
         }
         const created = await createHostAtomic(db, license.id, {
           package_name: packageName,
           app_name: appName,
           cert_sha256: signatureBind ? cert : '',
           maxPackages: license.max_packages,
+          hostAppLimit: license.host_app_limit,
         });
-        if (!created.ok) throw new HttpError(403, 'PACKAGE_LIMIT_REACHED', 'Host package limit reached');
+        if (!created.ok) {
+          if (created.code === 'APP_NAME_LIMIT_REACHED') {
+            throw new HttpError(403, 'APP_NAME_LIMIT_REACHED', 'Host app name limit reached for this package');
+          }
+          throw new HttpError(403, 'PACKAGE_LIMIT_REACHED', 'Host package limit reached');
+        }
         host = created.host;
         await log(db, {
           license_id: license.id, host_id: host.id, event_type: 'HOST_BOUND',
           result: 'SUCCESS', request_id: requestId, ip_hash: ipHash,
-          detail: 'Host package auto-bound: ' + packageName + ' / ' + appName,
+          detail: 'Host identity auto-bound: ' + packageName + ' / ' + appName,
         });
       }
 

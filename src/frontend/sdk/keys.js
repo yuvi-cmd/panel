@@ -70,6 +70,8 @@ export function keysPage(o) {
     const pkgCount = Number(l.package_count || 0);
     const hosts = hostsByLicense.get(id) || [];
     const maxPackages = Number(l.max_packages || 1);
+    const hostAppLimit = Number(l.host_app_limit || 1);
+    const maxHostApps = Number(l.host_app_count || 0);
     const guestLimit = l.guest_app_limit == null || l.guest_app_limit === '' ? 0 : Number(l.guest_app_limit);
     const clonedApps = Number(l.guest_app_count || 0);
 
@@ -89,7 +91,7 @@ export function keysPage(o) {
         + '<input type="hidden" name="_csrf" value="' + esc(csrf) + '">'
         + '<input type="hidden" name="action" value="' + (blocked ? 'host_unblock' : 'host_block') + '">'
         + '<input type="hidden" name="host_id" value="' + Number(h.id) + '"></form>'
-        + '<form id="delete-host-' + Number(h.id) + '" method="post" action="/sdk/keys/' + id + '/action" class="hidden" onsubmit="return confirm(\'Delete this host package? Its grants, sessions and host-scoped guest bindings are removed, and its package slot becomes free.\')">'
+        + '<form id="delete-host-' + Number(h.id) + '" method="post" action="/sdk/keys/' + id + '/action" class="hidden" onsubmit="return confirm(\'Delete this host app identity? Its grants, sessions and host-scoped guest bindings are removed. Its app-name slot becomes free; the package slot frees only when no app names remain.\')">'
         + '<input type="hidden" name="_csrf" value="' + esc(csrf) + '">'
         + '<input type="hidden" name="action" value="host_delete">'
         + '<input type="hidden" name="host_id" value="' + Number(h.id) + '"></form>';
@@ -103,8 +105,9 @@ export function keysPage(o) {
       + infoRow('Signature', Number(l.signature_bind ?? 1) ? 'Verify cert' : 'Package + app name')
       + infoRow('Expiry', esc(expiryLabel(l)))
       + infoRow('Package limit', pkgCount + ' / ' + maxPackages + ' used')
+      + infoRow('App names', maxHostApps + ' / ' + hostAppLimit + ' per package')
       + infoRow('Cloned apps', guestLimit
-        ? clonedApps + ' / ' + guestLimit + ' per host'
+        ? clonedApps + ' / ' + guestLimit + ' per host app'
         : 'Unlimited · identity checked')
       + infoRow('User ref', l.user_ref ? esc(l.user_ref) : '—')
       + '</div>'
@@ -116,20 +119,21 @@ export function keysPage(o) {
         + '</select><button class="btn-premium px-3 py-2 rounded-xl text-[11px] font-extrabold">Extend</button></div>')
       + actionForm(csrf, id, '<p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-2">Extend limits</p>'
         + '<input type="hidden" name="action" value="extend_limits">'
-        + '<div class="grid grid-cols-3 gap-2 items-end">'
+        + '<div class="grid grid-cols-2 md:grid-cols-4 gap-2 items-end">'
         + '<div><p class="text-[9px] text-slate-400 font-bold mb-1">HOST PACKAGES</p><input type="number" name="max_packages" min="1" max="100" value="' + maxPackages + '" class="w-full clay-card px-2 py-2 text-xs rounded-lg"></div>'
-        + '<div><p class="text-[9px] text-slate-400 font-bold mb-1">CLONED LIMIT</p><input type="number" name="guest_app_limit" min="1" max="1000" placeholder="Unlimited" value="' + (guestLimit || '') + '" class="w-full clay-card px-2 py-2 text-xs rounded-lg"></div>'
+        + '<div><p class="text-[9px] text-slate-400 font-bold mb-1">APP NAMES / PKG</p><input type="number" name="host_app_limit" min="1" max="100" value="' + hostAppLimit + '" class="w-full clay-card px-2 py-2 text-xs rounded-lg"></div>'
+        + '<div><p class="text-[9px] text-slate-400 font-bold mb-1">CLONED / HOST APP</p><input type="number" name="guest_app_limit" min="1" max="1000" placeholder="Unlimited" value="' + (guestLimit || '') + '" class="w-full clay-card px-2 py-2 text-xs rounded-lg"></div>'
         + '<button class="btn-premium px-2 py-2 rounded-lg text-[10px] font-extrabold">Save</button>'
         + '</div>')
       + '</div>'
-      + actionForm(csrf, id, '<p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-2">Add / update package</p>'
+      + actionForm(csrf, id, '<p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-2">Add / update host app</p>'
         + '<input type="hidden" name="action" value="host_save">'
         + '<div class="grid grid-cols-2 gap-2 mb-2">'
         + '<input name="host_package" maxlength="200" placeholder="com.example.host" required class="clay-card px-3 py-2 text-xs font-mono rounded-lg">'
-        + '<input name="host_app_name" maxlength="120" placeholder="App name" class="clay-card px-3 py-2 text-xs rounded-lg">'
+        + '<input name="host_app_name" maxlength="120" placeholder="App name (e.g. Dura plays)" required class="clay-card px-3 py-2 text-xs rounded-lg">'
         + '</div>'
         + '<div class="flex gap-2"><input name="host_cert" maxlength="80" placeholder="Certificate SHA-256 (64 hex)" class="clay-card px-3 py-2 text-xs font-mono rounded-lg flex-1">'
-        + '<button class="clay-card px-3 py-2 rounded-lg text-[10px] font-extrabold text-emerald-600">Add pkg</button></div>')
+        + '<button class="clay-card px-3 py-2 rounded-lg text-[10px] font-extrabold text-emerald-600">Add app</button></div>')
       + '<div class="mt-3"><p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">Bound packages</p>' + hostList + '</div>'
       + blockForms
       + '<div class="mt-4 pt-3 border-t border-red-100">'
@@ -162,9 +166,10 @@ export function keysPage(o) {
       + '<div class="mt-2">' + hostLine + '</div></div>'
       + '<button type="button" onclick="openMakDetails(' + id + ')" class="btn-premium px-4 py-2 rounded-xl text-xs font-bold">Details</button></div>'
       + secretBox
-      + '<div class="grid grid-cols-3 gap-2 mt-4">'
+      + '<div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-4">'
       + '<div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">PACKAGES</p><p class="text-xs font-black">' + pkgCount + ' / ' + maxPackages + '</p></div>'
-      + '<div class="clay-card p-2 text-center rounded-xl" title="' + (guestLimit ? 'Distinct cloned apps (package + app name) bound under this MAK, compared with the configured per-host limit' : 'Cloned apps are unlimited; the signed package + app name + certificate identity is still enforced') + '"><p class="text-[10px] text-slate-400 font-bold">CLONED APPS</p><p class="text-xs font-black">' + (guestLimit ? clonedApps + ' / ' + guestLimit : 'UNLIMITED') + '</p></div>'
+      + '<div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">APP NAMES</p><p class="text-xs font-black">' + maxHostApps + ' / ' + hostAppLimit + '</p></div>'
+      + '<div class="clay-card p-2 text-center rounded-xl" title="' + (guestLimit ? 'Distinct cloned apps (package + app name) bound under each host app, compared with the configured limit' : 'Cloned apps are unlimited; the signed package + app name + certificate identity is still enforced') + '"><p class="text-[10px] text-slate-400 font-bold">CLONED APPS</p><p class="text-xs font-black">' + (guestLimit ? clonedApps + ' / ' + guestLimit : 'UNLIMITED') + '</p></div>'
       + '<div class="clay-card p-2 text-center rounded-xl"><p class="text-[10px] text-slate-400 font-bold">ACTIVATIONS</p><p class="text-xs font-black">' + Number(l.activation_count || 0) + ' / ' + Number(l.max_activations || 0) + '</p></div></div>'
       + details + '</div>';
   }).join('') : '<div class="glass-card p-10 text-center"><i class="bi bi-inbox text-5xl text-slate-300 mb-3"></i><p class="text-slate-500 text-sm">No MAK licenses found</p><a href="/sdk/generate" class="inline-block mt-3 btn-premium px-6 py-2.5 rounded-xl text-xs font-bold">Generate MAK</a></div>';

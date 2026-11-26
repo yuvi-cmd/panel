@@ -194,10 +194,10 @@ async function activate(env, credential, { hostPackage = 'com.test.host', hostCe
   });
 }
 
-async function hostVerify(env, credential, grantId, { hostPackage = 'com.test.host', hostCert = 'c'.repeat(64) } = {}) {
+async function hostVerify(env, credential, grantId, { hostPackage = 'com.test.host', hostCert = 'c'.repeat(64), appName = 'Test Host' } = {}) {
   return envelopeCall(env, 'host/verify', {
     grant_id: grantId, mak: credential, package_name: hostPackage,
-    app_name: 'Test Host', cert_sha256: hostCert, nonce: randomNonce(),
+    app_name: appName, cert_sha256: hostCert, nonce: randomNonce(),
   });
 }
 
@@ -235,6 +235,7 @@ async function issueLicense(env, cookie, token, data = {}) {
     max_activations: '1',
     session_ttl: '3600',
     max_packages: '2',
+    host_app_limit: '1',
     guest_app_limit: '',
     max_apps: '2',
     max_installs: '3',
@@ -309,6 +310,7 @@ async function main() {
     assert.match(newHtml, /Custom MAK key/);
     assert.match(newHtml, /Signature Bind/);
     assert.match(newHtml, /name="max_packages"/);
+    assert.match(newHtml, /name="host_app_limit"/);
     assert.match(newHtml, /name="guest_app_limit"[^>]*placeholder="Unlimited"/);
     assert.doesNotMatch(newHtml, /name="max_apps"/);
     assert.doesNotMatch(newHtml, /name="max_installs"/);
@@ -319,6 +321,7 @@ async function main() {
     assert.ok(issued.mak, 'raw MAK appears on the reveal page');
     const license = await env.DB.prepare('SELECT * FROM mak_licenses ORDER BY id DESC LIMIT 1').first();
     assert.equal(license.max_packages, 2);
+    assert.equal(license.host_app_limit, 1);
     assert.equal(license.guest_app_limit, null);
     assert.equal(license.max_apps, 2);
     assert.equal(license.max_installs, 3);
@@ -422,7 +425,7 @@ async function main() {
     const env = globalThis.__lastEnv;
     const { cookie, token } = env.__test;
     const issued = await issueLicense(env, cookie, token, {
-      label: 'Limited License', guest_app_limit: '2', max_packages: '2',
+      label: 'Limited License', guest_app_limit: '2', max_packages: '2', host_app_limit: '2',
       host_package: 'com.limit.host', host_app_name: 'Limit Host', host_cert: '7'.repeat(64),
     });
     assert.equal(issued.res.status, 200, issued.html.slice(0, 500));
@@ -456,7 +459,23 @@ async function main() {
     assert.equal(renamed.body.decision, 'DENY');
     assert.equal(renamed.body.code, 'APP_LIMIT_REACHED');
 
-    // The cap is per host package: another host package gets its own slots.
+    // The cap is per host app identity: another app name under the same
+    // package gets its own cloned-app slots.
+    const samePackage = await activate(env, issued.mak, {
+      hostPackage: 'com.limit.host', hostCert: '7'.repeat(64), appName: 'Limit Host Rebrand',
+    });
+    assert.equal(samePackage.body.decision, 'ALLOW', JSON.stringify(samePackage.body));
+    const checkSamePackage = (guestPackage, guestAppName, cert, apkHash) => guestCheck(env, issued.mak, samePackage.body.grant.grant_id, {
+      hostPackage: 'com.limit.host', hostAppName: 'Limit Host Rebrand', hostCert: '7'.repeat(64),
+      guestPackage, guestAppName, guestCert: cert, apkHash,
+    });
+    assert.equal((await checkSamePackage('com.limit.one', 'One', '1'.repeat(64), 'a'.repeat(64))).body.decision, 'ALLOW');
+    assert.equal((await checkSamePackage('com.limit.two', 'Two', '2'.repeat(64), 'c'.repeat(64))).body.decision, 'ALLOW');
+    const samePackageThird = await checkSamePackage('com.limit.three', 'Three', '3'.repeat(64), 'd'.repeat(64));
+    assert.equal(samePackageThird.body.decision, 'DENY');
+    assert.equal(samePackageThird.body.code, 'APP_LIMIT_REACHED');
+
+    // Another host package also gets its own slots.
     const second = await activate(env, issued.mak, {
       hostPackage: 'com.limit.host2', hostCert: '8'.repeat(64), appName: 'Limit Host Two',
     });
@@ -475,11 +494,90 @@ async function main() {
   await test('host app name is part of the signed host identity', async () => {
     const env = globalThis.__lastEnv;
     const { credential, grant } = env.__test;
+    // The test license allows one app name per package, so a second app name
+    // cannot silently replace the bound identity.
     const mismatch = await activate(env, credential, { appName: 'Different Host' });
     assert.equal(mismatch.body.decision, 'DENY');
-    assert.equal(mismatch.body.code, 'HOST_APP_MISMATCH');
+    assert.equal(mismatch.body.code, 'APP_NAME_LIMIT_REACHED');
     const ticket = await hostVerify(env, credential, grant.grant_id);
     assert.equal(ticket.body.decision, 'ALLOW');
+    // host/verify also rejects an app name that does not match the grant.
+    const wrongApp = await hostVerify(env, credential, grant.grant_id, { appName: 'Different Host' });
+    assert.equal(wrongApp.body.decision, 'DENY');
+    assert.equal(wrongApp.body.code, 'HOST_APP_MISMATCH');
+  });
+
+  await test('app name limit is per package and keeps every bound identity fixed', async () => {
+    const env = globalThis.__lastEnv;
+    const { cookie, token } = env.__test;
+    const issued = await issueLicense(env, cookie, token, {
+      label: 'App name limit', signature_bind: '0', max_packages: '2', host_app_limit: '2',
+    });
+    assert.ok(issued.mak, issued.html.slice(0, 500));
+    const license = await env.DB.prepare('SELECT * FROM mak_licenses ORDER BY id DESC LIMIT 1').first();
+    assert.equal(Number(license.host_app_limit), 2);
+
+    const a1 = await activate(env, issued.mak, { hostPackage: 'com.names.host', appName: 'Dura plays', hostCert: '' });
+    assert.equal(a1.body.decision, 'ALLOW', JSON.stringify(a1.body));
+    const a1again = await activate(env, issued.mak, { hostPackage: 'com.names.host', appName: 'Dura plays', hostCert: '' });
+    assert.equal(a1again.body.decision, 'ALLOW', JSON.stringify(a1again.body));
+    assert.equal(a1again.body.grant.grant_id, a1.body.grant.grant_id, 'same identity reuses the same grant');
+    const a2 = await activate(env, issued.mak, { hostPackage: 'com.names.host', appName: 'Sysmlcon', hostCert: '' });
+    assert.equal(a2.body.decision, 'ALLOW', JSON.stringify(a2.body));
+    assert.notEqual(a2.body.grant.grant_id, a1.body.grant.grant_id, 'second app name gets its own host identity');
+    const a3 = await activate(env, issued.mak, { hostPackage: 'com.names.host', appName: 'Third name', hostCert: '' });
+    assert.equal(a3.body.decision, 'DENY');
+    assert.equal(a3.body.code, 'APP_NAME_LIMIT_REACHED');
+
+    // The same app-name limit applies independently to the second package.
+    const b1 = await activate(env, issued.mak, { hostPackage: 'com.names.host2', appName: 'Dura plays 2', hostCert: '' });
+    assert.equal(b1.body.decision, 'ALLOW', JSON.stringify(b1.body));
+    const b2 = await activate(env, issued.mak, { hostPackage: 'com.names.host2', appName: 'Sysmlcon 2', hostCert: '' });
+    assert.equal(b2.body.decision, 'ALLOW', JSON.stringify(b2.body));
+    const b3 = await activate(env, issued.mak, { hostPackage: 'com.names.host2', appName: 'Third name 2', hostCert: '' });
+    assert.equal(b3.body.decision, 'DENY');
+    assert.equal(b3.body.code, 'APP_NAME_LIMIT_REACHED');
+
+    // The package limit remains a separate cap.
+    const c1 = await activate(env, issued.mak, { hostPackage: 'com.names.host3', appName: 'Third package', hostCert: '' });
+    assert.equal(c1.body.decision, 'DENY');
+    assert.equal(c1.body.code, 'PACKAGE_LIMIT_REACHED');
+
+    const counts = await env.DB.prepare(
+      'SELECT package_name, COUNT(*) AS c FROM mak_hosts WHERE license_id=? GROUP BY package_name ORDER BY package_name',
+    ).bind(license.id).all();
+    assert.deepEqual(counts.results.map((r) => [r.package_name, Number(r.c)]), [
+      ['com.names.host', 2], ['com.names.host2', 2],
+    ]);
+  });
+
+  await test('panel host form enforces app names per package', async () => {
+    const env = globalThis.__lastEnv;
+    const { cookie, token } = env.__test;
+    const issued = await issueLicense(env, cookie, token, {
+      label: 'Panel host form', signature_bind: '0', max_packages: '1', host_app_limit: '2',
+    });
+    assert.ok(issued.mak, issued.html.slice(0, 500));
+    const license = await env.DB.prepare('SELECT * FROM mak_licenses ORDER BY id DESC LIMIT 1').first();
+    const action = (fields) => call(env, '/sdk/keys/' + license.id + '/action', {
+      method: 'POST', cookie, body: form({ _csrf: token, ...fields }),
+    });
+
+    assert.equal((await action({ action: 'host_save', host_package: 'com.panel.host', host_app_name: 'Dura plays', host_cert: '' })).status, 303);
+    assert.equal((await action({ action: 'host_save', host_package: 'com.panel.host', host_app_name: 'Sysmlcon', host_cert: '' })).status, 303);
+    const third = await action({ action: 'host_save', host_package: 'com.panel.host', host_app_name: 'Third app', host_cert: '' });
+    assert.equal(third.status, 303);
+    assert.match(String(third.headers.get('Location') || ''), /err=/);
+
+    const rows = await env.DB.prepare(
+      'SELECT app_name FROM mak_hosts WHERE license_id=? AND package_name=? ORDER BY app_name',
+    ).bind(license.id, 'com.panel.host').all();
+    assert.deepEqual(rows.results.map((r) => r.app_name), ['Dura plays', 'Sysmlcon']);
+
+    // A new package is still blocked by the independent package limit.
+    const other = await action({ action: 'host_save', host_package: 'com.panel.host2', host_app_name: 'Second package', host_cert: '' });
+    assert.equal(other.status, 303);
+    assert.match(String(other.headers.get('Location') || ''), /err=/);
   });
 
   await test('second host package allowed, third blocked by max_packages', async () => {
@@ -696,7 +794,7 @@ async function main() {
     const limitedPage = await call(env, '/sdk/keys?q=' + encodeURIComponent(license.license_uid), { cookie });
     const limitedHtml = await limitedPage.text();
     assert.match(limitedHtml, /CLONED APPS<\/p><p class="text-xs font-black">0 \/ 5<\/p>/, 'keys page shows the explicit cloned app limit');
-    assert.match(limitedHtml, /Cloned apps<\/p><p[^>]*>0 \/ 5 per host<\/p>/);
+    assert.match(limitedHtml, /Cloned apps<\/p><p[^>]*>0 \/ 5 per host app<\/p>/);
 
     // Legacy callers that only post max_packages must not wipe the limit.
     assert.equal((await action({ action: 'extend_limits', max_packages: '3' })).status, 303);

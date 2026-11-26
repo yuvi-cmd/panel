@@ -147,7 +147,7 @@ async function rebuildMakHosts(db) {
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     last_seen INTEGER,
-    UNIQUE(license_id, package_name)
+    UNIQUE(license_id, package_name, app_name)
   )`).run();
   await db.prepare(
     `INSERT INTO mak_hosts_migrate
@@ -195,6 +195,7 @@ async function migrateMakSchema(db) {
   // New policy columns.
   await addMakColumn(db, 'mak_licenses', 'credential_plain', "TEXT NOT NULL DEFAULT ''");
   await addMakColumn(db, 'mak_licenses', 'max_packages', 'INTEGER NOT NULL DEFAULT 1');
+  await addMakColumn(db, 'mak_licenses', 'host_app_limit', 'INTEGER NOT NULL DEFAULT 1');
   await addMakColumn(db, 'mak_licenses', 'guest_app_limit', 'INTEGER DEFAULT NULL');
   await addMakColumn(db, 'mak_licenses', 'max_apps', 'INTEGER NOT NULL DEFAULT 2');
   await addMakColumn(db, 'mak_licenses', 'max_installs', 'INTEGER NOT NULL DEFAULT 3');
@@ -210,7 +211,8 @@ async function migrateMakSchema(db) {
   await db.prepare("UPDATE mak_licenses SET host_bind_mode='AUTO' WHERE host_bind_mode IS NULL OR host_bind_mode=''").run().catch(() => {});
 
   const hostSql = await makTableSql(db, 'mak_hosts');
-  if (hostSql && (/UNIQUE\s*\(\s*license_id\s*\)/i.test(hostSql) || !(await makColumnExists(db, 'mak_hosts', 'app_name')))) {
+  const oldHostKey = /UNIQUE\s*\(\s*license_id\s*,\s*package_name\s*\)/i.test(hostSql);
+  if (hostSql && (oldHostKey || /UNIQUE\s*\(\s*license_id\s*\)/i.test(hostSql) || !(await makColumnExists(db, 'mak_hosts', 'app_name')))) {
     await rebuildMakHosts(db);
   }
 
